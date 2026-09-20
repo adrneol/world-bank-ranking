@@ -1,0 +1,115 @@
+/**
+ * SQLite connection factory.
+ *
+ * Uses Node's built-in `node:sqlite` (no native compilation step). All database
+ * access in this application goes through this module and `repository.js`, so
+ * the storage engine can be replaced without touching domain logic.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
+import config from '../config.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+
+/** @type {DatabaseSync|null} */
+let db = null;
+
+/**
+ * Apply the schema. Idempotent: every statement uses IF NOT EXISTS.
+ */
+function applySchema(handle) {
+  const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
+  handle.exec(schema);
+}
+
+/**
+ * Open (once) and return the shared database handle.
+ *
+ * @param {{ file?: string }} [options]
+ * @returns {DatabaseSync}
+ */
+export function getDb(options = {}) {
+  const file = options.file ?? config.databaseFile;
+
+  if (db && db.__file !== file) {
+    closeDb();
+  }
+  if (db) return db;
+
+  if (file !== ':memory:') {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+  }
+
+  const handle = new DatabaseSync(file);
+  handle.__file = file;
+  // WAL keeps reads fast while an ingest writes; memory DBs ignore it.
+  if (file !== ':memory:') {
+    try {
+      handle.exec('PRAGMA journal_mode = WAL;');
+    } catch {
+      // Non-fatal: some filesystems do not support WAL.
+    }
+  }
+  handle.exec('PRAGMA foreign_keys = ON;');
+  applySchema(handle);
+
+  db = handle;
+  return db;
+}
+
+/** Close the shared handle, if open. */
+export function closeDb() {
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      // Already closed.
+    }
+    db = null;
+  }
+}
+
+/**
+ * Create a brand new in-memory database with the schema applied.
+ * Used by unit tests so they never touch the real cache file.
+ *
+ * @returns {DatabaseSync}
+ */
+export function createMemoryDb() {
+  const handle = new DatabaseSync(':memory:');
+  handle.__file = ':memory:';
+  handle.exec('PRAGMA foreign_keys = ON;');
+  applySchema(handle);
+  return handle;
+}
+
+/**
+ * Run `fn` inside a transaction. Rolls back on any thrown error.
+ *
+ * @template T
+ * @param {DatabaseSync} handle
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function transaction(handle, fn) {
+  handle.exec('BEGIN');
+  try {
+    const result = fn();
+    handle.exec('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      handle.exec('ROLLBACK');
+    } catch {
+      // Ignore rollback failures; the original error is what matters.
+    }
+    throw error;
+  }
+}
+
+export { SCHEMA_PATH };
+export default getDb;
