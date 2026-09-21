@@ -131,21 +131,18 @@ npm run build   # production build
 
 ## Production Deployment
 
-The deployed backend used with this project:
+Deploy the backend first, then point the frontend at it. The frontend
+receives the API base URL through `VITE_API_BASE_URL` in deployed
+environments:
 
 ```text
-https://world-bank-ranking.onrender.com
+VITE_API_BASE_URL=https://your-backend.example.com
 ```
 
-The frontend takes its API base from one public variable:
-
-```text
-VITE_API_BASE_URL=https://world-bank-ranking.onrender.com
-```
-
-Set it as a build/deploy environment variable (e.g. in Vercel for both
-Preview and Production). No source-code change is needed to switch between
-the local backend and the deployed backend.
+(The value above is a documentation placeholder, not a real deployment.
+Configure the actual backend URL as a build/deploy environment variable,
+e.g. in Vercel for both Preview and Production.) No source-code change is
+needed to switch between the local backend and a deployed backend.
 
 ## Environment Variables
 
