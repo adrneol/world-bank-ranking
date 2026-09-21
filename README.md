@@ -152,6 +152,15 @@ files. The backend needs no API key.
 | Variable | Where | Meaning |
 |---|---|---|
 | `VITE_API_BASE_URL` | frontend | Backend base URL. Empty means relative `/api` (local proxy / same host). |
+
+Frontend environment files (`frontend/`): `VITE_API_BASE_URL` is read with
+Vite's file precedence. `vite dev` additionally loads the tracked
+`.env.development`, which pins the variable to empty, so local development
+always uses the Vite `/api` proxy even when a local (untracked)
+`frontend/.env` holds a deployment URL. Production builds ignore
+`.env.development`; they use deployment-provided `VITE_API_BASE_URL`, falling
+back to a local untracked `frontend/.env` and then to relative `/api`.
+Local-only files (`.env`, `.env.local`) are never committed.
 | `PORT` | backend | API listen port (default 3001). |
 | `CACHE_TTL_HOURS` | backend | Cache freshness window (default 24). |
 | `DATABASE_FILE` | backend | SQLite file (default `data/worldbank.db`). |
