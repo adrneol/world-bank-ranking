@@ -31,9 +31,13 @@ export function compareByValueDesc(a, b) {
 /**
  * Rank a list of eligible observations.
  *
- * @param {{ iso3: string, name?: string, value: number }[]} rows
+ * Sorting and comparison use ONLY the numeric value (never valueRaw, never a
+ * formatted string). valueRaw, when present, is passed through untouched as
+ * audit metadata.
+ *
+ * @param {{ iso3: string, name?: string, value: number, valueRaw?: string|null }[]} rows
  * @returns {{
- *   ranked: { rank:number, iso3:string, name?:string, value:number }[],
+ *   ranked: { rank:number, iso3:string, name?:string, value:number, valueRaw?:string|null }[],
  *   total: number,
  *   dropped: number
  * }}
@@ -49,6 +53,7 @@ export function rankByValue(rows) {
     iso3: row.iso3,
     name: row.name,
     value: row.value,
+    ...(row.valueRaw !== undefined ? { valueRaw: row.valueRaw } : {}),
   }));
 
   return { ranked, total: ranked.length, dropped };

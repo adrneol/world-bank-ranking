@@ -137,13 +137,32 @@ An entity should be treated as an aggregate if:
 OR
 - region.value === "Aggregates"
 OR
-- ISO3 is blank
+- World Bank metadata identity/id is blank/missing
 
-Observation eligibility:
+CLARIFICATION — "blank ISO3" has two distinct meanings that must not be conflated:
+
+A. Metadata identity: for an entity to be eligible, its World Bank country
+metadata identity/id (which equals ISO3 for real countries/economies, e.g.
+id === "IND") must be non-blank. A metadata record with a blank/missing id
+has no usable identifier and is excluded as an aggregate.
+
+B. Observation code: for an observation to be eligible, its observation
+countryiso3code must be non-blank. World Bank income-group aggregate rows
+(e.g. country.id "XD"/"XN" with countryiso3code "") carry real numbers but
+are excluded by this rule.
+
+C. Join requirement: an observation is ranked only when its non-blank
+countryiso3code joins to a stored metadata entity that is itself
+non-aggregate. A non-blank code with no metadata match (unknown country) and
+a code matching an aggregate entity (e.g. "WLD") are both excluded, with
+distinct audit counters.
+
+Observation eligibility (all must hold):
 
 1. observation value must not be null
-2. ISO3 must not be blank
-3. ISO3 must correspond to a country/economy in the metadata
+2. observation countryiso3code must be non-blank (rule B)
+3. countryiso3code must correspond to a country/economy in the metadata
+   whose metadata identity/id is non-blank (rule A)
 4. matched metadata entity must not be an aggregate
 
 Never convert null to zero.
@@ -259,6 +278,43 @@ If there is insufficient evidence to establish the reason:
 State:
 
 "The number of ranked entities differs between years. The application can establish the observed data coverage and filtering difference, but does not infer a cause beyond the World Bank data."
+
+COVERAGE EXPLANATION PRECEDENCE (explicit, B > C > A > D):
+
+Evaluate in this order and return the first matching case:
+
+1. CASE B first: if the eligible metadata universes associated with the two
+observations are comparable and different, report B with the actual
+added/removed entity lists. A universe change takes precedence because it
+redefines the population being ranked; reporting it as mere coverage loss
+would misattribute the change.
+
+2. CASE C second: if B does not apply and the World Bank responses for the
+two years differ in rows removed by the universe rule (aggregate entities,
+blank observation codes, unknown codes) alongside a difference in raw rows
+received, report C. Filtering takes precedence over plain coverage because
+it identifies a measured removal mechanism rather than an unmeasured absence.
+
+3. CASE A third: if B and C do not apply, the eligible universe is stable
+(comparable and unchanged, or both years from the same retrieval), and the
+ranking denominator changed, report A as observation coverage for that
+indicator-year.
+
+4. CASE D otherwise: different retrievals whose universes cannot be compared,
+or no other case applies. Report established coverage/filtering facts only.
+
+Do not infer reporting behavior. In particular, never state or imply that a
+missing observation means a country "did not report", "failed to submit", or
+was "excluded by the World Bank" unless the source data explicitly establish
+that fact. A null observation is recorded only as "no usable observation".
+
+HISTORICAL UNIVERSE RULE: historical universe comparisons must use the
+universe snapshot (eligible/aggregate entity ids and eligible count) recorded
+on the fetch run that produced each year's data — never the current
+countries table count. Coverage denominators for past years must be explained
+against their own run's universe when snapshots are available; when a
+snapshot is missing, report comparable=false and use CASE D rather than
+recomputing history under the current universe.
 
 This rule is extremely important.
 
@@ -903,7 +959,7 @@ blank ISO3 exclusion
 value DESC
 ISO3 ASC
 
-Current expected results:
+Current expected results (current-price series; constant series audited separately below):
 
 Year | Nominal Rank/Total | PPP Rank/Total
 
@@ -914,13 +970,28 @@ Year | Nominal Rank/Total | PPP Rank/Total
 2024 | 155/200 | 133/195
 2025 | 144/186 | 124/185
 
+ALL-FOUR-INDICATOR ACCEPTANCE REQUIREMENT: the live audit must report
+explicit audit results for ALL FOUR indicators, not only the two
+current-price series above:
+
+- NY.GDP.PCAP.CD (nominal current)
+- NY.GDP.PCAP.KD (nominal constant 2015)
+- NY.GDP.PCAP.PP.CD (PPP current)
+- NY.GDP.PCAP.PP.KD (PPP constant 2021)
+
+For every acceptance year (2004, 2014, 2020, 2021, 2024, 2025) and every one
+of the four indicators, the live audit must report: India raw value, India
+rank, denominator (valid observations), eligible universe, and World Bank
+lastupdated. Constant-series ranks are independent rankings with their own
+denominators and must never be inferred from the current-price ranks.
+
 These are acceptance/audit values for the current retrieved dataset, NOT permanent universal truths.
 
 World Bank data can be revised.
 
 The live audit command should recalculate them from the current API rather than hardcoding them into production.
 
-The snapshot tests can use a versioned copy of the data that produced these results.
+The snapshot tests can use a versioned copy of the data that produced these results. The versioned snapshot must cover the full acceptance range needed for 2004, 2014, 2020, 2021, 2024, 2025 and all four indicators.
 
 ============================================================
 27. EXPECTED INDIA RAW VALUES
@@ -1361,15 +1432,18 @@ Verify at minimum:
 
 for the four indicators.
 
-For every year/indicator verify:
+For every year/indicator verify (for ALL FOUR indicators
+NY.GDP.PCAP.CD, NY.GDP.PCAP.KD, NY.GDP.PCAP.PP.CD, NY.GDP.PCAP.PP.KD):
 
 - India raw value
 - India rank
 - denominator
 - neighboring countries
 - valid observation count
+- eligible universe
+- World Bank lastupdated
 
-Also verify the following current live rank results where the same dataset/version is being used:
+Also verify the following current live rank results where the same dataset/version is being used (current-price series; the live audit must additionally report the constant-series ranks for the same years):
 
 2004:
 Nominal current = 171/209
@@ -1394,6 +1468,11 @@ PPP current = 133/195
 2025:
 Nominal current = 144/186
 PPP current = 124/185
+
+Plus, for the same six years, report the independently calculated ranks for
+NY.GDP.PCAP.KD (constant 2015 US$) and NY.GDP.PCAP.PP.KD (constant 2021
+international $) with their own denominators. Do not treat constant-series
+ranks as derivable from current-price ranks.
 
 If the live World Bank dataset has changed from the reconnaissance snapshot, DO NOT force the old values.
 
@@ -1442,6 +1521,11 @@ And explain only objectively observable differences such as:
 - different source
 
 Do not automatically claim which methodology is correct merely because the ranks differ.
+
+THIRD-PARTY INPUT EPHEMERALITY: third-party claimed rank/denominator inputs
+are ephemeral UI state only. They must not be persisted to the database
+unless persistence is explicitly added later. They must never alter stored
+World Bank observations, rankings, or denominators.
 
 ============================================================
 41. ENVIRONMENT

@@ -19,11 +19,59 @@ const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 let db = null;
 
 /**
- * Apply the schema. Idempotent: every statement uses IF NOT EXISTS.
+ * Columns added after the first release.
+ *
+ * `CREATE TABLE IF NOT EXISTS` cannot add a column to a table that already
+ * exists, so an existing local cache is upgraded in place here: no table, row or
+ * value is ever removed. Keys are table names, values map a column to its SQL
+ * definition.
+ */
+const ADDED_COLUMNS = Object.freeze({
+  fetch_runs: Object.freeze({
+    rows_with_value: 'INTEGER DEFAULT 0',
+    rows_non_finite_skipped: 'INTEGER DEFAULT 0',
+    rows_invalid_year: 'INTEGER DEFAULT 0',
+    pages_fetched: 'INTEGER DEFAULT 0',
+    requests: 'INTEGER DEFAULT 0',
+    universe_snapshot: 'TEXT',
+  }),
+  observations: Object.freeze({
+    value_raw: 'TEXT',
+  }),
+});
+
+/** Column names currently present on a table (empty set for a missing table). */
+function existingColumns(handle, table) {
+  return new Set(handle.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name));
+}
+
+/** Add any column the current code expects but the stored table is missing. */
+function applyColumnMigrations(handle) {
+  for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
+    const present = existingColumns(handle, table);
+    if (present.size === 0) continue;
+    for (const [column, definition] of Object.entries(columns)) {
+      if (!present.has(column)) {
+        handle.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+      }
+    }
+  }
+}
+
+/**
+ * Apply the schema, then upgrade any pre-existing table in place.
+ * Idempotent: every statement uses IF NOT EXISTS / a column presence check.
+ * Also backfills value_raw for rows written before the column existed.
  */
 function applySchema(handle) {
   const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
   handle.exec(schema);
+  applyColumnMigrations(handle);
+  try {
+    handle.exec('UPDATE observations SET value_raw = CAST(value AS TEXT) WHERE value_raw IS NULL;');
+  } catch {
+    // Table may not exist yet in exotic flows; fresh schema already has values.
+  }
 }
 
 /**

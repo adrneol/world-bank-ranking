@@ -5,7 +5,13 @@
  * JavaScript objects, which keeps the numerical logic independently testable
  * and makes the storage engine replaceable.
  *
- * Raw World Bank values are passed through as SQLite REAL with no rounding.
+ * Numerical representation (see schema.sql design notes):
+ * Raw World Bank values are stored twice: as SQLite REAL (the queryable
+ * numeric used for ORDER BY, range scans, ranking comparisons and YoY
+ * arithmetic — deterministic for a fixed snapshot) and as value_raw TEXT
+ * (the canonical decimal string of the accepted value, for audit and
+ * reproducibility). Nothing is ever rounded before calculation; formatting
+ * lives in domain/format.js and is presentation-only.
  */
 
 import { getDb, transaction } from './index.js';
@@ -14,6 +20,33 @@ const nowIso = () => new Date().toISOString();
 
 /** Null out undefined so bound parameters stay valid. */
 const nz = (v) => (v === undefined ? null : v);
+
+/**
+ * Canonical decimal string for a finite numeric value.
+ *
+ * If the input is a string holding a valid decimal, its trimmed form is kept
+ * (preserving the sender's lexical form when it round-trips). If it is a
+ * number, String(value) is the shortest round-trip representation, which is
+ * lossless with respect to the parsed IEEE-754 double:
+ * Number(canonicalDecimalString(x)) === x for every finite x.
+ * Returns null for null/undefined/non-finite input.
+ */
+export function canonicalDecimalString(input) {
+  if (input === null || input === undefined) return null;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed === '') return null;
+    if (!/^[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?$/.test(trimmed)) return null;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return null;
+    return trimmed;
+  }
+  if (typeof input === 'number') {
+    if (!Number.isFinite(input)) return null;
+    return String(input);
+  }
+  return null;
+}
 
 /** Coerce a World Bank region object into id/value parts. */
 function regionParts(region) {
@@ -160,17 +193,21 @@ export function listIndicators(db) {
 
 /**
  * Insert or update one raw observation.
- * The value is stored exactly as received from the World Bank.
+ * The numeric value is stored exactly as received (REAL, no rounding) along
+ * with its canonical decimal string (value_raw TEXT, for audit). Callers may
+ * omit valueRaw, in which case it defaults to String(value).
  */
-export function upsertObservation(db, { countryId, indicatorId, year, value, wbLastUpdated }) {
+export function upsertObservation(db, { countryId, indicatorId, year, value, valueRaw, wbLastUpdated }) {
+  const raw = valueRaw ?? (value === null || value === undefined ? null : String(value));
   db.prepare(`
-    INSERT INTO observations (country_id, indicator_id, year, value, wb_last_updated, fetched_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO observations (country_id, indicator_id, year, value, value_raw, wb_last_updated, fetched_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(country_id, indicator_id, year) DO UPDATE SET
       value           = excluded.value,
+      value_raw       = excluded.value_raw,
       wb_last_updated = excluded.wb_last_updated,
       fetched_at      = excluded.fetched_at
-  `).run(countryId, indicatorId, year, value, nz(wbLastUpdated), nowIso());
+  `).run(countryId, indicatorId, year, value, nz(raw), nz(wbLastUpdated), nowIso());
 }
 
 /** Bulk upsert observations in one transaction. Returns rows written. */
@@ -200,15 +237,17 @@ export function getObservation(db, countryId, indicatorId, year) {
  *
  * This is the exact input to a level ranking. Aggregates are excluded here at
  * the SQL level, mirroring the single filtering rule in domain/universe.js.
+ * valueRaw is audit-only: calculations must use the numeric value.
  *
- * @returns {{iso3:string, name:string, value:number}[]}
+ * @returns {{iso3:string, name:string, value:number, valueRaw:string|null}[]}
  */
 export function getEligibleObservations(db, indicatorId, year) {
   return db
     .prepare(`
       SELECT o.country_id AS iso3,
-             c.name       AS name,
-             o.value      AS value
+              c.name       AS name,
+              o.value      AS value,
+              o.value_raw  AS valueRaw
       FROM observations o
       JOIN countries c ON c.id = o.country_id
       WHERE o.indicator_id = ?
@@ -224,9 +263,10 @@ export function getEligibleObservationsRange(db, indicatorId, startYear, endYear
   return db
     .prepare(`
       SELECT o.country_id AS iso3,
-             c.name       AS name,
-             o.year       AS year,
-             o.value      AS value
+              c.name       AS name,
+              o.year       AS year,
+              o.value      AS value,
+              o.value_raw  AS valueRaw
       FROM observations o
       JOIN countries c ON c.id = o.country_id
       WHERE o.indicator_id = ?
@@ -242,7 +282,7 @@ export function getEligibleObservationsRange(db, indicatorId, startYear, endYear
 export function getCountryObservationsRange(db, indicatorId, iso3, startYear, endYear) {
   return db
     .prepare(`
-      SELECT year, value
+      SELECT year, value, value_raw AS valueRaw
       FROM observations
       WHERE indicator_id = ? AND country_id = ? AND year BETWEEN ? AND ?
       ORDER BY year
@@ -303,6 +343,39 @@ export function listYearsWithData(db, indicatorId) {
 }
 
 /**
+ * Every year that holds at least one eligible observation for ANY metric, plus
+ * the same list per metric.
+ *
+ * The year filter must be derived from the stored data (specification section 8),
+ * never from a hardcoded 2000-2025 range, so a newer World Bank vintage becomes
+ * selectable as soon as it has been ingested.
+ */
+export function listAvailableYears(db) {
+  const years = db
+    .prepare(`
+      SELECT DISTINCT o.year AS year
+      FROM observations o
+      JOIN countries c ON c.id = o.country_id
+      WHERE c.is_aggregate = 0 AND o.value IS NOT NULL
+      ORDER BY o.year
+    `)
+    .all()
+    .map((r) => r.year);
+
+  const perMetric = {};
+  for (const indicator of listIndicators(db)) {
+    perMetric[indicator.metric_key] = listYearsWithData(db, indicator.id);
+  }
+
+  return {
+    years,
+    minYear: years.length ? Math.min(...years) : null,
+    maxYear: years.length ? Math.max(...years) : null,
+    perMetric,
+  };
+}
+
+/**
  * Country-level coverage for one indicator+year:
  *   eligible universe, valid observations, entities lacking an observation.
  */
@@ -352,6 +425,12 @@ export function finishFetchRun(db, id, patch) {
       rows_aggregate_excluded = ?,
       rows_blank_iso3_skipped = ?,
       rows_unknown_country    = ?,
+      rows_with_value         = ?,
+      rows_non_finite_skipped = ?,
+      rows_invalid_year       = ?,
+      pages_fetched           = ?,
+      requests                = ?,
+      universe_snapshot       = ?,
       error_message           = ?
     WHERE id = ?
   `).run(
@@ -365,9 +444,148 @@ export function finishFetchRun(db, id, patch) {
     patch.rowsAggregateExcluded ?? 0,
     patch.rowsBlankIso3Skipped ?? 0,
     patch.rowsUnknownCountry ?? 0,
+    patch.rowsWithValue ?? 0,
+    patch.rowsNonFiniteSkipped ?? 0,
+    patch.rowsInvalidYear ?? 0,
+    patch.pagesFetched ?? 0,
+    patch.requests ?? 0,
+    patch.universeSnapshot ? JSON.stringify(patch.universeSnapshot) : null,
     nz(patch.errorMessage),
     id,
   );
+}
+
+/**
+ * Persist the per-year ingest counters for a run (replacing any earlier attempt
+ * for the same run/metric/year so a retried run cannot double count).
+ *
+ * @param {object} db
+ * @param {number} runId
+ * @param {object[]} rows one entry per metric and year
+ */
+export function upsertIngestYearStats(db, runId, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+  const statement = db.prepare(`
+    INSERT INTO ingest_year_stats (
+      fetch_run_id, metric_key, indicator_code, year,
+      rows_received, rows_with_value, rows_written, rows_null_skipped,
+      rows_non_finite_skipped, rows_invalid_year, rows_blank_iso3_skipped,
+      rows_aggregate_excluded, rows_unknown_country
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(fetch_run_id, metric_key, year) DO UPDATE SET
+      indicator_code          = excluded.indicator_code,
+      rows_received           = excluded.rows_received,
+      rows_with_value         = excluded.rows_with_value,
+      rows_written            = excluded.rows_written,
+      rows_null_skipped       = excluded.rows_null_skipped,
+      rows_non_finite_skipped = excluded.rows_non_finite_skipped,
+      rows_invalid_year       = excluded.rows_invalid_year,
+      rows_blank_iso3_skipped = excluded.rows_blank_iso3_skipped,
+      rows_aggregate_excluded = excluded.rows_aggregate_excluded,
+      rows_unknown_country    = excluded.rows_unknown_country
+  `);
+  return transaction(db, () => {
+    let n = 0;
+    for (const row of rows) {
+      if (row?.year === null || row?.year === undefined) continue;
+      statement.run(
+        runId,
+        row.metricKey,
+        nz(row.indicatorCode),
+        row.year,
+        row.rowsReceived ?? 0,
+        row.rowsWithValue ?? 0,
+        row.rowsWritten ?? 0,
+        row.rowsNullSkipped ?? 0,
+        row.rowsNonFiniteSkipped ?? 0,
+        row.rowsInvalidYear ?? 0,
+        row.rowsBlankIso3Skipped ?? 0,
+        row.rowsAggregateExcluded ?? 0,
+        row.rowsUnknownCountry ?? 0,
+      );
+      n += 1;
+    }
+    return n;
+  });
+}
+
+/**
+ * Per-year ingest counters recorded for one metric.
+ *
+ * Ordering is deterministic: for a single year the LATEST fetch run comes
+ * first (ORDER BY fetch_run_id DESC) so callers can take index [0] as the
+ * latest applicable run. The multi-year form is ordered by year ascending
+ * with the latest run first within each year, for the same reason.
+ */
+export function getIngestYearStats(db, metricKey, options = {}) {
+  if (options.year !== undefined && options.year !== null) {
+    return (
+      db
+        .prepare(
+          'SELECT * FROM ingest_year_stats WHERE metric_key = ? AND year = ? ORDER BY fetch_run_id DESC',
+        )
+        .all(metricKey, options.year) ?? []
+    );
+  }
+  return db
+    .prepare(
+      'SELECT * FROM ingest_year_stats WHERE metric_key = ? ORDER BY year ASC, fetch_run_id DESC',
+    )
+    .all(metricKey);
+}
+
+/**
+ * Latest recorded ingest counters for one metric and year (latest fetch run).
+ * Returns null when the year was never ingested for that metric.
+ */
+export function getLatestIngestYearStat(db, metricKey, year) {
+  if (year === null || year === undefined) return null;
+  return getIngestYearStats(db, metricKey, { year })[0] ?? null;
+}
+
+/**
+ * The universe snapshot recorded by the most recent successful run (eligible and
+ * aggregate entity ids as fetched from the World Bank metadata).
+ *
+ * @returns {{runId:number, completedAt:string|null, snapshot:object}|null}
+ */
+export function getLatestUniverseSnapshot(db, options = {}) {
+  const excludeRunId = options.excludeRunId ?? null;
+  const row = db
+    .prepare(
+      `SELECT id, completed_at, universe_snapshot
+       FROM fetch_runs
+       WHERE status = 'success' AND universe_snapshot IS NOT NULL AND id != ?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(excludeRunId ?? -1);
+  if (!row || !row.universe_snapshot) return null;
+  return {
+    runId: row.id,
+    completedAt: row.completed_at ?? null,
+    snapshot: JSON.parse(row.universe_snapshot),
+  };
+}
+
+/**
+ * The universe snapshot recorded by ONE specific run, used to compare the
+ * eligible metadata universe between two different retrievals.
+ *
+ * @returns {{runId:number, completedAt:string|null, snapshot:object}|null}
+ */
+export function getUniverseSnapshotByRun(db, runId) {
+  if (runId === null || runId === undefined) return null;
+  const row = db
+    .prepare(
+      'SELECT id, completed_at, universe_snapshot FROM fetch_runs WHERE id = ? LIMIT 1',
+    )
+    .get(runId);
+  if (!row || !row.universe_snapshot) return null;
+  return {
+    runId: row.id,
+    completedAt: row.completed_at ?? null,
+    snapshot: JSON.parse(row.universe_snapshot),
+  };
 }
 
 export function getLatestFetchRun(db, { status = 'success' } = {}) {
@@ -390,6 +608,44 @@ export function getLastSuccessfulFetchTime(db) {
     .prepare("SELECT MAX(completed_at) AS t FROM fetch_runs WHERE status = 'success'")
     .get();
   return row?.t ?? null;
+}
+
+// ============================================================
+// refresh_locks: SQLite-backed cross-process mutex (see schema.sql)
+// ============================================================
+
+/** Current lock row (always id = 1). */
+export function refreshLockStatus(db) {
+  return (
+    db.prepare('SELECT id, locked, run_id AS runId, holder, updated_at AS updatedAt FROM refresh_locks WHERE id = 1').get() ?? null
+  );
+}
+
+/**
+ * Atomically acquire the refresh lock. Returns true when this caller won it,
+ * false when another holder owns it. Exactly one concurrent acquirer can win,
+ * even across processes, because the UPDATE matches only when locked = 0.
+ */
+export function acquireRefreshLock(db, { runId = null, holder = null } = {}) {
+  const info = db
+    .prepare('UPDATE refresh_locks SET locked = 1, run_id = ?, holder = ?, updated_at = ? WHERE id = 1 AND locked = 0')
+    .run(nz(runId), nz(holder), nowIso());
+  return info.changes === 1;
+}
+
+/** Release the lock unconditionally (idempotent). */
+export function releaseRefreshLock(db) {
+  db.prepare("UPDATE refresh_locks SET locked = 0, run_id = NULL, holder = NULL, updated_at = ? WHERE id = 1").run(nowIso());
+}
+
+/**
+ * Recover a stale lock (e.g. after a crash left locked = 1 with no live
+ * holder). Releases it and returns the previous row for the audit trail.
+ */
+export function forceReleaseRefreshLock(db, reason = null) {
+  const previous = refreshLockStatus(db);
+  releaseRefreshLock(db);
+  return { previous, reason };
 }
 
 // ============================================================

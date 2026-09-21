@@ -12,9 +12,11 @@
  *   - if the previous value is <= 0         -> YoY is null with a reason code
  *     (a non-positive base makes the percentage change undefined or its sign
  *      misleading, so it is reported as not calculable rather than as 0%)
- *   - an incalculable YoY is NEVER reported as 0
- *   - when both years are 0, the change is reported as 0 with an explicit
- *     reason code, because no growth can be computed from a zero base
+ *   - an incalculable YoY is NEVER reported as 0: there is no code path in this
+ *     module that turns an invalid YoY into a 0% change
+ *   - when both years are 0 the percentage is still not reported, because a zero
+ *     base yields no defined growth rate: the value is null with the explicit
+ *     reason `both_years_zero`
  *
  * A reason code accompanies every null result so the UI and the audit panel can
  * state WHY the value is unavailable instead of showing a bare blank.
@@ -27,6 +29,7 @@ export const YOY_NA_REASONS = Object.freeze({
   PREVIOUS_NON_POSITIVE: 'previous_year_value_not_positive',
   BOTH_ZERO: 'both_years_zero',
   BOTH_MISSING: 'both_years_missing',
+  NON_FINITE_VALUE: 'non_finite_value',
 });
 
 /** Human-readable descriptions, used by the audit panel. */
@@ -41,6 +44,8 @@ export const YOY_NA_DESCRIPTIONS = Object.freeze({
     'Both years are zero, so no growth can be computed from a zero base.',
   [YOY_NA_REASONS.BOTH_MISSING]:
     'Neither year has a stored World Bank observation.',
+  [YOY_NA_REASONS.NON_FINITE_VALUE]:
+    'At least one of the two stored values was not a finite number, so no percentage can be calculated.',
 });
 
 /**
@@ -67,18 +72,15 @@ export function computeYoy({ current, previous }) {
   const cur = Number(current);
   const prev = Number(previous);
   if (!Number.isFinite(cur) || !Number.isFinite(prev)) {
-    return notAvailable(YOY_NA_REASONS.CURRENT_MISSING);
+    return notAvailable(YOY_NA_REASONS.NON_FINITE_VALUE);
   }
 
   if (prev === 0) {
     if (cur === 0) {
-      // Both zero: the change is zero, but no growth rate exists.
-      return {
-        yoyPercent: 0,
-        reason: YOY_NA_REASONS.BOTH_ZERO,
-        description: YOY_NA_DESCRIPTIONS[YOY_NA_REASONS.BOTH_ZERO],
-        computable: false,
-      };
+      // Both years zero: the base is zero, so no growth rate is defined.
+      // Reporting 0% here would present an invalid YoY as a real one, so the
+      // value stays null and the reason explains why.
+      return notAvailable(YOY_NA_REASONS.BOTH_ZERO);
     }
     return notAvailable(YOY_NA_REASONS.PREVIOUS_NON_POSITIVE);
   }

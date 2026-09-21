@@ -157,18 +157,20 @@ async function fetchJson(url, { timeoutMs = config.worldBank.timeoutMs } = {}) {
  * GET with retries.
  *
  * @param {string} url
- * @param {{ maxRetries?: number, baseMs?: number, onRetry?: Function, context?: string }} options
+ * @param {{ maxRetries?: number, baseMs?: number, timeoutMs?: number, onRetry?: Function, context?: string }} options
  */
 export async function getWithRetry(url, options = {}) {
   const maxRetries = options.maxRetries ?? config.worldBank.maxRetries;
   const baseMs = options.baseMs ?? config.worldBank.retryBaseMs;
+  const timeoutMs = options.timeoutMs ?? config.worldBank.timeoutMs;
   const context = options.context ?? url;
+  void context;
 
   let lastError;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      return await fetchJson(url);
+      return await fetchJson(url, { timeoutMs });
     } catch (error) {
       lastError = error;
 
@@ -221,17 +223,79 @@ export async function fetchPage(pathname, params = {}, options = {}) {
 }
 
 /**
+ * Compare the reconstructed row count with the total the World Bank declared.
+ *
+ * API semantics used here (verified against the live API):
+ *   `meta.total` counts every row the API will return for the request,
+ *   independent of `per_page`. A correct reconstruction across all `meta.pages`
+ *   pages therefore has to reconstruct exactly `meta.total` rows.
+ * If `meta.total` is absent the check cannot be asserted: the status is reported
+ * as `unknown` (and surfaced to the caller) rather than being called complete.
+ *
+ * @param {{declaredTotal?: number|string|null, receivedRows?: number, declaredPages?: number,
+ *          pagesFetched?: number, url?: string}} input
+ * @returns {{complete: boolean, status: 'complete'|'mismatch'|'unknown', declaredTotal: number|null,
+ *            receivedRows: number, missingRows: number|null, message: string|null}}
+ */
+export function checkPaginationCompleteness(input = {}) {
+  const { declaredTotal, receivedRows, declaredPages = null, pagesFetched = null, url = '' } = input;
+
+  const total =
+    declaredTotal === undefined || declaredTotal === null ? null : Number(declaredTotal);
+  const received = Number(receivedRows ?? 0);
+
+  if (total === null || !Number.isFinite(total)) {
+    return {
+      complete: true,
+      status: 'unknown',
+      declaredTotal: null,
+      receivedRows: received,
+      missingRows: null,
+      message:
+        'The World Bank response did not declare meta.total, so pagination completeness could not be asserted.',
+      declaredPages,
+      pagesFetched,
+      url,
+    };
+  }
+
+  const difference = total - received;
+  const complete = received === total;
+
+  return {
+    complete,
+    status: complete ? 'complete' : 'mismatch',
+    declaredTotal: total,
+    receivedRows: received,
+    missingRows: complete ? 0 : difference,
+    message: complete
+      ? null
+      : `World Bank pagination completeness check failed: meta.total declared ${total} row(s) but ${received} were reconstructed ` +
+        `(${difference > 0 ? `${difference} missing` : `${Math.abs(difference)} extra`}) ` +
+        `over ${pagesFetched ?? '?'} page(s) of ${declaredPages ?? '?'} declared.`,
+    declaredPages,
+    pagesFetched,
+    url,
+  };
+}
+
+/**
  * Fetch EVERY page of a World Bank collection endpoint.
  *
  * Pagination is driven strictly by the response metadata:
  *   - `pages`   total number of pages
  *   - `per_page` page size the server actually used
- *   - `total`   total record count, used as a completeness check
+ *   - `total`   total record count, used as a completeness assertion
  *
  * The first response decides the total page count; subsequent pages are
  * requested until all are collected. Page 1 is never assumed to be complete.
  *
- * @returns {{ rows: object[], meta: object, pagesFetched: number, requests: number }}
+ * The reconstruction is then checked against `meta.total`. A mismatch is a hard
+ * failure (WorldBankPayloadError) instead of silently returning a partial
+ * series, because a short series would produce a wrong ranking denominator.
+ *
+ * @returns {{ rows: object[], meta: object, pagesFetched: number, requests: number,
+ *             declaredTotal: number|null, completeness: object }}
  */
 export async function fetchAllPages(pathname, params = {}, options = {}) {
   const perPage = options.perPage ?? config.worldBank.perPage;
@@ -240,7 +304,10 @@ export async function fetchAllPages(pathname, params = {}, options = {}) {
   const first = await fetchPage(pathname, { ...params, page: 1, per_page: perPage }, options);
 
   const totalPages = Number(first.meta?.pages ?? 1);
-  const declaredTotal = Number(first.meta?.total ?? first.rows.length);
+  const declaredTotal =
+    first.meta?.total === undefined || first.meta?.total === null
+      ? null
+      : Number(first.meta.total);
 
   if (!Number.isFinite(totalPages) || totalPages < 1) {
     throw new WorldBankPayloadError(
@@ -269,6 +336,23 @@ export async function fetchAllPages(pathname, params = {}, options = {}) {
     }
   }
 
+  const completeness = checkPaginationCompleteness({
+    declaredTotal,
+    receivedRows: rows.length,
+    declaredPages: totalPages,
+    pagesFetched: totalPages,
+    url: first.url,
+  });
+
+  if (!completeness.complete) {
+    throw new WorldBankPayloadError(completeness.message, {
+      pathname,
+      params,
+      meta: first.meta,
+      ...completeness,
+    });
+  }
+
   return {
     rows,
     meta: first.meta,
@@ -276,6 +360,7 @@ export async function fetchAllPages(pathname, params = {}, options = {}) {
     pagesFetched: totalPages,
     requests,
     declaredTotal,
+    completeness,
   };
 }
 

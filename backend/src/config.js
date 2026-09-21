@@ -166,6 +166,11 @@ export const config = Object.freeze({
   neighborsDefault: int('RANK_NEIGHBORS_DEFAULT', 5),
 
   autoIngestOnEmpty: bool('WB_AUTO_INGEST_ON_EMPTY', true),
+
+  // Automatic background refresh when the cache is stale per CACHE_TTL_HOURS.
+  // Manual refreshes always attempt immediately; only automatic triggers honor
+  // the post-failure cooldown in AUTO_REFRESH_FAIL_COOLDOWN_MS.
+  autoRefreshOnStale: bool('WB_AUTO_REFRESH_ON_STALE', true),
 });
 
 /** Data-source attribution used throughout API responses and the UI. */

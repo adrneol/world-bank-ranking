@@ -92,6 +92,10 @@ export function buildYoyRows(currentRows, previousRows) {
       name: current.name ?? previous.name,
       previousValue: previous.value,
       currentValue: current.value,
+      // Audit-only decimal strings; the percentage itself is computed from
+      // the numeric values above, never from these strings.
+      ...(previous.valueRaw !== undefined ? { previousValueRaw: previous.valueRaw } : {}),
+      ...(current.valueRaw !== undefined ? { currentValueRaw: current.valueRaw } : {}),
       yoyPercent: ((current.value / previous.value) - 1) * 100,
     });
   }

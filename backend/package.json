@@ -14,7 +14,7 @@
     "ingest": "node src/scripts/ingest.js",
     "audit:live": "node src/scripts/liveAudit.js",
     "snapshot:create": "node src/scripts/createSnapshot.js",
-    "test": "node --test test/"
+    "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "express": "^5.1.0",

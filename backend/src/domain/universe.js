@@ -131,38 +131,109 @@ export function buildUniverse(metaRows) {
 }
 
 /**
+ * Machine-readable reasons why an observation cannot be ranked.
+ *
+ * These are the ONLY rejection codes in the application. The ingestion pipeline
+ * imports them instead of hardcoding strings, so two different causes can never
+ * be silently merged into one audit counter.
+ */
+export const OBSERVATION_REJECTIONS = Object.freeze({
+  MISSING_VALUE: 'missing_value',
+  NON_FINITE_VALUE: 'non_finite_value',
+  INVALID_YEAR: 'invalid_year',
+  BLANK_ISO3: 'blank_iso3',
+  AGGREGATE_ENTITY: 'aggregate_entity',
+  UNKNOWN_COUNTRY: 'unknown_country',
+});
+
+/** Human-readable meaning of each rejection code, used by audit output. */
+export const OBSERVATION_REJECTION_DESCRIPTIONS = Object.freeze({
+  [OBSERVATION_REJECTIONS.MISSING_VALUE]:
+    'The World Bank returned no value for this country-year. Missing data is never treated as zero.',
+  [OBSERVATION_REJECTIONS.NON_FINITE_VALUE]:
+    'The World Bank value was not a finite number.',
+  [OBSERVATION_REJECTIONS.INVALID_YEAR]:
+    'The observation did not carry a usable year.',
+  [OBSERVATION_REJECTIONS.BLANK_ISO3]:
+    'The observation carried a blank ISO3 code. World Bank income-group aggregates arrive this way.',
+  [OBSERVATION_REJECTIONS.AGGREGATE_ENTITY]:
+    'The ISO3 code matches a World Bank entity flagged as an aggregate (for example "World" / "WLD").',
+  [OBSERVATION_REJECTIONS.UNKNOWN_COUNTRY]:
+    'The ISO3 code is absent from the stored World Bank country metadata, so it cannot be ranked.',
+});
+
+/** True when `key` is present in a Set, Map or array collection. */
+export function isMember(collection, key) {
+  if (!collection || !key) return false;
+  if (collection instanceof Map) return collection.has(key);
+  if (collection instanceof Set) return collection.has(key);
+  if (Array.isArray(collection)) return collection.includes(key);
+  if (typeof collection.has === 'function') return Boolean(collection.has(key));
+  return false;
+}
+
+/**
+ * Build the two lookup indexes used to classify observations from a universe
+ * object returned by buildUniverse(). Defined once so the ingestion pipeline and
+ * every service apply exactly the same rule.
+ *
+ * @param {{eligible: object[], aggregates: object[]}} universe
+ * @returns {{eligibleIso3Set: Set<string>, aggregateIso3Set: Set<string>}}
+ */
+export function createUniverseIndex(universe) {
+  const eligibleIso3Set = new Set((universe?.eligible ?? []).map((c) => c.id).filter(Boolean));
+  const aggregateIso3Set = new Set(
+    (universe?.aggregates ?? [])
+      .flatMap((c) => [c.id, c.iso3, c.iso3Code])
+      .filter(Boolean),
+  );
+  return { eligibleIso3Set, aggregateIso3Set };
+}
+
+/**
  * Eligibility test for a single observation, used by the ingestion pipeline so
  * that ineligible rows never reach the database in the first place.
  *
- * @param {{ iso3: string|null|undefined, value: number|null|undefined }} observation
- * @param {Set<string>} eligibleIso3Set non-aggregate ISO3 codes
- * @returns {{ eligible: boolean, reason: string|null }}
+ * Precedence of rejection reasons (first match wins) is fixed and documented so
+ * each audit counter has exactly one meaning:
+ *   1. missing value    2. non-finite value   3. invalid year
+ *   4. blank ISO3       5. aggregate entity   6. unknown country
+ *
+ * @param {{ iso3?: string|null, value?: number|null, year?: number|null }} observation
+ * @param {Set<string>|Map<string, unknown>} eligibleIso3Set non-aggregate ISO3 codes
+ * @param {{ aggregateIso3Set?: Set<string>, year?: number }} [context]
+ * @returns {{ eligible: boolean, reason: string|null, iso3?: string, value?: number }}
  */
-export function classifyObservation(observation, eligibleIso3Set) {
+export function classifyObservation(observation, eligibleIso3Set, context = {}) {
+  const { aggregateIso3Set } = context;
+  const year = context.year ?? observation?.year ?? null;
   const value = observation?.value;
+
   if (value === null || value === undefined) {
-    return { eligible: false, reason: 'null value' };
+    return { eligible: false, reason: OBSERVATION_REJECTIONS.MISSING_VALUE };
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return { eligible: false, reason: 'non-finite value' };
+    return { eligible: false, reason: OBSERVATION_REJECTIONS.NON_FINITE_VALUE };
+  }
+  if (year !== null && !Number.isFinite(Number(year))) {
+    return { eligible: false, reason: OBSERVATION_REJECTIONS.INVALID_YEAR };
   }
 
   const iso3 = normalizeIso3(observation?.iso3);
   if (!iso3) {
-    return { eligible: false, reason: AGGREGATE_REASONS.BLANK_ISO3 };
+    return { eligible: false, reason: OBSERVATION_REJECTIONS.BLANK_ISO3 };
   }
 
-  const known = eligibleIso3Set instanceof Map
-    ? eligibleIso3Set.has(iso3)
-    : eligibleIso3Set?.has?.(iso3);
-
-  if (!known) {
-    // Either an aggregate (which never enters the eligible set) or an entity
-    // absent from metadata. Both are unrankable.
-    return { eligible: false, reason: 'not in eligible country universe' };
+  if (!isMember(eligibleIso3Set, iso3)) {
+    // Two different unrankable cases, kept apart in the counters: a known
+    // aggregate entity (e.g. WLD) versus an ISO3 absent from the metadata.
+    if (isMember(aggregateIso3Set, iso3)) {
+      return { eligible: false, reason: OBSERVATION_REJECTIONS.AGGREGATE_ENTITY };
+    }
+    return { eligible: false, reason: OBSERVATION_REJECTIONS.UNKNOWN_COUNTRY };
   }
 
-  return { eligible: true, reason: null };
+  return { eligible: true, reason: null, iso3, value: Number(value) };
 }
 
 /**
