@@ -381,6 +381,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const h = handle();
     res.json({
       source: SOURCE_INFO,
+      apiBaseUrl: config.worldBank.baseUrl,
       indicators: listIndicators(h),
       expectedIndicators: METRIC_KEYS.map((k) => getMetric(k)),
       universe: {
