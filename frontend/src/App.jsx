@@ -1,14 +1,19 @@
 /**
- * Application shell: header, global filter bar, section navigation and all
- * data sections. Filter state lives here (mirrored to the URL query string);
- * every section receives the active filter values as props, so displayed
- * results can never disagree with the visible filter labels.
+ * Application shell: compact header, tab navigation, global filter bar and
+ * one focused view at a time. Filter state lives here (mirrored to the URL
+ * query string); every section receives the active filter values as props, so
+ * displayed results can never disagree with the visible filter labels.
+ *
+ * Views lazy-mount: only the active tab fetches and renders. All data shown
+ * is backend-calculated; this shell holds UI state only.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api/client.js';
 import { METRIC_KEYS, metricLabel, resolveMetricKey } from './config/metrics.js';
 import { Field } from './components/ui.jsx';
+import Tabs, { SubTabs } from './components/Tabs.jsx';
+import Overview from './sections/Overview.jsx';
 import YearlyTable from './sections/YearlyTable.jsx';
 import YearComparison from './sections/YearComparison.jsx';
 import LevelVerification from './sections/LevelVerification.jsx';
@@ -19,7 +24,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -45,6 +50,30 @@ function YearOptions({ years, id, value, onChange, label }) {
   );
 }
 
+const VIEWS = Object.freeze([
+  { id: 'overview', label: 'Overview' },
+  { id: 'data', label: 'Data' },
+  { id: 'rank', label: 'Rank' },
+  { id: 'yoy', label: 'YoY' },
+  { id: 'coverage', label: 'Coverage' },
+  { id: 'audit', label: 'Audit' },
+  { id: 'status', label: 'Status' },
+]);
+
+function isViewId(value) {
+  return VIEWS.some((v) => v.id === value);
+}
+
+const RANK_SUBS = Object.freeze([
+  { id: 'verify', label: 'Verify India' },
+  { id: 'table', label: 'Full table' },
+]);
+
+const YOY_SUBS = Object.freeze([
+  { id: 'ranking', label: 'Ranking' },
+  { id: 'verify', label: 'Verify India' },
+]);
+
 export default function App() {
   const [yearsData, setYearsData] = useState(null);
   const [yearsError, setYearsError] = useState(null);
@@ -59,8 +88,11 @@ export default function App() {
     metric: 'nominal_current',
     neighbors: 5,
     fromYear: '',
+    view: 'overview',
     ...readUrlState(),
   }));
+  const [rankSub, setRankSub] = useState('verify');
+  const [yoySub, setYoySub] = useState('ranking');
 
   // Load available years once (plus reload after a successful refresh).
   useEffect(() => {
@@ -104,7 +136,8 @@ export default function App() {
     const neighborsRaw = Number.parseInt(filters.neighbors, 10);
     const neighbors = Number.isInteger(neighborsRaw) ? Math.max(0, Math.min(50, neighborsRaw)) : 5;
     const fromYear = filters.fromYear !== '' && filters.fromYear != null ? pick(filters.fromYear, null) : null;
-    return { startYear, endYear, year, metric, neighbors, fromYear };
+    const view = isViewId(filters.view) ? filters.view : 'overview';
+    return { startYear, endYear, year, metric, neighbors, fromYear, view };
   }, [filters, availableYears, maxYear, defaultStart]);
 
   // Mirror effective state to the URL (UI state only, never business logic).
@@ -116,6 +149,7 @@ export default function App() {
     query.set('metric', effective.metric);
     query.set('neighbors', effective.neighbors);
     if (effective.fromYear != null) query.set('fromYear', effective.fromYear);
+    query.set('view', effective.view);
     const next = `?${query.toString()}`;
     if (window.location.search !== next) window.history.replaceState(null, '', next);
   }, [effective]);
@@ -137,42 +171,27 @@ export default function App() {
   }, []);
 
   const filtersReady = !yearsLoading && !yearsError && availableYears.length > 0;
+  const view = effective.view;
 
   return (
     <div className="app">
       <a className="skip-link" href="#main">
         Skip to data
       </a>
-      <header className="app-header">
-        <div className="wrap">
-          <p className="eyebrow">World Bank World Development Indicators</p>
-          <h1>India GDP per capita ranking</h1>
-          <p className="lede">
-            Independently calculated ranks from World Bank observations. Rank calculated from World Bank WDI
-            observations.
-          </p>
-          <nav className="section-nav" aria-label="Sections">
-            {[
-              ['yearly', 'Yearly data'],
-              ['comparison', 'Year comparison'],
-              ['verify', 'Verify rank'],
-              ['full-ranking', 'Full ranking'],
-              ['yoy-ranking', 'YoY ranking'],
-              ['yoy-verify', 'Verify YoY'],
-              ['coverage', 'Coverage'],
-              ['audit', 'Audit'],
-              ['data-status', 'Status'],
-            ].map(([id, label]) => (
-              <a key={id} href={`#${id}`}>
-                {label}
-              </a>
-            ))}
-          </nav>
+      <header className="app-header app-header-compact">
+        <div className="wrap header-row">
+          <div>
+            <p className="eyebrow">World Bank WDI · India GDP per capita</p>
+            <h1>
+              India ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
+            </h1>
+          </div>
+          <Tabs views={VIEWS} active={view} onChange={(v) => setFilter('view', v)} />
         </div>
       </header>
 
       <div className="wrap">
-        <div className="filterbar" role="region" aria-label="Global filters">
+        <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
           {yearsLoading ? (
             <p className="status status-loading" role="status">
               Loading available years…
@@ -188,10 +207,10 @@ export default function App() {
           ) : null}
           {filtersReady ? (
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Data filters">
-              <YearOptions years={availableYears} id="f-start" label="Start year" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
-              <YearOptions years={availableYears} id="f-end" label="End year" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
-              <YearOptions years={availableYears} id="f-year" label="Selected year" value={effective.year} onChange={(v) => setFilter('year', v)} />
-              <Field label="Metric" htmlFor="f-metric" hint="Yearly table and comparison always show all four.">
+              <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
+              <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
+              <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
+              <Field label="Metric" htmlFor="f-metric">
                 <select id="f-metric" value={effective.metric} onChange={(e) => setFilter('metric', e.target.value)}>
                   {METRIC_KEYS.map((key) => (
                     <option key={key} value={key}>
@@ -200,7 +219,7 @@ export default function App() {
                   ))}
                 </select>
               </Field>
-              <Field label="Neighbors" htmlFor="f-neighbors" hint="0–50 rows above/below India.">
+              <Field label="Neighbors" htmlFor="f-neighbors">
                 <input
                   id="f-neighbors"
                   type="number"
@@ -210,7 +229,7 @@ export default function App() {
                   onChange={(e) => setFilter('neighbors', e.target.value)}
                 />
               </Field>
-              <Field label="Compare from year" htmlFor="f-from" hint="Empty hides the change explanation.">
+              <Field label="Compare from" htmlFor="f-from">
                 <select id="f-from" value={effective.fromYear ?? ''} onChange={(e) => setFilter('fromYear', e.target.value)}>
                   <option value="">—</option>
                   {availableYears.map((y) => (
@@ -233,20 +252,46 @@ export default function App() {
           </p>
         ) : null}
 
-        <main id="main" key={dataVersion}>
-          {filtersReady ? (
+        <main id="main" key={`${dataVersion}:${view}`}>
+          {filtersReady && view === 'overview' ? (
             <>
-              <YearlyTable startYear={effective.startYear} endYear={effective.endYear} />
+              <Overview year={effective.year} />
               <YearComparison year={effective.year} />
-              <LevelVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} />
-              <FullRanking year={effective.year} metricKey={effective.metric} />
-              <YoyRanking year={effective.year} metricKey={effective.metric} />
-              <YoyVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} />
-              <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} />
-              <AuditSource year={effective.year} metricKey={effective.metric} />
-              <DataStatus onRefreshed={handleRefreshed} />
             </>
           ) : null}
+          {filtersReady && view === 'data' ? (
+            <YearlyTable startYear={effective.startYear} endYear={effective.endYear} />
+          ) : null}
+          {filtersReady && view === 'rank' ? (
+            <div role="tabpanel" id="panel-rank" aria-labelledby="tab-rank">
+              <SubTabs options={RANK_SUBS} active={rankSub} onChange={setRankSub} label="Rank workspace views" />
+              {rankSub === 'verify' ? (
+                <LevelVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} />
+              ) : (
+                <FullRanking year={effective.year} metricKey={effective.metric} />
+              )}
+            </div>
+          ) : null}
+          {filtersReady && view === 'yoy' ? (
+            <div role="tabpanel" id="panel-yoy" aria-labelledby="tab-yoy">
+              <p className="denominators">
+                YoY ranking orders countries by <strong>percentage change</strong>, not GDP-per-capita level.
+              </p>
+              <SubTabs options={YOY_SUBS} active={yoySub} onChange={setYoySub} label="YoY workspace views" />
+              {yoySub === 'ranking' ? (
+                <YoyRanking year={effective.year} metricKey={effective.metric} />
+              ) : (
+                <YoyVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} />
+              )}
+            </div>
+          ) : null}
+          {filtersReady && view === 'coverage' ? (
+            <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} />
+          ) : null}
+          {filtersReady && view === 'audit' ? (
+            <AuditSource year={effective.year} metricKey={effective.metric} />
+          ) : null}
+          {filtersReady && view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
         </main>
 
         <footer className="app-footer">

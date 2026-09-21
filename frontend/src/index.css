@@ -95,19 +95,181 @@ body {
   max-width: 60ch;
 }
 
-.section-nav {
+.header-row {
   display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
   flex-wrap: wrap;
-  gap: 0.25rem 1rem;
 }
 
-.section-nav a {
+.app-header-compact {
+  padding: 1.1rem 0 0.9rem;
+}
+
+.app-header-compact h1 {
+  font-size: clamp(1.2rem, 2.8vw, 1.6rem);
+}
+
+.header-year {
+  font-weight: 400;
   color: #d4dae3;
-  font-size: 0.9rem;
 }
 
-.section-nav a:hover {
+/* ---------- tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.tab {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #d4dae3;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  padding: 0.5rem 0.85rem;
+  min-height: 2.5rem;
+  cursor: pointer;
+}
+
+.tab:hover {
   color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tab-active {
+  color: #101828;
+  background: var(--bg);
+  border-color: var(--bg);
+}
+
+.tab:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.subtabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--line);
+}
+
+.subtab {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  padding: 0.5rem 0.9rem;
+  margin-bottom: -2px;
+  min-height: 2.5rem;
+  cursor: pointer;
+}
+
+.subtab:hover {
+  color: var(--ink);
+}
+
+.subtab-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- compact filter bar ---------- */
+
+.filterbar-compact {
+  padding: 0.7rem 0.9rem;
+  margin: 0.85rem 0;
+}
+
+.filterbar-compact .filter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.5rem 0.8rem;
+}
+
+.filterbar-compact .field-hint {
+  display: none;
+}
+
+.filterbar-compact select,
+.filterbar-compact input {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.5rem;
+}
+
+/* ---------- overview cards ---------- */
+
+.overview-year {
+  font-size: 1.35rem;
+  margin: 0 0 0.75rem;
+}
+
+.overview-context {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.8rem;
+  margin: 0 0 1rem;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: #fff;
+  margin: 0;
+  min-width: 0;
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.card-unit {
+  margin: 0.1rem 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.card-value {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-rank {
+  margin: 0.15rem 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-yoy {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-code {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 /* ---------- filter bar ---------- */

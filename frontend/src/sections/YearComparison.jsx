@@ -25,7 +25,7 @@ export default function YearComparison({ year }) {
     <Section
       id="comparison"
       title={`Selected year: ${year ?? '—'}`}
-      subtitle="India's four independent World Bank indicator positions for the same year. The four series have different units and are never combined."
+      subtitle="One row per metric. Separate series with different units — never combined, never scored."
     >
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="year comparison" />
       {!loading && !error && row ? (
