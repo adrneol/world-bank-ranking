@@ -7,7 +7,12 @@
  * coverage — it only transports backend-calculated results.
  */
 
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+// Precedence: explicit VITE_API_BASE_URL (local override or production)
+// wins; empty/absent falls back to relative /api (Vite dev proxy locally,
+// same-origin API in deployments that serve both from one host). Trailing
+// slashes and surrounding whitespace are stripped so neither
+// "<base>//api/years" nor "<base>api/years" can be constructed.
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
 
 export class ApiError extends Error {
   constructor(message, { status = null, code = null } = {}) {
