@@ -81,7 +81,7 @@ function SummaryCards({ data }) {
     <div className="cards" role="region" aria-label="India ranking movement summary">
       <div className="card">
         <h3>
-          {years.a} <span className="card-unit">observed ranking</span>
+          Earlier · {years.a} <span className="card-unit">observed ranking</span>
         </h3>
         <p className="card-rank">
           {fm.fullRankA != null ? `#${fm.fullRankA} / ${fm.denominatorA}` : 'n/a'}
@@ -97,7 +97,7 @@ function SummaryCards({ data }) {
       </div>
       <div className="card">
         <h3>
-          {years.b} <span className="card-unit">observed ranking</span>
+          Later · {years.b} <span className="card-unit">observed ranking</span>
         </h3>
         <p className="card-rank">
           {fm.fullRankB != null ? `#${fm.fullRankB} / ${fm.denominatorB}` : 'n/a'}
@@ -111,15 +111,18 @@ function SummaryCards({ data }) {
           {metric.indicatorCode} · {metric.unit}
         </p>
       </div>
-      <div className="card">
-        <h3>Position number change</h3>
-        <p className="card-rank" aria-label={`Position number changed by ${fm.positionNumberChange}`}>
+      <div className="card card-result">
+        <h3>Result · position number change</h3>
+        <p className="card-result-value" aria-label={`Position number changed by ${fm.positionNumberChange}`}>
           {fm.positionNumberChange != null ? formatSigned(fm.positionNumberChange) : 'n/a'}
+        </p>
+        <p className="card-unit">
+          {fm.positionNumberChange != null ? signMeaning(fm.positionNumberChange) : 'Decomposition unavailable.'}
         </p>
         <p className="card-unit">
           {fm.placesGained != null
             ? `${fm.placesGained > 0 ? `${formatPlaces(fm.placesGained)} gained` : fm.placesGained < 0 ? `${formatPlaces(fm.placesGained)} lost` : 'No change in places'} (places gained = ${formatSigned(fm.placesGained)})`
-            : 'Decomposition unavailable.'}
+            : ''}
         </p>
       </div>
     </div>
@@ -169,13 +172,86 @@ function StorySentence({ data }) {
   );
 }
 
+function EconomyDetails({ r, yearA, yearB }) {
+  return (
+    <details className="details">
+      <summary>Details</summary>
+      <dl className="facts">
+        <div>
+          <dt>ISO3</dt>
+          <dd className="mono">{r.iso3}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>{r.status}</dd>
+        </div>
+        <div>
+          <dt>Relation (A / B)</dt>
+          <dd>
+            {r.relationToFocusA} / {r.relationToFocusB}
+          </dd>
+        </div>
+        <div>
+          <dt>
+            Rank in {yearA} / {yearB}
+          </dt>
+          <dd className="num">
+            {r.rankA ?? '—'} / {r.rankB ?? '—'}
+          </dd>
+        </div>
+        <div>
+          <dt>Raw value A</dt>
+          <dd className="mono">{r.rawTextA ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Raw value B</dt>
+          <dd className="mono">{r.rawTextB ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Display A / B</dt>
+          <dd>
+            {r.displayA ?? '—'} / {r.displayB ?? '—'}
+          </dd>
+        </div>
+        <div>
+          <dt>Region</dt>
+          <dd>{r.region ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Income level</dt>
+          <dd>{r.incomeLevel ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Lending type</dt>
+          <dd>{r.lendingType ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Metadata note</dt>
+          <dd>{r.metadataVintageNote}</dd>
+        </div>
+        {r.tiedWithFocusA || r.tiedWithFocusB ? (
+          <div>
+            <dt>Tie</dt>
+            <dd>Tied value with India; ISO3 order decides the position.</dd>
+          </div>
+        ) : null}
+      </dl>
+    </details>
+  );
+}
+
+/**
+ * Entered/exited table: economies OUTSIDE the common set.
+ * The Effect column is correct here only: above → affects position,
+ * below → denominator only.
+ */
 function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
   return (
     <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
-      <table className="table">
+      <table className="table table-compact">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
           <tr>
@@ -198,69 +274,7 @@ function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <details className="details">
-                  <summary>Details</summary>
-                  <dl className="facts">
-                    <div>
-                      <dt>ISO3</dt>
-                      <dd className="mono">{r.iso3}</dd>
-                    </div>
-                    <div>
-                      <dt>Status</dt>
-                      <dd>{r.status}</dd>
-                    </div>
-                    <div>
-                      <dt>Relation (A / B)</dt>
-                      <dd>
-                        {r.relationToFocusA} / {r.relationToFocusB}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>
-                        Rank in {yearA} / {yearB}
-                      </dt>
-                      <dd className="num">
-                        {r.rankA ?? '—'} / {r.rankB ?? '—'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Raw value A</dt>
-                      <dd className="mono">{r.rawTextA ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>Raw value B</dt>
-                      <dd className="mono">{r.rawTextB ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>Display A / B</dt>
-                      <dd>
-                        {r.displayA ?? '—'} / {r.displayB ?? '—'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Region</dt>
-                      <dd>{r.region ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>Income level</dt>
-                      <dd>{r.incomeLevel ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>Lending type</dt>
-                      <dd>{r.lendingType ?? '—'}</dd>
-                    </div>
-                    <div>
-                      <dt>Metadata note</dt>
-                      <dd>{r.metadataVintageNote}</dd>
-                    </div>
-                    {r.tiedWithFocusA || r.tiedWithFocusB ? (
-                      <div>
-                        <dt>Tie</dt>
-                        <dd>Tied value with India; ISO3 order decides the position.</dd>
-                      </div>
-                    ) : null}
-                  </dl>
-                </details>
+                <EconomyDetails r={r} yearA={yearA} yearB={yearB} />
               </th>
               <td className="mono">{r.iso3}</td>
               {showStatus ? <td>{r.status}</td> : null}
@@ -276,14 +290,136 @@ function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
   );
 }
 
+/**
+ * Common comparison-set table: a DIFFERENT population from entered/exited.
+ * No Status column (obvious from the section) and deliberately NO Effect
+ * column: common economies are the fixed comparison population, not
+ * observed-set effect contributors. Sorting uses backend raw numerics
+ * (valueA/valueB) and backend ranks — never display strings. All
+ * search/filter/sort is presentation-only.
+ */
+function CommonTable({ rows, yearA, yearB, caption }) {
+  if (!rows || rows.length === 0) {
+    return <p className="muted">None.</p>;
+  }
+  return (
+    <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
+      <table className="table table-compact">
+        {caption ? <caption className="sr-only">{caption}</caption> : null}
+        <thead>
+          <tr>
+            <th scope="col">Economy</th>
+            <th scope="col">ISO3</th>
+            <th scope="col" className="num">
+              {yearA} rank
+            </th>
+            <th scope="col" className="num">
+              {yearB} rank
+            </th>
+            <th scope="col" className="num">
+              {yearA} value
+            </th>
+            <th scope="col" className="num">
+              {yearB} value
+            </th>
+            <th scope="col">
+              {yearA} vs India
+            </th>
+            <th scope="col">
+              {yearB} vs India
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+              <th scope="row">
+                {r.name ?? r.iso3}
+                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
+                <EconomyDetails r={r} yearA={yearA} yearB={yearB} />
+              </th>
+              <td className="mono">{r.iso3}</td>
+              <td className="num">{r.rankA ?? '—'}</td>
+              <td className="num">{r.rankB ?? '—'}</td>
+              <td className="num">{r.displayA ?? '—'}</td>
+              <td className="num">{r.displayB ?? '—'}</td>
+              <td>{r.relationToFocusA}</td>
+              <td>{r.relationToFocusB}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Relation filter predicate for the common table (backend relations only). */
+function matchesCommonRelation(r, filter) {
+  const a = r.relationToFocusA;
+  const b = r.relationToFocusB;
+  switch (filter) {
+    case 'aboveA':
+      return a === 'above';
+    case 'belowA':
+      return a === 'below';
+    case 'aboveB':
+      return b === 'above';
+    case 'belowB':
+      return b === 'below';
+    case 'aboveBoth':
+      return a === 'above' && b === 'above';
+    case 'belowBoth':
+      return a === 'below' && b === 'below';
+    case 'crossed':
+      return (a === 'above' && b === 'below') || (a === 'below' && b === 'above');
+    default:
+      return true;
+  }
+}
+
+/**
+ * Sort with backend semantics: numeric values sort by the raw backend
+ * number (never the display string); ranks sort by backend rank; ties keep
+ * backend order via ISO3 (rows arrive in ISO3 order within equal keys only
+ * if the comparator is stable — so re-apply ISO3 as the deterministic
+ * tie-break, mirroring the ranking rule).
+ */
+function sortCommonRows(rows, sort) {
+  const copy = [...rows];
+  const byIso3 = (x, y) => (x.iso3 < y.iso3 ? -1 : x.iso3 > y.iso3 ? 1 : 0);
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  switch (sort) {
+    case 'valueA-asc':
+      return copy.sort((x, y) => (num(x.valueA) ?? Infinity) - (num(y.valueA) ?? Infinity) || byIso3(x, y));
+    case 'valueB-asc':
+      return copy.sort((x, y) => (num(x.valueB) ?? Infinity) - (num(y.valueB) ?? Infinity) || byIso3(x, y));
+    case 'valueB-desc':
+      return copy.sort((x, y) => (num(y.valueB) ?? -Infinity) - (num(x.valueB) ?? -Infinity) || byIso3(x, y));
+    case 'rankA-asc':
+      return copy.sort((x, y) => (x.rankA ?? Infinity) - (y.rankA ?? Infinity) || byIso3(x, y));
+    case 'rankA-desc':
+      return copy.sort((x, y) => (y.rankA ?? -Infinity) - (x.rankA ?? -Infinity) || byIso3(x, y));
+    case 'rankB-asc':
+      return copy.sort((x, y) => (x.rankB ?? Infinity) - (y.rankB ?? Infinity) || byIso3(x, y));
+    case 'rankB-desc':
+      return copy.sort((x, y) => (y.rankB ?? -Infinity) - (x.rankB ?? -Infinity) || byIso3(x, y));
+    case 'valueA-desc':
+    default:
+      return copy.sort((x, y) => (num(y.valueA) ?? -Infinity) - (num(x.valueA) ?? -Infinity) || byIso3(x, y));
+  }
+}
+
 export default function RankMovement({ availableYears, yearA, yearB, metricKey, onYearA, onYearB, onMetric }) {
   const [tab, setTab] = useState('entered');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
   const [commonOpen, setCommonOpen] = useState(false);
   const [commonQuery, setCommonQuery] = useState('');
+  const [commonRelation, setCommonRelation] = useState('all');
+  const [commonSort, setCommonSort] = useState('valueB-desc');
   const [commonPage, setCommonPage] = useState(1);
   const [listPage, setListPage] = useState(1);
+  const [listsOpen, setListsOpen] = useState(false);
 
   const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null;
   const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}`;
@@ -329,14 +465,18 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
 
   const filteredCommon = useMemo(() => {
     const q = commonQuery.trim().toLowerCase();
-    const base = enteredExited.common.filter(
+    const searched = enteredExited.common.filter(
       (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
     );
-    const pageSize = 50;
-    const pages = Math.max(1, Math.ceil(base.length / pageSize));
+    // Relation filter uses the two backend-provided yearly relations, so an
+    // economy above India in one year and below in the other stays explicit.
+    const related = searched.filter((r) => matchesCommonRelation(r, commonRelation));
+    const sorted = sortCommonRows(related, commonSort);
+    const pageSize = 25;
+    const pages = Math.max(1, Math.ceil(sorted.length / pageSize));
     const page = Math.min(Math.max(1, commonPage), pages);
-    return { base, page, pages, pageSize, slice: base.slice((page - 1) * pageSize, page * pageSize) };
-  }, [enteredExited.common, commonQuery, commonPage]);
+    return { base: sorted, page, pages, pageSize, slice: sorted.slice((page - 1) * pageSize, page * pageSize) };
+  }, [enteredExited.common, commonQuery, commonRelation, commonSort, commonPage]);
 
   const swap = () => {
     if (yearA == null || yearB == null) return;
@@ -394,30 +534,26 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
             <p className="section-sub">
               {data.universe.common} economies had valid observations in both {data.years.a} and {data.years.b}.
             </p>
-            <dl className="facts">
-              <div>
-                <dt>
-                  {data.years.a} common comparison position
-                </dt>
-                <dd className="num">
+            <div className="duo" role="group" aria-label={`Like-for-like comparison, ${data.universe.common} economies observed in both years`}>
+              <div className="duo-box">
+                <span className="duo-year">{data.years.a}</span>
+                <span className="duo-rank">
                   #{data.focusMovement.commonRankA} / {data.focusMovement.denominatorCommon}
-                </dd>
+                </span>
               </div>
-              <div>
-                <dt>
-                  {data.years.b} common comparison position
-                </dt>
-                <dd className="num">
+              <span className="duo-arrow" aria-hidden="true">
+                →
+              </span>
+              <div className="duo-box">
+                <span className="duo-year">{data.years.b}</span>
+                <span className="duo-rank">
                   #{data.focusMovement.commonRankB} / {data.focusMovement.denominatorCommon}
-                </dd>
+                </span>
               </div>
-              <div>
-                <dt>Common-set movement</dt>
-                <dd className="num">
-                  {formatSigned(data.focusMovement.commonEffect)} positions ({signMeaning(data.focusMovement.commonEffect)})
-                </dd>
-              </div>
-            </dl>
+              <span className="duo-delta num">
+                {formatSigned(data.focusMovement.commonEffect)} positions ({signMeaning(data.focusMovement.commonEffect)})
+              </span>
+            </div>
             <p>
               These {data.universe.common} economies are the only economies used to calculate the like-for-like
               movement.
@@ -466,32 +602,38 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
             </p>
 
             <h3 className="subhead">Entered and exited relative to India&apos;s position</h3>
-            <dl className="facts">
-              <div>
-                <dt>Entered in {data.years.b}</dt>
-                <dd className="num">{data.universe.entered}</dd>
+            <div className="facts facts-grouped">
+              <div className="facts-group">
+                <h4 className="facts-group-title">
+                  Entered in {data.years.b} · {data.universe.entered} total
+                </h4>
+                <dl className="facts">
+                  <div>
+                    <dt>Above India</dt>
+                    <dd className="num">{data.focusMovement.enteredAboveB}</dd>
+                  </div>
+                  <div>
+                    <dt>Below India</dt>
+                    <dd className="num">{data.focusMovement.enteredBelowB}</dd>
+                  </div>
+                </dl>
               </div>
-              <div>
-                <dt>Entered in {data.years.b} — above India</dt>
-                <dd className="num">{data.focusMovement.enteredAboveB}</dd>
+              <div className="facts-group">
+                <h4 className="facts-group-title">
+                  Exited from {data.years.a} · {data.universe.exited} total
+                </h4>
+                <dl className="facts">
+                  <div>
+                    <dt>Above India</dt>
+                    <dd className="num">{data.focusMovement.exitedAboveA}</dd>
+                  </div>
+                  <div>
+                    <dt>Below India</dt>
+                    <dd className="num">{data.focusMovement.exitedBelowA}</dd>
+                  </div>
+                </dl>
               </div>
-              <div>
-                <dt>Entered in {data.years.b} — below India</dt>
-                <dd className="num">{data.focusMovement.enteredBelowB}</dd>
-              </div>
-              <div>
-                <dt>Exited from {data.years.a}</dt>
-                <dd className="num">{data.universe.exited}</dd>
-              </div>
-              <div>
-                <dt>Exited from {data.years.a} — above India</dt>
-                <dd className="num">{data.focusMovement.exitedAboveA}</dd>
-              </div>
-              <div>
-                <dt>Exited from {data.years.a} — below India</dt>
-                <dd className="num">{data.focusMovement.exitedBelowA}</dd>
-              </div>
-            </dl>
+            </div>
 
             <h3 className="subhead">Outside-common-set effect on India&apos;s position number</h3>
             <dl className="facts">
@@ -522,20 +664,11 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
               </p>
             </div>
 
-            <h3 className="subhead">Economies below India&apos;s position</h3>
-            <dl className="facts">
-              <div>
-                <dt>Entered in {data.years.b} below India</dt>
-                <dd className="num">{data.focusMovement.enteredBelowB}</dd>
-              </div>
-              <div>
-                <dt>Exited from {data.years.a} below India</dt>
-                <dd className="num">{data.focusMovement.exitedBelowA}</dd>
-              </div>
-            </dl>
-            <p>
-              These outside-common-set economies affect the size of the observed ranking population, but not
-              India&apos;s position number.
+            <h4 className="subhead subhead-secondary">Other outside-common-set economies</h4>
+            <p className="muted">
+              Entered in {data.years.b} below India: {data.focusMovement.enteredBelowB} · Exited from{' '}
+              {data.years.a} below India: {data.focusMovement.exitedBelowA}. These affect the size of the
+              observed ranking population, not India&apos;s position number.
             </p>
 
             <h3 className="subhead">Rank-movement decomposition</h3>
@@ -562,7 +695,12 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
               </div>
             </dl>
             <div className="explanation" role="note" aria-label={data.focusMovement.identityText ?? 'Decomposition'}>
-              <p className="mono">{data.focusMovement.identityText}</p>
+              <p className="mono" aria-label="Clean verification equation">
+                {formatSigned(data.focusMovement.positionNumberChange)} ={' '}
+                {formatSigned(data.focusMovement.commonEffect)} + {data.focusMovement.enteredAboveB} −{' '}
+                {data.focusMovement.exitedAboveA}
+              </p>
+              <p className="mono footnote">Backend verification: {data.focusMovement.identityText}</p>
               <p>Full position-number change = common-set movement + observed-set effect.</p>
               <p>
                 Here, India&apos;s position number changed by {formatSigned(data.focusMovement.positionNumberChange)}{' '}
@@ -582,6 +720,18 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
               The tables below list only economies outside the common comparison set. They are a different
               population from the {data.universe.common} common economies above.
             </p>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setListsOpen((v) => !v)}
+              aria-expanded={listsOpen}
+            >
+              {listsOpen
+                ? 'Hide entered/exited economy details'
+                : `Show entered/exited economy details (entered ${enteredExited.entered.length}, exited ${enteredExited.exited.length})`}
+            </button>
+            {listsOpen ? (
+              <>
             <div role="tablist" aria-label="Entered or exited the observed ranking">
               <button
                 type="button"
@@ -666,6 +816,8 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
                 Next →
               </button>
             </div>
+              </>
+            ) : null}
 
             <h3 className="subhead">
               {data.universe.common} economies in the common comparison set
@@ -701,12 +853,50 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
                       placeholder="e.g. United, USA"
                     />
                   </Field>
+                  <Field label="Relation to India" htmlFor="mv-crel">
+                    <select
+                      id="mv-crel"
+                      value={commonRelation}
+                      onChange={(e) => {
+                        setCommonRelation(e.target.value);
+                        setCommonPage(1);
+                      }}
+                    >
+                      <option value="all">All</option>
+                      <option value="aboveA">Above India in {data.years.a}</option>
+                      <option value="belowA">Below India in {data.years.a}</option>
+                      <option value="aboveB">Above India in {data.years.b}</option>
+                      <option value="belowB">Below India in {data.years.b}</option>
+                      <option value="aboveBoth">Above India in both years</option>
+                      <option value="belowBoth">Below India in both years</option>
+                      <option value="crossed">Crossed India between years</option>
+                    </select>
+                  </Field>
+                  <Field label="Sort by" htmlFor="mv-csort">
+                    <select
+                      id="mv-csort"
+                      value={commonSort}
+                      onChange={(e) => setCommonSort(e.target.value)}
+                    >
+                      <option value="valueA-desc">Value in {data.years.a} — high to low</option>
+                      <option value="valueA-asc">Value in {data.years.a} — low to high</option>
+                      <option value="valueB-desc">Value in {data.years.b} — high to low</option>
+                      <option value="valueB-asc">Value in {data.years.b} — low to high</option>
+                      <option value="rankA-asc">Rank in {data.years.a} — best first</option>
+                      <option value="rankA-desc">Rank in {data.years.a} — lowest first</option>
+                      <option value="rankB-asc">Rank in {data.years.b} — best first</option>
+                      <option value="rankB-desc">Rank in {data.years.b} — lowest first</option>
+                    </select>
+                  </Field>
                 </form>
-                <EconomyTable
+                <p className="footnote">
+                  Sorting uses backend raw values and ranks. It never changes the comparison summary above.
+                </p>
+                <CommonTable
                   rows={filteredCommon.slice}
                   yearA={data.years.a}
                   yearB={data.years.b}
-                  caption={`Common observed economies for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
+                  caption={`Common comparison-set economies for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
                 />
                 <p className="footnote" aria-live="polite">
                   Showing {filteredCommon.slice.length} of {filteredCommon.base.length} · page {filteredCommon.page}{' '}

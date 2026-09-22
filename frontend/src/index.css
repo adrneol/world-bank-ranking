@@ -711,6 +711,101 @@ thead .sticky-col {
   font-weight: 600;
 }
 
+/* ---------- rank-movement result + centerpiece (additive) ---------- */
+.card-result {
+  border-width: 2px;
+}
+
+.card-result-value {
+  margin: 0.15rem 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.duo {
+  display: flex;
+  align-items: stretch;
+  gap: 0.7rem;
+  margin: 0.8rem 0;
+  flex-wrap: wrap;
+}
+
+.duo-box {
+  flex: 1 1 10rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.7rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.duo-year {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.duo-rank {
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.duo-arrow {
+  align-self: center;
+  font-size: 1.3rem;
+  color: var(--muted);
+}
+
+.duo-delta {
+  align-self: center;
+  font-size: 1rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.facts-grouped {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.8rem;
+  margin: 0 0 1rem;
+}
+
+.facts-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.9rem;
+  background: var(--surface);
+  margin: 0;
+  min-width: 0;
+}
+
+.facts-group-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+}
+
+.facts-group .facts {
+  margin: 0;
+}
+
+.subhead-secondary {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 1rem;
+}
+
+.table-compact th,
+.table-compact td {
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
 /* ---------- rank-movement partition (additive) ---------- */
 .partition {
   display: grid;
