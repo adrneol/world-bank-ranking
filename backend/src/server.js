@@ -269,11 +269,20 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     if (yearA === undefined || yearB === undefined) {
       throw httpError(400, 'Both yearA and yearB are required for a rank-movement comparison.', 'MISSING_YEAR');
     }
+    // Optional point breaker: None (absent/empty/"none") preserves two-year mode.
+    const rawMid = req.query.yearMid ?? req.query.breaker ?? req.query.pointBreaker ?? req.query.mid;
+    let yearMid;
+    if (rawMid === undefined || rawMid === null || String(rawMid).trim() === '' || String(rawMid).trim().toLowerCase() === 'none') {
+      yearMid = undefined;
+    } else {
+      yearMid = parseYear(rawMid, 'yearMid');
+    }
     const detail = String(req.query.detail ?? 'full').toLowerCase() === 'summary' ? 'summary' : 'full';
     const result = buildLevelComparisonResponse(handle(), {
       metricKey,
       yearA,
       yearB,
+      ...(yearMid !== undefined ? { yearMid } : {}),
       focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
       detail,
     });

@@ -25,7 +25,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -145,7 +145,19 @@ export default function App() {
     const defaultYearB = availableYears.includes(2014) ? 2014 : maxYear;
     const yearA = pick(filters.yearA, defaultYearA);
     const yearB = pick(filters.yearB, defaultYearB);
-    return { startYear, endYear, year, metric, neighbors, fromYear, view, yearA, yearB };
+    // Optional point breaker: strictly between the two endpoints, else None.
+    // Invalid states (equal to an endpoint, outside the interval, unknown year)
+    // resolve to null so they are impossible to select or share via URL.
+    let yearMid = null;
+    if (yearA != null && yearB != null) {
+      const rawMid = Number.parseInt(filters.yearMid, 10);
+      if (Number.isInteger(rawMid) && availableYears.includes(rawMid)) {
+        const lo = Math.min(yearA, yearB);
+        const hi = Math.max(yearA, yearB);
+        if (rawMid > lo && rawMid < hi) yearMid = rawMid;
+      }
+    }
+    return { startYear, endYear, year, metric, neighbors, fromYear, view, yearA, yearB, yearMid };
   }, [filters, availableYears, maxYear, minYear, defaultStart]);
 
   // Mirror effective state to the URL (UI state only, never business logic).
@@ -159,6 +171,7 @@ export default function App() {
     if (effective.fromYear != null) query.set('fromYear', effective.fromYear);
     if (effective.yearA != null) query.set('yearA', effective.yearA);
     if (effective.yearB != null) query.set('yearB', effective.yearB);
+    if (effective.yearMid != null) query.set('yearMid', effective.yearMid);
     query.set('view', effective.view);
     const next = `?${query.toString()}`;
     if (window.location.search !== next) window.history.replaceState(null, '', next);
@@ -287,9 +300,11 @@ export default function App() {
               availableYears={availableYears}
               yearA={effective.yearA}
               yearB={effective.yearB}
+              yearMid={effective.yearMid}
               metricKey={effective.metric}
               onYearA={(v) => setFilter('yearA', v)}
               onYearB={(v) => setFilter('yearB', v)}
+              onYearMid={(v) => setFilter('yearMid', v ?? '')}
               onMetric={(v) => setFilter('metric', v)}
             />
           ) : null}

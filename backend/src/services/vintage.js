@@ -20,18 +20,23 @@ import {
 import { getCacheStatus } from '../wb/ingest.js';
 
 /**
- * Build the vintage/evidence block for one indicator and two years.
+ * Build the vintage/evidence block for one indicator and two years,
+ * or three years when a point breaker is active.
  *
  * All inputs are already-validated integers; missing stats are represented
- * explicitly rather than invented.
+ * explicitly rather than invented. When yearMid is absent the return shape is
+ * identical to the original two-year version.
  *
  * @param {object} db
- * @param {{metricKey:string, indicatorId:number, yearA:number, yearB:number}} options
+ * @param {{metricKey:string, indicatorId:number, yearA:number, yearB:number, yearMid?:number|null}} options
  */
-export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, yearB }) {
+export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, yearB, yearMid = null }) {
   const statA = getLatestIngestYearStat(db, metricKey, yearA);
   const statB = getLatestIngestYearStat(db, metricKey, yearB);
-  const vintageRows = getVintageForIndicatorYears(db, indicatorId, [yearA, yearB]);
+  const hasMid = Number.isInteger(yearMid);
+  const statMid = hasMid ? getLatestIngestYearStat(db, metricKey, yearMid) : null;
+  const vintageYears = hasMid ? [yearA, yearMid, yearB] : [yearA, yearB];
+  const vintageRows = getVintageForIndicatorYears(db, indicatorId, vintageYears);
   const cache = getCacheStatus(db);
   const fingerprint = getDatasetFingerprint(db);
   const lastRun = getLatestFetchRun(db, { status: null });
@@ -69,6 +74,21 @@ export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, year
         }
       : null,
   };
+  if (hasMid) {
+    perYear.mid = statMid
+      ? {
+          fetchRunId: statMid.fetch_run_id ?? null,
+          indicatorCode: statMid.indicator_code ?? null,
+          rowsReceived: statMid.rows_received ?? 0,
+          rowsWithValue: statMid.rows_with_value ?? 0,
+          rowsWritten: statMid.rows_written ?? 0,
+          rowsNullSkipped: statMid.rows_null_skipped ?? 0,
+          rowsAggregateExcluded: statMid.rows_aggregate_excluded ?? 0,
+          rowsBlankIso3Skipped: statMid.rows_blank_iso3_skipped ?? 0,
+          rowsUnknownCountry: statMid.rows_unknown_country ?? 0,
+        }
+      : null;
+  }
 
   return {
     vintage: {
@@ -83,6 +103,7 @@ export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, year
       lastSuccessAt: getLastSuccessfulFetchTime(db),
       runIdA: statA?.fetch_run_id ?? null,
       runIdB: statB?.fetch_run_id ?? null,
+      ...(hasMid ? { runIdMid: statMid?.fetch_run_id ?? null } : {}),
       fetchedAtMin: vintageRows?.fetchedAtMin ?? null,
       fetchedAtMax: vintageRows?.fetchedAtMax ?? null,
     },
