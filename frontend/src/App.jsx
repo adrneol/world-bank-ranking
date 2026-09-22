@@ -145,7 +145,7 @@ export default function App() {
     const defaultYearB = availableYears.includes(2014) ? 2014 : maxYear;
     const yearA = pick(filters.yearA, defaultYearA);
     const yearB = pick(filters.yearB, defaultYearB);
-    // Optional point breaker: strictly between the two endpoints, else None.
+    // Optional middle year: strictly between the two endpoints, else None.
     // Invalid states (equal to an endpoint, outside the interval, unknown year)
     // resolve to null so they are impossible to select or share via URL.
     let yearMid = null;

@@ -57,7 +57,7 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, on
           ))}
         </select>
       </Field>
-      <Field label="Point breaker" htmlFor="mv-yearMid">
+      <Field label="Middle year" htmlFor="mv-yearMid">
         <select
           id="mv-yearMid"
           value={yearMid ?? ''}
@@ -224,7 +224,7 @@ function SummaryCards3({ data }) {
     <div>
       <div className="cards" role="region" aria-label="India observed ranking at three points">
         {card('Start', fm.fullRankA, fm.denominatorA, years.a)}
-        {card('Point breaker', fm.fullRankMid, fm.denominatorMid, years.mid)}
+        {card('Middle year', fm.fullRankMid, fm.denominatorMid, years.mid)}
         {card('End', fm.fullRankB, fm.denominatorB, years.b)}
       </div>
       <div className="cards" role="region" aria-label="Observed position number changes">
@@ -338,7 +338,7 @@ function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
           <dt>Metadata note</dt>
           <dd>{r.metadataVintageNote}</dd>
         </div>
-        {r.tiedWithFocusA || r.tiedWithFocusB ? (
+        {r.tiedWithFocusA || r.tiedWithFocusMid || r.tiedWithFocusB ? (
           <div>
             <dt>Tie</dt>
             <dd>Tied value with India; ISO3 order decides the position.</dd>
@@ -350,14 +350,27 @@ function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
 }
 
 /**
- * Entered/exited table: economies OUTSIDE the common set.
- * The Effect column is correct here only: above → affects position,
- * below → denominator only.
+ * Entered/exited (two-year) / outside-per-year (three-year) table: economies
+ * OUTSIDE the common set. The Effect column is correct here only: above →
+ * affects position, below → denominator only.
+ *
+ * Without a middle year this renders exactly the original entered/exited
+ * table. With a middle year plus focusYear it renders the same interaction
+ * model for one year's outside slice of the three-year common universe:
+ * presence, relation/rank/value in that year, and whether the economy affects
+ * India's position in that year (backend per-year fields).
  */
-function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
+function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption }) {
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
+  const isThreeYear = yearMid != null && focusYear != null;
+  const keys = isThreeYear ? yearColumnKeys([yearA, yearMid, yearB], focusYear) : null;
+  const affectsKey = keys ? `affectsFocusPosition${keys.rank.replace('rank', '')}` : null;
+  const presenceOf = (r) =>
+    [r.presentInA ? yearA : null, r.presentInMid ? yearMid : null, r.presentInB ? yearB : null]
+      .filter((v) => v !== null)
+      .join(' · ') || '—';
   return (
     <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
       <table className="table table-compact">
@@ -366,13 +379,13 @@ function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
           <tr>
             <th scope="col">Economy</th>
             <th scope="col">ISO3</th>
-            {showStatus ? <th scope="col">Status</th> : null}
-            <th scope="col">Relation to India</th>
+            {showStatus ? <th scope="col">{isThreeYear ? 'Present in' : 'Status'}</th> : null}
+            <th scope="col">Relation to India{isThreeYear ? ` in ${focusYear}` : ''}</th>
             <th scope="col" className="num">
-              Rank
+              Rank{isThreeYear ? ` in ${focusYear}` : ''}
             </th>
             <th scope="col" className="num">
-              Value
+              Value{isThreeYear ? ` in ${focusYear}` : ''}
             </th>
             <th scope="col">Effect</th>
           </tr>
@@ -383,20 +396,50 @@ function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <EconomyDetails r={r} yearA={yearA} yearB={yearB} />
+                <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
               </th>
               <td className="mono">{r.iso3}</td>
-              {showStatus ? <td>{r.status}</td> : null}
-              <td>{r.relationToFocus}</td>
-              <td className="num">{r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}</td>
-              <td className="num">{r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}</td>
-              <td>{r.positionEffect === 'affects_position' ? 'Affects position' : 'Denominator only'}</td>
+              {showStatus ? <td>{isThreeYear ? presenceOf(r) : r.status}</td> : null}
+              <td>{isThreeYear ? (r[keys.relation] ?? r.relationToFocus) : r.relationToFocus}</td>
+              <td className="num">
+                {isThreeYear ? (r[keys.rank] ?? '—') : r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}
+              </td>
+              <td className="num">
+                {isThreeYear
+                  ? (r[keys.display] ?? '—')
+                  : r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}
+              </td>
+              <td>
+                {isThreeYear
+                  ? r[affectsKey]
+                    ? 'Affects position'
+                    : 'Denominator only'
+                  : r.positionEffect === 'affects_position'
+                    ? 'Affects position'
+                    : 'Denominator only'}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
+}
+
+/**
+ * Column keys for one comparison year, derived from its position in the
+ * selected comparisonYears = [start, ...(middle ? [middle] : []), end].
+ * Backend rows carry per-year fields with A/Mid/B suffixes.
+ */
+function yearColumnKeys(years, year) {
+  const index = years.indexOf(year);
+  const suffix = index === 0 ? 'A' : index === years.length - 1 ? 'B' : 'Mid';
+  return {
+    year,
+    rank: `rank${suffix}`,
+    display: `display${suffix}`,
+    relation: `relationToFocus${suffix}`,
+  };
 }
 
 /**
@@ -404,13 +447,19 @@ function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
  * No Status column (obvious from the section) and deliberately NO Effect
  * column: common economies are the fixed comparison population, not
  * observed-set effect contributors. Sorting uses backend raw numerics
- * (valueA/valueB) and backend ranks — never display strings. All
+ * (valueA/valueMid/valueB) and backend ranks — never display strings. All
  * search/filter/sort is presentation-only.
+ *
+ * Year columns derive from comparisonYears: [yearA, yearB] renders exactly
+ * the original two-year table; [yearA, yearMid, yearB] extends it with the
+ * middle-year rank, value and vs-India columns.
  */
-function CommonTable({ rows, yearA, yearB, caption }) {
+function CommonTable({ rows, yearA, yearB, yearMid = null, caption }) {
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
+  const years = yearMid != null ? [yearA, yearMid, yearB] : [yearA, yearB];
+  const cols = years.map((y) => yearColumnKeys(years, y));
   return (
     <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
       <table className="table table-compact">
@@ -419,75 +468,21 @@ function CommonTable({ rows, yearA, yearB, caption }) {
           <tr>
             <th scope="col">Economy</th>
             <th scope="col">ISO3</th>
-            <th scope="col" className="num">
-              {yearA} rank
-            </th>
-            <th scope="col" className="num">
-              {yearB} rank
-            </th>
-            <th scope="col" className="num">
-              {yearA} value
-            </th>
-            <th scope="col" className="num">
-              {yearB} value
-            </th>
-            <th scope="col">
-              {yearA} vs India
-            </th>
-            <th scope="col">
-              {yearB} vs India
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-              <th scope="row">
-                {r.name ?? r.iso3}
-                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <EconomyDetails r={r} yearA={yearA} yearB={yearB} />
+            {cols.map((c) => (
+              <th key={`rank-${c.year}`} scope="col" className="num">
+                {c.year} rank
               </th>
-              <td className="mono">{r.iso3}</td>
-              <td className="num">{r.rankA ?? '—'}</td>
-              <td className="num">{r.rankB ?? '—'}</td>
-              <td className="num">{r.displayA ?? '—'}</td>
-              <td className="num">{r.displayB ?? '—'}</td>
-              <td>{r.relationToFocusA}</td>
-              <td>{r.relationToFocusB}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/**
- * Outside-common-set table for three-year mode: every economy present in at
- * least one selected year but missing in at least one other year. Presence
- * columns are backend membership facts; Effect follows ranking positions.
- */
-function OutsideTable3({ rows, yearA, yearMid, yearB, caption }) {
-  if (!rows || rows.length === 0) {
-    return <p className="muted">None.</p>;
-  }
-  return (
-    <div className="table-scroll" role="region" aria-label={caption ?? 'Outside economies'} tabIndex={0}>
-      <table className="table table-compact">
-        {caption ? <caption className="sr-only">{caption}</caption> : null}
-        <thead>
-          <tr>
-            <th scope="col">Economy</th>
-            <th scope="col">ISO3</th>
-            <th scope="col">Present in</th>
-            <th scope="col">Relation to India</th>
-            <th scope="col" className="num">
-              Rank A/MID/B
-            </th>
-            <th scope="col" className="num">
-              Value A/MID/B
-            </th>
-            <th scope="col">Effect</th>
+            ))}
+            {cols.map((c) => (
+              <th key={`value-${c.year}`} scope="col" className="num">
+                {c.year} value
+              </th>
+            ))}
+            {cols.map((c) => (
+              <th key={`vs-${c.year}`} scope="col">
+                {c.year} vs India
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -499,93 +494,19 @@ function OutsideTable3({ rows, yearA, yearMid, yearB, caption }) {
                 <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
               </th>
               <td className="mono">{r.iso3}</td>
-              <td>
-                {[r.presentInA ? yearA : null, r.presentInMid ? yearMid : null, r.presentInB ? yearB : null]
-                  .filter((v) => v !== null)
-                  .join(' · ') || '—'}
-              </td>
-              <td>
-                {r.relationToFocusA}/{r.relationToFocusMid}/{r.relationToFocusB}
-              </td>
-              <td className="num">
-                {r.rankA ?? '—'} / {r.rankMid ?? '—'} / {r.rankB ?? '—'}
-              </td>
-              <td className="num">
-                {r.displayA ?? '—'} / {r.displayMid ?? '—'} / {r.displayB ?? '—'}
-              </td>
-              <td>{r.positionEffect === 'affects_position' ? 'Affects position' : 'Denominator only'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/**
- * Common comparison-set table for three-year mode: one shared universe ranked
- * in all three years. No Effect column: common economies are the fixed
- * comparison population.
- */
-function CommonTable3({ rows, yearA, yearMid, yearB, caption }) {
-  if (!rows || rows.length === 0) {
-    return <p className="muted">None.</p>;
-  }
-  return (
-    <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
-      <table className="table table-compact">
-        {caption ? <caption className="sr-only">{caption}</caption> : null}
-        <thead>
-          <tr>
-            <th scope="col">Economy</th>
-            <th scope="col">ISO3</th>
-            <th scope="col" className="num">
-              {yearA} rank
-            </th>
-            <th scope="col" className="num">
-              {yearMid} rank
-            </th>
-            <th scope="col" className="num">
-              {yearB} rank
-            </th>
-            <th scope="col" className="num">
-              {yearA} value
-            </th>
-            <th scope="col" className="num">
-              {yearMid} value
-            </th>
-            <th scope="col" className="num">
-              {yearB} value
-            </th>
-            <th scope="col">
-              {yearA} vs India
-            </th>
-            <th scope="col">
-              {yearMid} vs India
-            </th>
-            <th scope="col">
-              {yearB} vs India
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-              <th scope="row">
-                {r.name ?? r.iso3}
-                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
-              </th>
-              <td className="mono">{r.iso3}</td>
-              <td className="num">{r.rankA ?? '—'}</td>
-              <td className="num">{r.rankMid ?? '—'}</td>
-              <td className="num">{r.rankB ?? '—'}</td>
-              <td className="num">{r.displayA ?? '—'}</td>
-              <td className="num">{r.displayMid ?? '—'}</td>
-              <td className="num">{r.displayB ?? '—'}</td>
-              <td>{r.relationToFocusA}</td>
-              <td>{r.relationToFocusMid}</td>
-              <td>{r.relationToFocusB}</td>
+              {cols.map((c) => (
+                <td key={`rank-${c.year}`} className="num">
+                  {r[c.rank] ?? '—'}
+                </td>
+              ))}
+              {cols.map((c) => (
+                <td key={`value-${c.year}`} className="num">
+                  {r[c.display] ?? '—'}
+                </td>
+              ))}
+              {cols.map((c) => (
+                <td key={`vs-${c.year}`}>{r[c.relation]}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -597,12 +518,18 @@ function CommonTable3({ rows, yearA, yearMid, yearB, caption }) {
 /** Relation filter predicate for the common table (backend relations only). */
 function matchesCommonRelation(r, filter) {
   const a = r.relationToFocusA;
+  const m = r.relationToFocusMid;
   const b = r.relationToFocusB;
+  const hasMid = m === 'above' || m === 'below';
   switch (filter) {
     case 'aboveA':
       return a === 'above';
     case 'belowA':
       return a === 'below';
+    case 'aboveMid':
+      return m === 'above';
+    case 'belowMid':
+      return m === 'below';
     case 'aboveB':
       return b === 'above';
     case 'belowB':
@@ -611,11 +538,94 @@ function matchesCommonRelation(r, filter) {
       return a === 'above' && b === 'above';
     case 'belowBoth':
       return a === 'below' && b === 'below';
-    case 'crossed':
-      return (a === 'above' && b === 'below') || (a === 'below' && b === 'above');
+    case 'aboveAll':
+      return hasMid ? a === 'above' && m === 'above' && b === 'above' : a === 'above' && b === 'above';
+    case 'belowAll':
+      return hasMid ? a === 'below' && m === 'below' && b === 'below' : a === 'below' && b === 'below';
+    case 'crossed': {
+      const rels = [a, ...(hasMid ? [m] : []), b].filter((v) => v === 'above' || v === 'below');
+      return new Set(rels).size > 1;
+    }
     default:
       return true;
   }
+}
+
+/**
+ * Relation-filter options derived from the selected comparison years.
+ * comparisonYears = [start, ...(middle ? [middle] : []), end].
+ * Two years yield exactly the original option set; three years extend it.
+ */
+function commonRelationOptions(years) {
+  const [a, ...rest] = years;
+  const b = rest[rest.length - 1];
+  const mid = rest.length > 1 ? rest[0] : null;
+  const options = [
+    { value: 'all', label: 'All' },
+    { value: 'aboveA', label: `Above India in ${a}` },
+    { value: 'belowA', label: `Below India in ${a}` },
+  ];
+  if (mid != null) {
+    options.push(
+      { value: 'aboveMid', label: `Above India in ${mid}` },
+      { value: 'belowMid', label: `Below India in ${mid}` },
+    );
+  }
+  options.push(
+    { value: 'aboveB', label: `Above India in ${b}` },
+    { value: 'belowB', label: `Below India in ${b}` },
+  );
+  if (mid != null) {
+    options.push(
+      { value: 'aboveAll', label: 'Above India in all 3 years' },
+      { value: 'belowAll', label: 'Below India in all 3 years' },
+    );
+  } else {
+    options.push(
+      { value: 'aboveBoth', label: 'Above India in both years' },
+      { value: 'belowBoth', label: 'Below India in both years' },
+    );
+  }
+  options.push({ value: 'crossed', label: 'Crossed India between years' });
+  return options;
+}
+
+/**
+ * Sort options derived from the selected comparison years.
+ * Two years yield exactly the original option set; three years add the
+ * equivalent middle-year entries.
+ */
+function commonSortOptions(years) {
+  const [a, ...rest] = years;
+  const b = rest[rest.length - 1];
+  const mid = rest.length > 1 ? rest[0] : null;
+  const options = [
+    { value: 'valueA-desc', label: `Value in ${a} — high to low` },
+    { value: 'valueA-asc', label: `Value in ${a} — low to high` },
+  ];
+  if (mid != null) {
+    options.push(
+      { value: 'valueMid-desc', label: `Value in ${mid} — high to low` },
+      { value: 'valueMid-asc', label: `Value in ${mid} — low to high` },
+    );
+  }
+  options.push(
+    { value: 'valueB-desc', label: `Value in ${b} — high to low` },
+    { value: 'valueB-asc', label: `Value in ${b} — low to high` },
+    { value: 'rankA-asc', label: `Rank in ${a} — best first` },
+    { value: 'rankA-desc', label: `Rank in ${a} — lowest first` },
+  );
+  if (mid != null) {
+    options.push(
+      { value: 'rankMid-asc', label: `Rank in ${mid} — best first` },
+      { value: 'rankMid-desc', label: `Rank in ${mid} — lowest first` },
+    );
+  }
+  options.push(
+    { value: 'rankB-asc', label: `Rank in ${b} — best first` },
+    { value: 'rankB-desc', label: `Rank in ${b} — lowest first` },
+  );
+  return options;
 }
 
 /**
@@ -632,6 +642,10 @@ function sortCommonRows(rows, sort) {
   switch (sort) {
     case 'valueA-asc':
       return copy.sort((x, y) => (num(x.valueA) ?? Infinity) - (num(y.valueA) ?? Infinity) || byIso3(x, y));
+    case 'valueMid-asc':
+      return copy.sort((x, y) => (num(x.valueMid) ?? Infinity) - (num(y.valueMid) ?? Infinity) || byIso3(x, y));
+    case 'valueMid-desc':
+      return copy.sort((x, y) => (num(y.valueMid) ?? -Infinity) - (num(x.valueMid) ?? -Infinity) || byIso3(x, y));
     case 'valueB-asc':
       return copy.sort((x, y) => (num(x.valueB) ?? Infinity) - (num(y.valueB) ?? Infinity) || byIso3(x, y));
     case 'valueB-desc':
@@ -640,6 +654,10 @@ function sortCommonRows(rows, sort) {
       return copy.sort((x, y) => (x.rankA ?? Infinity) - (y.rankA ?? Infinity) || byIso3(x, y));
     case 'rankA-desc':
       return copy.sort((x, y) => (y.rankA ?? -Infinity) - (x.rankA ?? -Infinity) || byIso3(x, y));
+    case 'rankMid-asc':
+      return copy.sort((x, y) => (x.rankMid ?? Infinity) - (y.rankMid ?? Infinity) || byIso3(x, y));
+    case 'rankMid-desc':
+      return copy.sort((x, y) => (y.rankMid ?? -Infinity) - (x.rankMid ?? -Infinity) || byIso3(x, y));
     case 'rankB-asc':
       return copy.sort((x, y) => (x.rankB ?? Infinity) - (y.rankB ?? Infinity) || byIso3(x, y));
     case 'rankB-desc':
@@ -654,49 +672,67 @@ function ThreeYearResults({ data }) {
   const fm = data.focusMovement;
   const u = data.universe;
   const y = data.years;
-  const [outsideOpen, setOutsideOpen] = useState(false);
-  const [outsideQuery, setOutsideQuery] = useState('');
-  const [outsideRelation, setOutsideRelation] = useState('all');
+  const [outsideTab, setOutsideTab] = useState('outB');
+  const [query, setQuery] = useState('');
+  const [relationFilter, setRelationFilter] = useState('all');
   const [outsidePage, setOutsidePage] = useState(1);
-  const [common3Open, setCommon3Open] = useState(false);
-  const [common3Query, setCommon3Query] = useState('');
-  const [common3Page, setCommon3Page] = useState(1);
+  const [listsOpen, setListsOpen] = useState(false);
+  const [commonOpen, setCommonOpen] = useState(false);
+  const [commonQuery, setCommonQuery] = useState('');
+  const [commonRelation, setCommonRelation] = useState('all');
+  const [commonSort, setCommonSort] = useState('valueB-desc');
+  const [commonPage, setCommonPage] = useState(1);
 
+  // comparisonYears drives every year-aware control below:
+  // [start, middle, end] with a middle year, [start, end] without.
+  const comparisonYears = [y.a, y.mid, y.b];
   const rows = data.economies?.rows ?? [];
   const commonRows = rows.filter((r) => r.status === 'common');
-  const outsideRows = rows.filter((r) => r.status !== 'common');
+  // One outside slice per selected year: economies holding a valid observation
+  // that year but missing in at least one of the other two selected years.
+  // Together they partition the three-year outside set; counts reconcile with
+  // universe.outsideInA / outsideInMid / outsideInB from the same universe.
+  const outsideTabs = [
+    { id: 'outA', year: y.a, label: `Outside in ${y.a}`, count: u.outsideInA, rows: rows.filter((r) => r.status !== 'common' && r.presentInA) },
+    { id: 'outMid', year: y.mid, label: `Outside in ${y.mid}`, count: u.outsideInMid, rows: rows.filter((r) => r.status !== 'common' && r.presentInMid) },
+    { id: 'outB', year: y.b, label: `Outside in ${y.b}`, count: u.outsideInB, rows: rows.filter((r) => r.status !== 'common' && r.presentInB) },
+  ];
+  const activeTab = outsideTabs.find((t) => t.id === outsideTab) ?? outsideTabs[2];
+  const tabSuffix = activeTab.id === 'outA' ? 'A' : activeTab.id === 'outMid' ? 'Mid' : 'B';
 
-  const filteredOutside = (() => {
-    const q = outsideQuery.trim().toLowerCase();
-    const searched = outsideRows.filter(
-      (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
-    );
-    const related = searched.filter((r) => {
-      if (outsideRelation === 'all') return true;
-      if (outsideRelation === 'above') {
-        return r.relationToFocusA === 'above' || r.relationToFocusMid === 'above' || r.relationToFocusB === 'above';
-      }
-      if (outsideRelation === 'below') {
-        return r.relationToFocusA === 'below' || r.relationToFocusMid === 'below' || r.relationToFocusB === 'below';
-      }
-      if (outsideRelation === 'affects') return r.affectsFocusPosition === true;
+  const filteredList = (() => {
+    const q = query.trim().toLowerCase();
+    const matchesQuery = (r) =>
+      !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
+    // Relation and effect are decided by ranking position in the tab's year
+    // (backend per-year fields), never by raw-value comparison.
+    const matchesRelation = (r) => {
+      if (relationFilter === 'all') return true;
+      if (relationFilter === 'above') return r[`relationToFocus${tabSuffix}`] === 'above';
+      if (relationFilter === 'below') return r[`relationToFocus${tabSuffix}`] === 'below';
+      if (relationFilter === 'affects') return r[`affectsFocusPosition${tabSuffix}`] === true;
       return true;
-    });
+    };
+    const filtered = activeTab.rows.filter((r) => matchesQuery(r) && matchesRelation(r));
     const pageSize = 25;
-    const pages = Math.max(1, Math.ceil(related.length / pageSize));
+    const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
     const page = Math.min(Math.max(1, outsidePage), pages);
-    return { base: related, page, pages, pageSize, slice: related.slice((page - 1) * pageSize, page * pageSize) };
+    return { filtered, page, pages, pageSize, slice: filtered.slice((page - 1) * pageSize, page * pageSize) };
   })();
 
-  const filteredCommon3 = (() => {
-    const q = common3Query.trim().toLowerCase();
+  const filteredCommon = (() => {
+    const q = commonQuery.trim().toLowerCase();
     const searched = commonRows.filter(
       (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
     );
+    // Relation filter uses the backend-provided yearly relations, so an
+    // economy above India in one year and below in another stays explicit.
+    const related = searched.filter((r) => matchesCommonRelation(r, commonRelation));
+    const sorted = sortCommonRows(related, commonSort);
     const pageSize = 25;
-    const pages = Math.max(1, Math.ceil(searched.length / pageSize));
-    const page = Math.min(Math.max(1, common3Page), pages);
-    return { base: searched, page, pages, pageSize, slice: searched.slice((page - 1) * pageSize, page * pageSize) };
+    const pages = Math.max(1, Math.ceil(sorted.length / pageSize));
+    const page = Math.min(Math.max(1, commonPage), pages);
+    return { base: sorted, page, pages, pageSize, slice: sorted.slice((page - 1) * pageSize, page * pageSize) };
   })();
 
   return (
@@ -727,7 +763,7 @@ function ThreeYearResults({ data }) {
           →
         </span>
         <div className="duo-box">
-          <span className="duo-year">Point breaker · {y.mid}</span>
+          <span className="duo-year">Middle year · {y.mid}</span>
           <span className="duo-rank">
             #{fm.commonRankMid} / {fm.denominatorCommon}
           </span>
@@ -879,29 +915,52 @@ function ThreeYearResults({ data }) {
         </p>
       </div>
 
-      <h3 className="subhead">Economies outside the three-year common comparison set</h3>
+      <h3 className="subhead">Economies outside the common comparison set</h3>
       <p>
-        The table below lists only economies outside the common comparison set ({u.outside} total). It is a
-        different population from the {u.common} common economies.
+        The tables below list only economies outside the common comparison set. They are a different
+        population from the {u.common} common economies above. Each tab shows one selected year&apos;s
+        outside slice — economies with a valid observation that year but missing in at least one of the
+        other two selected years.
       </p>
       <button
         type="button"
         className="btn btn-secondary"
-        onClick={() => setOutsideOpen((v) => !v)}
-        aria-expanded={outsideOpen}
+        onClick={() => setListsOpen((v) => !v)}
+        aria-expanded={listsOpen}
       >
-        {outsideOpen ? 'Hide outside economies' : `Show outside economies (${outsideRows.length})`}
+        {listsOpen
+          ? 'Hide outside economy details'
+          : `Show outside economy details (outside ${u.outside})`}
       </button>
-      {outsideOpen ? (
+      {listsOpen ? (
         <>
+          <div role="tablist" aria-label="Outside the common set in each selected year">
+            {outsideTabs.flatMap((t, index) => [
+              ...(index > 0 ? [' '] : []),
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={outsideTab === t.id}
+                aria-label={`${t.label} the common comparison set, ${t.count} economies`}
+                className={`btn ${outsideTab === t.id ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => {
+                  setOutsideTab(t.id);
+                  setOutsidePage(1);
+                }}
+              >
+                {t.label} ({t.count})
+              </button>,
+            ])}
+          </div>
           <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Outside filters">
             <Field label="Search name or ISO3" htmlFor="mv3-q">
               <input
                 id="mv3-q"
                 type="search"
-                value={outsideQuery}
+                value={query}
                 onChange={(e) => {
-                  setOutsideQuery(e.target.value);
+                  setQuery(e.target.value);
                   setOutsidePage(1);
                 }}
                 placeholder="e.g. India, IND"
@@ -910,36 +969,37 @@ function ThreeYearResults({ data }) {
             <Field label="Relation filter" htmlFor="mv3-rel">
               <select
                 id="mv3-rel"
-                value={outsideRelation}
+                value={relationFilter}
                 onChange={(e) => {
-                  setOutsideRelation(e.target.value);
+                  setRelationFilter(e.target.value);
                   setOutsidePage(1);
                 }}
               >
                 <option value="all">All</option>
-                <option value="above">Above India in any year</option>
-                <option value="below">Below India in any year</option>
+                <option value="above">Above India</option>
+                <option value="below">Below India</option>
                 <option value="affects">Affects India&apos;s position</option>
               </select>
             </Field>
           </form>
           <p className="footnote">Filtering is presentation-only. The decomposition always uses the full universe.</p>
-          <OutsideTable3
-            rows={filteredOutside.slice}
+          <EconomyTable
+            rows={filteredList.slice}
             yearA={y.a}
-            yearMid={y.mid}
             yearB={y.b}
-            caption={`Economies outside the three-year common set, ${y.a} to ${y.mid} to ${y.b}`}
+            yearMid={y.mid}
+            focusYear={activeTab.year}
+            caption={`Economies outside the common set in ${activeTab.year} for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`}
           />
           <p className="footnote" aria-live="polite">
-            Showing {filteredOutside.slice.length} of {filteredOutside.base.length} (outside) · page{' '}
-            {filteredOutside.page} of {filteredOutside.pages}
+            Showing {filteredList.slice.length} of {filteredList.filtered.length} ({activeTab.label}) · page{' '}
+            {filteredList.page} of {filteredList.pages}
           </p>
           <div className="pagination" role="navigation" aria-label="Outside pages">
             <button
               type="button"
               className="btn btn-secondary"
-              disabled={filteredOutside.page <= 1}
+              disabled={filteredList.page <= 1}
               onClick={() => setOutsidePage((p) => Math.max(1, p - 1))}
             >
               ← Prev
@@ -947,7 +1007,7 @@ function ThreeYearResults({ data }) {
             <button
               type="button"
               className="btn btn-secondary"
-              disabled={filteredOutside.page >= filteredOutside.pages}
+              disabled={filteredList.page >= filteredList.pages}
               onClick={() => setOutsidePage((p) => p + 1)}
             >
               Next →
@@ -963,55 +1023,87 @@ function ThreeYearResults({ data }) {
         Every economy in this table has a valid observation in {y.a}, {y.mid} and {y.b}. This is a completely
         different population from the outside economies above.
       </p>
+      <p className="footnote">
+        The summary and decomposition above are already complete. Open this only to inspect the like-for-like
+        economies.
+      </p>
       <button
         type="button"
         className="btn btn-secondary"
-        onClick={() => setCommon3Open((v) => !v)}
-        aria-expanded={common3Open}
+        onClick={() => setCommonOpen((v) => !v)}
+        aria-expanded={commonOpen}
       >
-        {common3Open ? 'Hide common economies' : `Show common economies (${u.common})`}
+        {commonOpen ? 'Hide common economies' : `Show common economies (${u.common})`}
       </button>
-      {common3Open ? (
+      {commonOpen ? (
         <>
           <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Common filters">
             <Field label="Search common" htmlFor="mv3-cq">
               <input
                 id="mv3-cq"
                 type="search"
-                value={common3Query}
+                value={commonQuery}
                 onChange={(e) => {
-                  setCommon3Query(e.target.value);
-                  setCommon3Page(1);
+                  setCommonQuery(e.target.value);
+                  setCommonPage(1);
                 }}
                 placeholder="e.g. United, USA"
               />
             </Field>
+            <Field label="Relation to India" htmlFor="mv3-crel">
+              <select
+                id="mv3-crel"
+                value={commonRelation}
+                onChange={(e) => {
+                  setCommonRelation(e.target.value);
+                  setCommonPage(1);
+                }}
+              >
+                {commonRelationOptions(comparisonYears).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Sort by" htmlFor="mv3-csort">
+              <select id="mv3-csort" value={commonSort} onChange={(e) => setCommonSort(e.target.value)}>
+                {commonSortOptions(comparisonYears).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
           </form>
-          <CommonTable3
-            rows={filteredCommon3.slice}
+          <p className="footnote">
+            Sorting uses backend raw values and ranks. It never changes the comparison summary above.
+          </p>
+          <CommonTable
+            rows={filteredCommon.slice}
             yearA={y.a}
-            yearMid={y.mid}
             yearB={y.b}
-            caption={`Common comparison-set economies, ${y.a} to ${y.mid} to ${y.b}`}
+            yearMid={y.mid}
+            caption={`Common comparison-set economies for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`}
           />
           <p className="footnote" aria-live="polite">
-            Showing {filteredCommon3.slice.length} of {filteredCommon3.base.length} · page {filteredCommon3.page} of{' '}
-            {filteredCommon3.pages}
+            Showing {filteredCommon.slice.length} of {filteredCommon.base.length} · page {filteredCommon.page} of{' '}
+            {filteredCommon.pages}
           </p>
           <div className="pagination" role="navigation" aria-label="Common pages">
             <button
               type="button"
               className="btn btn-secondary"
-              disabled={filteredCommon3.page <= 1}
-              onClick={() => setCommon3Page((p) => Math.max(1, p - 1))}
+              disabled={filteredCommon.page <= 1}
+              onClick={() => setCommonPage((p) => Math.max(1, p - 1))}
             >
               ← Prev
             </button>
             <button
               type="button"
               className="btn btn-secondary"
-              disabled={filteredCommon3.page >= filteredCommon3.pages}
-              onClick={() => setCommon3Page((p) => p + 1)}
+              disabled={filteredCommon.page >= filteredCommon.pages}
+              onClick={() => setCommonPage((p) => p + 1)}
             >
               Next →
             </button>
@@ -1535,14 +1627,11 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                         setCommonPage(1);
                       }}
                     >
-                      <option value="all">All</option>
-                      <option value="aboveA">Above India in {data.years.a}</option>
-                      <option value="belowA">Below India in {data.years.a}</option>
-                      <option value="aboveB">Above India in {data.years.b}</option>
-                      <option value="belowB">Below India in {data.years.b}</option>
-                      <option value="aboveBoth">Above India in both years</option>
-                      <option value="belowBoth">Below India in both years</option>
-                      <option value="crossed">Crossed India between years</option>
+                      {commonRelationOptions([data.years.a, data.years.b]).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Sort by" htmlFor="mv-csort">
@@ -1551,14 +1640,11 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                       value={commonSort}
                       onChange={(e) => setCommonSort(e.target.value)}
                     >
-                      <option value="valueA-desc">Value in {data.years.a} — high to low</option>
-                      <option value="valueA-asc">Value in {data.years.a} — low to high</option>
-                      <option value="valueB-desc">Value in {data.years.b} — high to low</option>
-                      <option value="valueB-asc">Value in {data.years.b} — low to high</option>
-                      <option value="rankA-asc">Rank in {data.years.a} — best first</option>
-                      <option value="rankA-desc">Rank in {data.years.a} — lowest first</option>
-                      <option value="rankB-asc">Rank in {data.years.b} — best first</option>
-                      <option value="rankB-desc">Rank in {data.years.b} — lowest first</option>
+                      {commonSortOptions([data.years.a, data.years.b]).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                 </form>
