@@ -228,7 +228,11 @@ export default function App() {
               </button>
             </div>
           ) : null}
-          {filtersReady ? (
+          {/* The Movement view is not shown the global filter bar: it consumes
+              none of Period start / Period end / Year / Neighbors / Compare
+              from, and its Metric comes from its own comparison controls
+              (bound to the same filter state). Every other view keeps it. */}
+          {filtersReady && view !== 'movement' ? (
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Data filters">
               <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
               <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />

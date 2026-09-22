@@ -355,63 +355,81 @@ function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
  * affects position, below → denominator only.
  *
  * Without a middle year this renders exactly the original entered/exited
- * table. With a middle year plus focusYear it renders the same interaction
- * model for one year's outside slice of the three-year common universe:
- * presence, relation/rank/value in that year, and whether the economy affects
- * India's position in that year (backend per-year fields).
+ * table (each row's own status decides its rank/value year, so a mixed All
+ * tab renders correctly row by row). With a middle year plus focusYear it
+ * renders the same interaction model for one year's outside slice of the
+ * three-year common universe: presence, relation/rank/value in that year, and
+ * whether the economy affects India's position in that year (backend
+ * per-year fields). With a middle year and no focusYear (the All tab) it
+ * shows the full outside dataset with combined per-year rank/value cells and
+ * the backend overall relation/effect fields.
  */
-function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption }) {
+function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption, serialBase = 0 }) {
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
-  const isThreeYear = yearMid != null && focusYear != null;
-  const keys = isThreeYear ? yearColumnKeys([yearA, yearMid, yearB], focusYear) : null;
+  const hasMid = yearMid != null;
+  const isYearTab = hasMid && focusYear != null;
+  const isAllTab = hasMid && focusYear == null;
+  const keys = isYearTab ? yearColumnKeys([yearA, yearMid, yearB], focusYear) : null;
   const affectsKey = keys ? `affectsFocusPosition${keys.rank.replace('rank', '')}` : null;
   const presenceOf = (r) =>
     [r.presentInA ? yearA : null, r.presentInMid ? yearMid : null, r.presentInB ? yearB : null]
       .filter((v) => v !== null)
       .join(' · ') || '—';
+  const combined = (r, prefix) =>
+    [r[`${prefix}A`] ?? '—', r[`${prefix}Mid`] ?? '—', r[`${prefix}B`] ?? '—'].join(' / ');
   return (
     <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
       <table className="table table-compact">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
           <tr>
+            <th scope="col" className="num">
+              #
+            </th>
             <th scope="col">Economy</th>
             <th scope="col">ISO3</th>
-            {showStatus ? <th scope="col">{isThreeYear ? 'Present in' : 'Status'}</th> : null}
-            <th scope="col">Relation to India{isThreeYear ? ` in ${focusYear}` : ''}</th>
+            {showStatus ? <th scope="col">{hasMid ? 'Present in' : 'Status'}</th> : null}
+            <th scope="col">Relation to India{isYearTab ? ` in ${focusYear}` : ''}</th>
             <th scope="col" className="num">
-              Rank{isThreeYear ? ` in ${focusYear}` : ''}
+              {isAllTab ? `Rank ${yearA} / ${yearMid} / ${yearB}` : `Rank${isYearTab ? ` in ${focusYear}` : ''}`}
             </th>
             <th scope="col" className="num">
-              Value{isThreeYear ? ` in ${focusYear}` : ''}
+              {isAllTab ? `Value ${yearA} / ${yearMid} / ${yearB}` : `Value${isYearTab ? ` in ${focusYear}` : ''}`}
             </th>
             <th scope="col">Effect</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {rows.map((r, i) => (
             <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+              <td className="num">{serialBase + i + 1}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
                 <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
               </th>
               <td className="mono">{r.iso3}</td>
-              {showStatus ? <td>{isThreeYear ? presenceOf(r) : r.status}</td> : null}
-              <td>{isThreeYear ? (r[keys.relation] ?? r.relationToFocus) : r.relationToFocus}</td>
+              {showStatus ? <td>{hasMid ? presenceOf(r) : r.status}</td> : null}
+              <td>{isYearTab ? (r[keys.relation] ?? r.relationToFocus) : r.relationToFocus}</td>
               <td className="num">
-                {isThreeYear ? (r[keys.rank] ?? '—') : r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}
+                {isAllTab
+                  ? combined(r, 'rank')
+                  : isYearTab
+                    ? (r[keys.rank] ?? '—')
+                    : r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}
               </td>
               <td className="num">
-                {isThreeYear
-                  ? (r[keys.display] ?? '—')
-                  : r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}
+                {isAllTab
+                  ? combined(r, 'display')
+                  : isYearTab
+                    ? (r[keys.display] ?? '—')
+                    : r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}
               </td>
               <td>
-                {isThreeYear
-                  ? r[affectsKey]
+                {hasMid
+                  ? (isYearTab ? r[affectsKey] : r.affectsFocusPosition)
                     ? 'Affects position'
                     : 'Denominator only'
                   : r.positionEffect === 'affects_position'
@@ -454,7 +472,7 @@ function yearColumnKeys(years, year) {
  * the original two-year table; [yearA, yearMid, yearB] extends it with the
  * middle-year rank, value and vs-India columns.
  */
-function CommonTable({ rows, yearA, yearB, yearMid = null, caption }) {
+function CommonTable({ rows, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
@@ -466,6 +484,9 @@ function CommonTable({ rows, yearA, yearB, yearMid = null, caption }) {
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
           <tr>
+            <th scope="col" className="num">
+              #
+            </th>
             <th scope="col">Economy</th>
             <th scope="col">ISO3</th>
             {cols.map((c) => (
@@ -486,8 +507,9 @@ function CommonTable({ rows, yearA, yearB, yearMid = null, caption }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {rows.map((r, i) => (
             <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+              <td className="num">{serialBase + i + 1}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
@@ -672,7 +694,10 @@ function ThreeYearResults({ data }) {
   const fm = data.focusMovement;
   const u = data.universe;
   const y = data.years;
-  const [outsideTab, setOutsideTab] = useState('outB');
+  // Tab selection remembers its year so a config change that removes that
+  // year falls back to All (render-phase adjustment, no effect needed).
+  const comparisonKey = `${y.a}|${y.mid}|${y.b}|${data.metric.indicatorCode}`;
+  const [tabState, setTabState] = useState({ id: 'all', year: null, key: comparisonKey });
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
   const [outsidePage, setOutsidePage] = useState(1);
@@ -688,29 +713,49 @@ function ThreeYearResults({ data }) {
   const comparisonYears = [y.a, y.mid, y.b];
   const rows = data.economies?.rows ?? [];
   const commonRows = rows.filter((r) => r.status === 'common');
-  // One outside slice per selected year: economies holding a valid observation
-  // that year but missing in at least one of the other two selected years.
-  // Together they partition the three-year outside set; counts reconcile with
-  // universe.outsideInA / outsideInMid / outsideInB from the same universe.
+  const allOutside = rows.filter((r) => r.status !== 'common');
+  // All (the full outside-common-set dataset) plus one outside slice per
+  // selected year: economies holding a valid observation that year but missing
+  // in at least one of the other two selected years. Tab counts come from the
+  // backend decomposition before any presentation-only search/filter.
   const outsideTabs = [
+    { id: 'all', year: null, label: 'All', count: u.outside, rows: allOutside },
     { id: 'outA', year: y.a, label: `Outside in ${y.a}`, count: u.outsideInA, rows: rows.filter((r) => r.status !== 'common' && r.presentInA) },
     { id: 'outMid', year: y.mid, label: `Outside in ${y.mid}`, count: u.outsideInMid, rows: rows.filter((r) => r.status !== 'common' && r.presentInMid) },
     { id: 'outB', year: y.b, label: `Outside in ${y.b}`, count: u.outsideInB, rows: rows.filter((r) => r.status !== 'common' && r.presentInB) },
   ];
-  const activeTab = outsideTabs.find((t) => t.id === outsideTab) ?? outsideTabs[2];
-  const tabSuffix = activeTab.id === 'outA' ? 'A' : activeTab.id === 'outMid' ? 'Mid' : 'B';
+  let outsideTab = tabState.id;
+  if (tabState.key !== comparisonKey) {
+    const stillValid = tabState.id === 'all' || comparisonYears.includes(tabState.year);
+    outsideTab = stillValid ? tabState.id : 'all';
+    setTabState({ id: outsideTab, year: stillValid ? tabState.year : null, key: comparisonKey });
+    setOutsidePage(1);
+  }
+  const selectTab = (t) => {
+    setTabState({ id: t.id, year: t.year, key: comparisonKey });
+    setOutsidePage(1);
+  };
+  const activeTab = outsideTabs.find((t) => t.id === outsideTab) ?? outsideTabs[0];
+  const tabSuffix = activeTab.id === 'outA' ? 'A' : activeTab.id === 'outMid' ? 'Mid' : activeTab.id === 'outB' ? 'B' : null;
 
   const filteredList = (() => {
     const q = query.trim().toLowerCase();
     const matchesQuery = (r) =>
       !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
-    // Relation and effect are decided by ranking position in the tab's year
-    // (backend per-year fields), never by raw-value comparison.
+    // Relation and effect are decided by ranking position, never by raw-value
+    // comparison: the tab year's backend per-year fields, or the backend
+    // overall fields on the All tab.
     const matchesRelation = (r) => {
       if (relationFilter === 'all') return true;
-      if (relationFilter === 'above') return r[`relationToFocus${tabSuffix}`] === 'above';
-      if (relationFilter === 'below') return r[`relationToFocus${tabSuffix}`] === 'below';
-      if (relationFilter === 'affects') return r[`affectsFocusPosition${tabSuffix}`] === true;
+      if (tabSuffix) {
+        if (relationFilter === 'above') return r[`relationToFocus${tabSuffix}`] === 'above';
+        if (relationFilter === 'below') return r[`relationToFocus${tabSuffix}`] === 'below';
+        if (relationFilter === 'affects') return r[`affectsFocusPosition${tabSuffix}`] === true;
+        return true;
+      }
+      if (relationFilter === 'above') return r.relationToFocus === 'above';
+      if (relationFilter === 'below') return r.relationToFocus === 'below';
+      if (relationFilter === 'affects') return r.affectsFocusPosition === true;
       return true;
     };
     const filtered = activeTab.rows.filter((r) => matchesQuery(r) && matchesRelation(r));
@@ -942,12 +987,13 @@ function ThreeYearResults({ data }) {
                 type="button"
                 role="tab"
                 aria-selected={outsideTab === t.id}
-                aria-label={`${t.label} the common comparison set, ${t.count} economies`}
+                aria-label={
+                  t.id === 'all'
+                    ? `All economies outside the common comparison set, ${t.count} economies`
+                    : `${t.label} the common comparison set, ${t.count} economies`
+                }
                 className={`btn ${outsideTab === t.id ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => {
-                  setOutsideTab(t.id);
-                  setOutsidePage(1);
-                }}
+                onClick={() => selectTab(t)}
               >
                 {t.label} ({t.count})
               </button>,
@@ -989,10 +1035,15 @@ function ThreeYearResults({ data }) {
             yearB={y.b}
             yearMid={y.mid}
             focusYear={activeTab.year}
-            caption={`Economies outside the common set in ${activeTab.year} for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`}
+            serialBase={(filteredList.page - 1) * filteredList.pageSize}
+            caption={
+              activeTab.id === 'all'
+                ? `All economies outside the common comparison set for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`
+                : `Economies outside the common set in ${activeTab.year} for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`
+            }
           />
           <p className="footnote" aria-live="polite">
-            Showing {filteredList.slice.length} of {filteredList.filtered.length} ({activeTab.label}) · page{' '}
+            Showing {filteredList.slice.length} of {activeTab.count} ({activeTab.label}) · page{' '}
             {filteredList.page} of {filteredList.pages}
           </p>
           <div className="pagination" role="navigation" aria-label="Outside pages">
@@ -1084,10 +1135,11 @@ function ThreeYearResults({ data }) {
             yearA={y.a}
             yearB={y.b}
             yearMid={y.mid}
+            serialBase={(filteredCommon.page - 1) * filteredCommon.pageSize}
             caption={`Common comparison-set economies for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`}
           />
           <p className="footnote" aria-live="polite">
-            Showing {filteredCommon.slice.length} of {filteredCommon.base.length} · page {filteredCommon.page} of{' '}
+            Showing {filteredCommon.slice.length} of {u.common} · page {filteredCommon.page} of{' '}
             {filteredCommon.pages}
           </p>
           <div className="pagination" role="navigation" aria-label="Common pages">
@@ -1157,7 +1209,7 @@ function ThreeYearResults({ data }) {
 }
 
 export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, onYearA, onYearB, onYearMid = null, onMetric }) {
-  const [tab, setTab] = useState('entered');
+  const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
   const [commonOpen, setCommonOpen] = useState(false);
@@ -1200,8 +1252,22 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
     return { entered, exited, common };
   }, [data]);
 
+  // Outside tabs: All (the full outside-common-set dataset) plus one tab per
+  // decomposition group. Tab counts come from the dataset before any
+  // presentation-only search/filter; the "Showing" line below reports the
+  // currently visible filtered rows against that stable tab count.
+  const outsideTabs = useMemo(() => {
+    const all = [...enteredExited.entered, ...enteredExited.exited];
+    return [
+      { id: 'all', label: 'All', count: all.length, rows: all },
+      { id: 'entered', label: `Entered in ${data?.years?.b}`, count: enteredExited.entered.length, rows: enteredExited.entered },
+      { id: 'exited', label: `Exited from ${data?.years?.a}`, count: enteredExited.exited.length, rows: enteredExited.exited },
+    ];
+  }, [data, enteredExited]);
+  const activeTab = outsideTabs.find((t) => t.id === tab) ?? outsideTabs[0];
+
   const filteredList = useMemo(() => {
-    const base = tab === 'entered' ? enteredExited.entered : enteredExited.exited;
+    const base = activeTab.rows;
     const q = query.trim().toLowerCase();
     const matchesQuery = (r) =>
       !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
@@ -1217,7 +1283,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
     const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
     const page = Math.min(Math.max(1, listPage), pages);
     return { filtered, page, pages, pageSize, slice: filtered.slice((page - 1) * pageSize, page * pageSize) };
-  }, [tab, query, relationFilter, enteredExited, listPage]);
+  }, [activeTab, query, relationFilter, listPage]);
 
   const filteredCommon = useMemo(() => {
     const q = commonQuery.trim().toLowerCase();
@@ -1255,22 +1321,31 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
         yearMid={breakerActive ? yearMid : null}
         metricKey={metricKey}
         onYearA={(v) => {
+          setTab('all');
           setListPage(1);
           setCommonPage(1);
           onYearA(v);
         }}
         onYearB={(v) => {
+          setTab('all');
           setListPage(1);
           setCommonPage(1);
           onYearB(v);
         }}
         onYearMid={(v) => {
+          setTab('all');
           setListPage(1);
           setCommonPage(1);
           if (onYearMid) onYearMid(v);
         }}
-        onMetric={onMetric}
-        onSwap={swap}
+        onMetric={(v) => {
+          setTab('all');
+          onMetric(v);
+        }}
+        onSwap={() => {
+          setTab('all');
+          swap();
+        }}
       />
       {sameYear ? (
         <div className="status status-error" role="alert">
@@ -1501,6 +1576,19 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               <button
                 type="button"
                 role="tab"
+                aria-selected={tab === 'all'}
+                aria-label={`All economies outside the common comparison set, ${outsideTabs[0].count} economies`}
+                className={`btn ${tab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => {
+                  setTab('all');
+                  setListPage(1);
+                }}
+              >
+                All ({outsideTabs[0].count})
+              </button>{' '}
+              <button
+                type="button"
+                role="tab"
                 aria-selected={tab === 'entered'}
                 aria-label={`Entered the observed ranking in ${data.years.b}, ${enteredExited.entered.length} economies`}
                 className={`btn ${tab === 'entered' ? 'btn-primary' : 'btn-secondary'}`}
@@ -1557,10 +1645,11 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               rows={filteredList.slice}
               yearA={data.years.a}
               yearB={data.years.b}
-              caption={`${tab === 'entered' ? 'Economies that entered the observed ranking' : 'Economies that exited the observed ranking'} for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
+              serialBase={(filteredList.page - 1) * filteredList.pageSize}
+              caption={`${tab === 'all' ? 'All economies outside the common comparison set' : tab === 'entered' ? 'Economies that entered the observed ranking' : 'Economies that exited the observed ranking'} for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
             />
             <p className="footnote" aria-live="polite">
-              Showing {filteredList.slice.length} of {filteredList.filtered.length} ({tab}) · page{' '}
+              Showing {filteredList.slice.length} of {activeTab.count} ({tab}) · page{' '}
               {filteredList.page} of {filteredList.pages}
             </p>
             <div className="pagination" role="navigation" aria-label="Entered exited pages">
@@ -1655,10 +1744,11 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                   rows={filteredCommon.slice}
                   yearA={data.years.a}
                   yearB={data.years.b}
+                  serialBase={(filteredCommon.page - 1) * filteredCommon.pageSize}
                   caption={`Common comparison-set economies for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
                 />
                 <p className="footnote" aria-live="polite">
-                  Showing {filteredCommon.slice.length} of {filteredCommon.base.length} · page {filteredCommon.page}{' '}
+                  Showing {filteredCommon.slice.length} of {data.universe.common} · page {filteredCommon.page}{' '}
                   of {filteredCommon.pages}
                 </p>
                 <div className="pagination" role="navigation" aria-label="Common pages">
