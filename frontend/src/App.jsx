@@ -16,6 +16,7 @@ import Tabs, { SubTabs } from './components/Tabs.jsx';
 import Overview from './sections/Overview.jsx';
 import YearlyTable from './sections/YearlyTable.jsx';
 import YearComparison from './sections/YearComparison.jsx';
+import RankMovement from './sections/RankMovement.jsx';
 import LevelVerification from './sections/LevelVerification.jsx';
 import FullRanking from './sections/FullRanking.jsx';
 import YoyRanking from './sections/YoyRanking.jsx';
@@ -24,7 +25,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -54,6 +55,7 @@ const VIEWS = Object.freeze([
   { id: 'overview', label: 'Overview' },
   { id: 'data', label: 'Data' },
   { id: 'rank', label: 'Rank' },
+  { id: 'movement', label: 'Movement' },
   { id: 'yoy', label: 'YoY' },
   { id: 'coverage', label: 'Coverage' },
   { id: 'audit', label: 'Audit' },
@@ -137,8 +139,14 @@ export default function App() {
     const neighbors = Number.isInteger(neighborsRaw) ? Math.max(0, Math.min(50, neighborsRaw)) : 5;
     const fromYear = filters.fromYear !== '' && filters.fromYear != null ? pick(filters.fromYear, null) : null;
     const view = isViewId(filters.view) ? filters.view : 'overview';
-    return { startYear, endYear, year, metric, neighbors, fromYear, view };
-  }, [filters, availableYears, maxYear, defaultStart]);
+    // Rank-movement years default to a decade-like pair when available,
+    // otherwise the stored extremes. Never hardcoded to a fixed range.
+    const defaultYearA = availableYears.includes(2004) ? 2004 : minYear;
+    const defaultYearB = availableYears.includes(2014) ? 2014 : maxYear;
+    const yearA = pick(filters.yearA, defaultYearA);
+    const yearB = pick(filters.yearB, defaultYearB);
+    return { startYear, endYear, year, metric, neighbors, fromYear, view, yearA, yearB };
+  }, [filters, availableYears, maxYear, minYear, defaultStart]);
 
   // Mirror effective state to the URL (UI state only, never business logic).
   useEffect(() => {
@@ -149,6 +157,8 @@ export default function App() {
     query.set('metric', effective.metric);
     query.set('neighbors', effective.neighbors);
     if (effective.fromYear != null) query.set('fromYear', effective.fromYear);
+    if (effective.yearA != null) query.set('yearA', effective.yearA);
+    if (effective.yearB != null) query.set('yearB', effective.yearB);
     query.set('view', effective.view);
     const next = `?${query.toString()}`;
     if (window.location.search !== next) window.history.replaceState(null, '', next);
@@ -271,6 +281,17 @@ export default function App() {
                 <FullRanking year={effective.year} metricKey={effective.metric} />
               )}
             </div>
+          ) : null}
+          {filtersReady && view === 'movement' ? (
+            <RankMovement
+              availableYears={availableYears}
+              yearA={effective.yearA}
+              yearB={effective.yearB}
+              metricKey={effective.metric}
+              onYearA={(v) => setFilter('yearA', v)}
+              onYearB={(v) => setFilter('yearB', v)}
+              onMetric={(v) => setFilter('metric', v)}
+            />
           ) : null}
           {filtersReady && view === 'yoy' ? (
             <div role="tabpanel" id="panel-yoy" aria-labelledby="tab-yoy">

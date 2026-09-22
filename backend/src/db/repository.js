@@ -278,6 +278,120 @@ export function getEligibleObservationsRange(db, indicatorId, startYear, endYear
     .all(indicatorId, startYear, endYear);
 }
 
+/**
+ * Eligible observations for one indicator across an explicit year list.
+ *
+ * Single-statement atomic read for comparisons: both years come from one
+ * query so a concurrent refresh cannot change one side halfway through the
+ * assembly. Rows carry the vintage columns so the service can detect mixed
+ * vintages without a second query.
+ *
+ * @param {object} db
+ * @param {number} indicatorId
+ * @param {number[]} years e.g. [yearA, yearB]
+ * @returns {{iso3:string, name:string, year:number, value:number, valueRaw:string|null, wbLastUpdated:string|null, fetchedAt:string|null}[]}
+ */
+export function getEligibleObservationsForYears(db, indicatorId, years) {
+  const unique = [...new Set((years ?? []).filter((y) => Number.isInteger(y)))].sort((a, b) => a - b);
+  if (unique.length === 0) return [];
+  const placeholders = unique.map(() => '?').join(',');
+  return db
+    .prepare(
+      `
+      SELECT o.country_id AS iso3,
+             c.name       AS name,
+             o.year       AS year,
+             o.value      AS value,
+             o.value_raw  AS valueRaw,
+             o.wb_last_updated AS wbLastUpdated,
+             o.fetched_at AS fetchedAt
+      FROM observations o
+      JOIN countries c ON c.id = o.country_id
+      WHERE o.indicator_id = ?
+        AND o.year IN (${placeholders})
+        AND c.is_aggregate = 0
+        AND o.value IS NOT NULL
+      ORDER BY o.year, o.country_id
+    `,
+    )
+    .all(indicatorId, ...unique);
+}
+
+/**
+ * Bulk economy metadata for a supplied ISO3 list.
+ *
+ * @param {object} db
+ * @param {string[]} iso3List
+ */
+export function getCountriesByIso3List(db, iso3List) {
+  const unique = [...new Set((iso3List ?? []).map((s) => String(s).toUpperCase()))].sort();
+  if (unique.length === 0) return [];
+  const placeholders = unique.map(() => '?').join(',');
+  return db
+    .prepare(`SELECT * FROM countries WHERE id IN (${placeholders}) ORDER BY id`)
+    .all(...unique);
+}
+
+/**
+ * Vintage summary for one indicator across explicit years (eligible rows only).
+ *
+ * @returns {{lastUpdatedValues:string[], fetchedAtMin:string|null, fetchedAtMax:string|null, rowCount:number}|null}
+ */
+export function getVintageForIndicatorYears(db, indicatorId, years) {
+  const unique = [...new Set((years ?? []).filter((y) => Number.isInteger(y)))].sort((a, b) => a - b);
+  if (unique.length === 0) return null;
+  const placeholders = unique.map(() => '?').join(',');
+  const rows = db
+    .prepare(
+      `
+      SELECT o.wb_last_updated AS wbLastUpdated,
+             MIN(o.fetched_at) AS fetchedAtMin,
+             MAX(o.fetched_at) AS fetchedAtMax,
+             COUNT(*) AS rowCount
+      FROM observations o
+      JOIN countries c ON c.id = o.country_id
+      WHERE o.indicator_id = ?
+        AND o.year IN (${placeholders})
+        AND c.is_aggregate = 0
+        AND o.value IS NOT NULL
+      GROUP BY o.wb_last_updated
+    `,
+    )
+    .all(indicatorId, ...unique);
+  if (!rows || rows.length === 0) return null;
+  let fetchedAtMin = null;
+  let fetchedAtMax = null;
+  let rowCount = 0;
+  const lastUpdatedValues = [];
+  for (const r of rows) {
+    lastUpdatedValues.push(r.wbLastUpdated ?? null);
+    if (r.fetchedAtMin && (!fetchedAtMin || r.fetchedAtMin < fetchedAtMin)) fetchedAtMin = r.fetchedAtMin;
+    if (r.fetchedAtMax && (!fetchedAtMax || r.fetchedAtMax > fetchedAtMax)) fetchedAtMax = r.fetchedAtMax;
+    rowCount += r.rowCount ?? 0;
+  }
+  lastUpdatedValues.sort();
+  return { lastUpdatedValues, fetchedAtMin, fetchedAtMax, rowCount };
+}
+
+/**
+ * Dataset fingerprint for cross-request consistency.
+ *
+ * Lets the frontend detect whether two successive responses came from the
+ * same retrieval generation.
+ */
+export function getDatasetFingerprint(db) {
+  const lastSuccessAt = getLastSuccessfulFetchTime(db);
+  const maxFetched = db.prepare('SELECT MAX(fetched_at) AS t FROM observations').get()?.t ?? null;
+  const observationCount = countObservations(db);
+  const latestRun = getLatestFetchRun(db, { status: 'success' });
+  return {
+    lastSuccessAt,
+    maxFetchedAt: maxFetched,
+    observationCount,
+    runId: latestRun?.id ?? null,
+  };
+}
+
 /** Observations for one country across a year range (e.g. India's timeline). */
 export function getCountryObservationsRange(db, indicatorId, iso3, startYear, endYear) {
   return db

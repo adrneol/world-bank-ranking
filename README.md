@@ -27,6 +27,7 @@ backend-calculated numbers; SQLite stores the retrieved observations.
 - Separate YoY ranking with its own denominator, plus YoY verification
 - YoY coverage (current/previous valid counts, valid pairs)
 - Data coverage panels and evidence-only changing-totals explanations
+- Rank movement comparison (Movement tab): like-for-like common universe, entered/exited analysis, verified decomposition
 - Audit/source transparency, including raw-value visibility
 - Data status, integrity checks, and manual refresh with progress
 - Responsive frontend (desktop, tablet, mobile)
@@ -71,6 +72,39 @@ country total. When totals change between years, the application explains why
 using only stored facts (metadata-universe change, observable filtering
 differences, or observation coverage), and states when evidence is
 insufficient. It does not invent reasons for missing observations.
+
+## Rank Movement Comparison (Movement Tab)
+
+Yearly ranks such as `171/209` and `172/213` cannot be read as “moved one
+place”: each denominator counts a different observed population. The Movement
+tab is a separate analytical layer that explains the change without touching
+the existing ranking tables.
+
+For one indicator and two years (`GET /api/comparison/level`):
+
+- `A` / `B`: eligible economies with a valid observation in Year A / Year B.
+- `Common = A ∩ B`, `Exited = A − B`, `Entered = B − A` (exact ISO3 sets).
+- `F_A` / `F_B`: India full observed ranks; `K_A` / `K_B`: India positions
+  inside Common using each year values (derived comparison positions, not
+  World Bank ranks).
+- Above/below India is decided by ranking position (`value DESC, ISO3 ASC`,
+  1-based), never by raw-value comparison, so ISO3 tie-breaks are exact.
+- Verified identity: `F_B − F_A = (K_B − K_A) + EnteredAbove_B − ExitedAbove_A`.
+  `positionNumberChange = F_B − F_A` (positive = position number increased);
+  `placesGained = F_A − F_B` (positive = moved up). The frontend displays
+  backend-provided numbers only.
+- Entered/exited means valid-observation set membership only — never that an
+  economy was created, dissolved, or politically added/removed. Per-economy
+  causes are reported as “Reason not established from stored evidence” unless
+  stored counters establish an aggregate fact.
+- Every 200 response carries `verification.passed === true` (domain + service
+  checks, integer-only, rank bounds, engine cross-check, metadata membership).
+  A failed invariant returns `COMPARISON_INVARIANT_FAILED` with no analytical
+  numbers.
+- Evidence includes World Bank vintage, producing runs, per-year ingest
+  counters, metadata-universe comparison, completeness, fingerprint, limits,
+  and the denominator explanation. Region/income metadata is labelled as the
+  retrieved vintage, not as historical fact.
 
 ## Architecture
 

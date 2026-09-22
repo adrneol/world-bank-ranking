@@ -83,6 +83,8 @@ export const api = {
     get('/api/yoy-ranking/verify', { indicator, year, country, neighbors }, options),
   coverage: ({ year, country, fromYear, toYear, indicator } = {}, options) =>
     get('/api/coverage', { year, country, fromYear, toYear, indicator }, options),
+  comparisonLevel: ({ indicator, yearA, yearB, country, detail } = {}, options) =>
+    get('/api/comparison/level', { indicator, yearA, yearB, country, detail }, options),
   observations: ({ indicator, year, country } = {}, options) =>
     get('/api/observations', { indicator, year, country }, options),
   countries: ({ includeAggregates } = {}, options) =>

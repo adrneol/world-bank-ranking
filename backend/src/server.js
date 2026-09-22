@@ -31,6 +31,7 @@ import {
   listIndicators,
 } from './db/repository.js';
 import { describeUniverseRule } from './domain/universe.js';
+import { buildLevelComparisonResponse } from './services/comparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
 import { buildFullRanking } from './services/fullRanking.js';
 import { buildIndiaYearlyRows } from './services/indiaYearly.js';
@@ -61,6 +62,7 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/yoy-ranking',
   '/api/yoy-ranking/verify',
   '/api/coverage',
+  '/api/comparison/level',
   '/api/observations',
   '/api/countries',
   '/api/metadata',
@@ -254,6 +256,26 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       ...(year !== undefined ? { year } : {}),
       focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
       neighbors: normalizeNeighborCount(req.query.neighbors),
+    });
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
+  // ---------- rank-movement comparison (level, separate analytical layer) ----------
+  app.get('/api/comparison/level', ah(async (req, res) => {
+    // No silent indicator default: the comparison must name its series.
+    const metricKey = parseMetric(req.query.indicator);
+    const yearA = parseYear(req.query.yearA, 'yearA');
+    const yearB = parseYear(req.query.yearB, 'yearB');
+    if (yearA === undefined || yearB === undefined) {
+      throw httpError(400, 'Both yearA and yearB are required for a rank-movement comparison.', 'MISSING_YEAR');
+    }
+    const detail = String(req.query.detail ?? 'full').toLowerCase() === 'summary' ? 'summary' : 'full';
+    const result = buildLevelComparisonResponse(handle(), {
+      metricKey,
+      yearA,
+      yearB,
+      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      detail,
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
