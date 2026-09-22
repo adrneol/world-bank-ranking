@@ -18,6 +18,21 @@ function formatSigned(n) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+/** “1 place” vs “N places”; backend integers only, grammar fixed here. */
+function formatPlaces(n) {
+  if (n === null || n === undefined) return '—';
+  const abs = Math.abs(n);
+  return `${abs} ${abs === 1 ? 'place' : 'places'}`;
+}
+
+/** Immediate sign meaning; canonical backend convention, never inferred. */
+function signMeaning(n) {
+  if (n === null || n === undefined) return '';
+  if (n > 0) return 'position number increased; lower place';
+  if (n < 0) return 'position number decreased; higher place';
+  return 'no change in position number';
+}
+
 function MovementControls({ availableYears, yearA, yearB, metricKey, onYearA, onYearB, onMetric, onSwap }) {
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
@@ -71,6 +86,11 @@ function SummaryCards({ data }) {
         <p className="card-rank">
           {fm.fullRankA != null ? `#${fm.fullRankA} / ${fm.denominatorA}` : 'n/a'}
         </p>
+        <p className="card-unit">
+          {fm.denominatorA != null
+            ? `${fm.denominatorA} economies with valid observations in ${years.a}`
+            : 'Denominator unavailable.'}
+        </p>
         <p className="card-code mono">
           {metric.indicatorCode} · {metric.unit}
         </p>
@@ -81,6 +101,11 @@ function SummaryCards({ data }) {
         </h3>
         <p className="card-rank">
           {fm.fullRankB != null ? `#${fm.fullRankB} / ${fm.denominatorB}` : 'n/a'}
+        </p>
+        <p className="card-unit">
+          {fm.denominatorB != null
+            ? `${fm.denominatorB} economies with valid observations in ${years.b}`
+            : 'Denominator unavailable.'}
         </p>
         <p className="card-code mono">
           {metric.indicatorCode} · {metric.unit}
@@ -93,7 +118,7 @@ function SummaryCards({ data }) {
         </p>
         <p className="card-unit">
           {fm.placesGained != null
-            ? `${fm.placesGained > 0 ? `${fm.placesGained} places gained` : fm.placesGained < 0 ? `${-fm.placesGained} places lost` : 'No change in places'} (places gained = ${formatSigned(fm.placesGained)})`
+            ? `${fm.placesGained > 0 ? `${formatPlaces(fm.placesGained)} gained` : fm.placesGained < 0 ? `${formatPlaces(fm.placesGained)} lost` : 'No change in places'} (places gained = ${formatSigned(fm.placesGained)})`
             : 'Decomposition unavailable.'}
         </p>
       </div>
@@ -101,13 +126,57 @@ function SummaryCards({ data }) {
   );
 }
 
-function EconomyTable({ rows, yearA, yearB, showStatus = true }) {
+function StorySentence({ data }) {
+  // Human-readable story composed ONLY from backend-provided integers.
+  // No recalculation: wording selects among precomputed backend fields.
+  const fm = data.focusMovement;
+  const u = data.universe;
+  const y = data.years;
+  if (!fm || fm.positionNumberChange == null) return null;
+  const dF = fm.positionNumberChange;
+  const dK = fm.commonEffect;
+  const pool = fm.observedSetEffect;
+  const direction =
+    dF > 0
+      ? `increased by ${dF} (a lower place)`
+      : dF < 0
+        ? `decreased by ${-dF} (a higher place)`
+        : 'did not change';
+  const commonDirection =
+    dK > 0
+      ? `moved down ${dK} among the same economies`
+      : dK < 0
+        ? `moved up ${-dK} among the same economies`
+        : 'held the same position among the same economies';
+  return (
+    <div>
+      <p>
+        India&apos;s observed position number {direction}: #{fm.fullRankA}/{fm.denominatorA} in {y.a} → #
+        {fm.fullRankB}/{fm.denominatorB} in {y.b}.
+      </p>
+      <p>
+        Among the {u.common} economies observed in both years, India {commonDirection} (#{fm.commonRankA} → #
+        {fm.commonRankB}).
+      </p>
+      <p>
+        {fm.enteredAboveB} {fm.enteredAboveB === 1 ? 'economy' : 'economies'} entered the {y.b} observed
+        ranking above India. {fm.exitedAboveA} {fm.exitedAboveA === 1 ? 'economy that ranked' : 'economies that ranked'}{' '}
+        above India in {y.a} {fm.exitedAboveA === 1 ? 'is' : 'are'} no longer in the observed ranking. Under
+        the ranking definition, these outside-common-set changes contributed{' '}
+        {pool > 0 ? `+${pool}` : `${pool}`} to India&apos;s position number.
+      </p>
+    </div>
+  );
+}
+
+function EconomyTable({ rows, yearA, yearB, showStatus = true, caption }) {
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
   return (
-    <div className="table-scroll" role="region" aria-label="Economies" tabIndex={0}>
+    <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
       <table className="table">
+        {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
           <tr>
             <th scope="col">Economy</th>
@@ -312,101 +381,233 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
           <>
             <h3 className="subhead">What happened to India&apos;s position number?</h3>
             <SummaryCards data={data} />
+            <div className="explanation" role="note" aria-label="Result in words">
+              <StorySentence data={data} />
+            </div>
             <p className="footnote">
-              Position numbers: lower is a higher place. Both denominators are shown because each year ranks only
-              the eligible economies with a valid observation for this indicator and year.
+              Position numbers: lower is a higher place. Denominators count {data.universe.membershipRule}:
+              #{data.focusMovement.fullRankA}/{data.focusMovement.denominatorA} in {data.years.a} and #
+              {data.focusMovement.fullRankB}/{data.focusMovement.denominatorB} in {data.years.b}.
             </p>
 
-            <h3 className="subhead">Is the movement comparable? The common universe</h3>
+            <h3 className="subhead">Like-for-like comparison</h3>
+            <p className="section-sub">
+              {data.universe.common} economies had valid observations in both {data.years.a} and {data.years.b}.
+            </p>
             <dl className="facts">
               <div>
-                <dt>Common observed economies</dt>
+                <dt>
+                  {data.years.a} common comparison position
+                </dt>
                 <dd className="num">
-                  {data.universe.common} of {data.universe.setA} in {data.years.a}, of {data.universe.setB} in{' '}
-                  {data.years.b}
+                  #{data.focusMovement.commonRankA} / {data.focusMovement.denominatorCommon}
                 </dd>
               </div>
               <div>
-                <dt>India among common economies</dt>
+                <dt>
+                  {data.years.b} common comparison position
+                </dt>
                 <dd className="num">
-                  #{data.focusMovement.commonRankA} → #{data.focusMovement.commonRankB} / {data.focusMovement.denominatorCommon}
+                  #{data.focusMovement.commonRankB} / {data.focusMovement.denominatorCommon}
                 </dd>
               </div>
               <div>
-                <dt>Common-universe movement</dt>
-                <dd className="num">{formatSigned(data.focusMovement.commonEffect)} positions</dd>
+                <dt>Common-set movement</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.commonEffect)} positions ({signMeaning(data.focusMovement.commonEffect)})
+                </dd>
               </div>
             </dl>
+            <p>
+              These {data.universe.common} economies are the only economies used to calculate the like-for-like
+              movement.
+            </p>
             <p className="footnote">
-              Common-universe positions are derived comparison positions, not official World Bank ranks and not
-              observed-year ranks.
+              <strong>Derived comparison position — not a World Bank rank.</strong> Common comparison positions
+              rank India only among the economies observed in both years, with the same ordering rule. They are
+              neither official ranks nor observed-year ranks.
+            </p>
+            <p className="footnote">The other economies shown below are outside this common comparison set.</p>
+
+            <h3 className="subhead">What changed outside the common comparison set?</h3>
+            <p>
+              Entered and exited economies are not part of the common comparison set. They explain the difference
+              between the two full observed ranking populations.
+            </p>
+            <div className="partition" role="group" aria-label="Observed-set partitions">
+              <div className="partition-row">
+                <span className="partition-year">{data.years.a} observed set</span>
+                <span className="partition-bar" aria-label={`${data.years.a} observed set: ${data.universe.common} common plus ${data.universe.exited} exited equals ${data.universe.setA}`}>
+                  <span className="partition-common">{data.universe.common} common</span>
+                  <span className="partition-delta">
+                    {data.universe.exited} exited
+                  </span>
+                </span>
+                <span className="partition-total num">
+                  {data.universe.setA} = {data.universe.common} + {data.universe.exited}
+                </span>
+              </div>
+              <div className="partition-row">
+                <span className="partition-year">{data.years.b} observed set</span>
+                <span className="partition-bar" aria-label={`${data.years.b} observed set: ${data.universe.common} common plus ${data.universe.entered} entered equals ${data.universe.setB}`}>
+                  <span className="partition-common">{data.universe.common} common</span>
+                  <span className="partition-delta">
+                    {data.universe.entered} entered
+                  </span>
+                </span>
+                <span className="partition-total num">
+                  {data.universe.setB} = {data.universe.common} + {data.universe.entered}
+                </span>
+              </div>
+            </div>
+            <p className="footnote">
+              Common means the same member economies in both years. Entered and exited are members outside that
+              common set.
             </p>
 
-            <h3 className="subhead">How did the changing observed population affect it?</h3>
+            <h3 className="subhead">Entered and exited relative to India&apos;s position</h3>
             <dl className="facts">
               <div>
-                <dt>Entered above India</dt>
+                <dt>Entered in {data.years.b}</dt>
+                <dd className="num">{data.universe.entered}</dd>
+              </div>
+              <div>
+                <dt>Entered in {data.years.b} — above India</dt>
                 <dd className="num">{data.focusMovement.enteredAboveB}</dd>
               </div>
               <div>
-                <dt>Exited above India</dt>
+                <dt>Entered in {data.years.b} — below India</dt>
+                <dd className="num">{data.focusMovement.enteredBelowB}</dd>
+              </div>
+              <div>
+                <dt>Exited from {data.years.a}</dt>
+                <dd className="num">{data.universe.exited}</dd>
+              </div>
+              <div>
+                <dt>Exited from {data.years.a} — above India</dt>
+                <dd className="num">{data.focusMovement.exitedAboveA}</dd>
+              </div>
+              <div>
+                <dt>Exited from {data.years.a} — below India</dt>
+                <dd className="num">{data.focusMovement.exitedBelowA}</dd>
+              </div>
+            </dl>
+
+            <h3 className="subhead">Outside-common-set effect on India&apos;s position number</h3>
+            <dl className="facts">
+              <div>
+                <dt>Entered in {data.years.b} above India</dt>
+                <dd className="num">{data.focusMovement.enteredAboveB}</dd>
+              </div>
+              <div>
+                <dt>Exited from {data.years.a} above India</dt>
                 <dd className="num">{data.focusMovement.exitedAboveA}</dd>
               </div>
               <div>
                 <dt>Observed-set effect</dt>
-                <dd className="num">{formatSigned(data.focusMovement.observedSetEffect)} positions</dd>
-              </div>
-              <div>
-                <dt>Entered below / exited below</dt>
                 <dd className="num">
-                  {data.focusMovement.enteredBelowB} / {data.focusMovement.exitedBelowA} (denominator only)
+                  {formatSigned(data.focusMovement.observedSetEffect)} positions (
+                  {signMeaning(data.focusMovement.observedSetEffect)})
                 </dd>
               </div>
             </dl>
-            <p className="footnote">
-              Economies entering or leaving below India change the denominator but not India&apos;s position
-              number. Only entries/exits above India move the position arithmetically.
-            </p>
-
-            <h3 className="subhead">Rank-movement decomposition</h3>
-            <div className="explanation" role="note" aria-label={data.focusMovement.identityText ?? 'Decomposition'}>
-              <p className="mono">{data.focusMovement.identityText}</p>
+            <div className="explanation" role="note" aria-label="Observed-set effect in words">
               <p>
-                Full position change ({formatSigned(data.focusMovement.positionNumberChange)}) = common-universe
-                movement ({formatSigned(data.focusMovement.commonEffect)}) + observed-set effect (
-                {formatSigned(data.focusMovement.observedSetEffect)}).
-              </p>
-              <p className="footnote">
-                Sign: positive means the position number increased (a lower place); places gained positive means
-                India moved up. This describes arithmetic under the ranking definition — not economic performance.
+                {data.focusMovement.enteredAboveB} {data.focusMovement.enteredAboveB === 1 ? 'economy' : 'economies'}{' '}
+                entered the {data.years.b} observed ranking above India. {data.focusMovement.exitedAboveA}{' '}
+                {data.focusMovement.exitedAboveA === 1 ? 'economy that ranked' : 'economies that ranked'} above
+                India in {data.years.a} {data.focusMovement.exitedAboveA === 1 ? 'is' : 'are'} no longer in the
+                observed ranking. Under the ranking definition, these outside-common-set changes contributed{' '}
+                {formatSigned(data.focusMovement.observedSetEffect)} to India&apos;s position number.
               </p>
             </div>
 
-            <h3 className="subhead">Which economies entered or exited the observed ranking?</h3>
-            <div role="tablist" aria-label="Entered or exited economies">
+            <h3 className="subhead">Economies below India&apos;s position</h3>
+            <dl className="facts">
+              <div>
+                <dt>Entered in {data.years.b} below India</dt>
+                <dd className="num">{data.focusMovement.enteredBelowB}</dd>
+              </div>
+              <div>
+                <dt>Exited from {data.years.a} below India</dt>
+                <dd className="num">{data.focusMovement.exitedBelowA}</dd>
+              </div>
+            </dl>
+            <p>
+              These outside-common-set economies affect the size of the observed ranking population, but not
+              India&apos;s position number.
+            </p>
+
+            <h3 className="subhead">Rank-movement decomposition</h3>
+            <dl className="facts">
+              <div>
+                <dt>Full position-number change</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.positionNumberChange)} positions (
+                  {signMeaning(data.focusMovement.positionNumberChange)})
+                </dd>
+              </div>
+              <div>
+                <dt>Common-set movement</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.commonEffect)} positions ({signMeaning(data.focusMovement.commonEffect)})
+                </dd>
+              </div>
+              <div>
+                <dt>Outside-common-set effect</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.observedSetEffect)} positions (
+                  {signMeaning(data.focusMovement.observedSetEffect)})
+                </dd>
+              </div>
+            </dl>
+            <div className="explanation" role="note" aria-label={data.focusMovement.identityText ?? 'Decomposition'}>
+              <p className="mono">{data.focusMovement.identityText}</p>
+              <p>Full position-number change = common-set movement + observed-set effect.</p>
+              <p>
+                Here, India&apos;s position number changed by {formatSigned(data.focusMovement.positionNumberChange)}{' '}
+                overall: {formatSigned(data.focusMovement.commonEffect)} within the {data.universe.common}{' '}
+                common economies, and {formatSigned(data.focusMovement.observedSetEffect)} from economies outside
+                the common set entering or exiting above India.
+              </p>
+              <p className="footnote">
+                Common-set movement is change among the same economies. Outside-common-set effect is the effect
+                of economies outside Common entering or exiting the full observed sets. This describes arithmetic
+                under the ranking definition — not economic performance.
+              </p>
+            </div>
+
+            <h3 className="subhead">Economies outside the common comparison set</h3>
+            <p>
+              The tables below list only economies outside the common comparison set. They are a different
+              population from the {data.universe.common} common economies above.
+            </p>
+            <div role="tablist" aria-label="Entered or exited the observed ranking">
               <button
                 type="button"
                 role="tab"
                 aria-selected={tab === 'entered'}
+                aria-label={`Entered the observed ranking in ${data.years.b}, ${enteredExited.entered.length} economies`}
                 className={`btn ${tab === 'entered' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => {
                   setTab('entered');
                   setListPage(1);
                 }}
               >
-                Entered ({enteredExited.entered.length})
+                Entered in {data.years.b} ({enteredExited.entered.length})
               </button>{' '}
               <button
                 type="button"
                 role="tab"
                 aria-selected={tab === 'exited'}
+                aria-label={`Exited the observed ranking from ${data.years.a}, ${enteredExited.exited.length} economies`}
                 className={`btn ${tab === 'exited' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => {
                   setTab('exited');
                   setListPage(1);
                 }}
               >
-                Exited ({enteredExited.exited.length})
+                Exited from {data.years.a} ({enteredExited.exited.length})
               </button>
             </div>
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Entered exited filters">
@@ -437,7 +638,12 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
             <p className="footnote">
               Filtering is presentation-only. The decomposition always uses the full universe.
             </p>
-            <EconomyTable rows={filteredList.slice} yearA={data.years.a} yearB={data.years.b} />
+            <EconomyTable
+              rows={filteredList.slice}
+              yearA={data.years.a}
+              yearB={data.years.b}
+              caption={`${tab === 'entered' ? 'Economies that entered the observed ranking' : 'Economies that exited the observed ranking'} for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
+            />
             <p className="footnote" aria-live="polite">
               Showing {filteredList.slice.length} of {filteredList.filtered.length} ({tab}) · page{' '}
               {filteredList.page} of {filteredList.pages}
@@ -461,10 +667,16 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
               </button>
             </div>
 
-            <h3 className="subhead">Common economies</h3>
+            <h3 className="subhead">
+              {data.universe.common} economies in the common comparison set
+            </h3>
+            <p>
+              Every economy in this table has a valid observation in both selected years. This is a completely
+              different population from the entered and exited economies above.
+            </p>
             <p className="footnote">
-              The summary and decomposition above are already complete. Open this only to inspect the {data.universe.common}{' '}
-              like-for-like economies.
+              The summary and decomposition above are already complete. Open this only to inspect the like-for-like
+              economies.
             </p>
             <button
               type="button"
@@ -490,7 +702,12 @@ export default function RankMovement({ availableYears, yearA, yearB, metricKey, 
                     />
                   </Field>
                 </form>
-                <EconomyTable rows={filteredCommon.slice} yearA={data.years.a} yearB={data.years.b} />
+                <EconomyTable
+                  rows={filteredCommon.slice}
+                  yearA={data.years.a}
+                  yearB={data.years.b}
+                  caption={`Common observed economies for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
+                />
                 <p className="footnote" aria-live="polite">
                   Showing {filteredCommon.slice.length} of {filteredCommon.base.length} · page {filteredCommon.page}{' '}
                   of {filteredCommon.pages}
