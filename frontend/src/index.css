@@ -496,6 +496,72 @@ thead .sticky-col {
   overflow-wrap: anywhere;
 }
 
+/* ---------- structured details panel (shared grid system) ---------- */
+/* One grid definition shared by every Details section, so corresponding
+   fields start at identical horizontal positions regardless of content.
+   Scoped to .details-panel: other .facts lists elsewhere are untouched. */
+.details-panel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.details-panel .dgrid {
+  display: grid;
+  gap: 0.5rem 1.5rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.details-panel .dgrid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.details-panel .dgrid > div.span-all {
+  grid-column: 1 / -1;
+}
+.details-panel .dgrid dt {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.details-panel .dgrid dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.details-panel .dgrid dd.mono {
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+/* Details values share their label's left edge: neutralize the right-aligned
+   tabular numeric treatment that .table .num otherwise imposes on Details
+   panels rendered inside table rows. Main-table alignment is untouched. */
+.details-panel .dgrid dd.num {
+  text-align: left;
+  white-space: normal;
+}
+hr.ddivider {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0.9rem 0;
+}
+@media (max-width: 55rem) {
+  .details-panel .dgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 40rem) {
+  .details-panel .dgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .facts dd.mono {
   font-family: var(--mono);
   font-weight: 500;
@@ -709,6 +775,48 @@ thead .sticky-col {
   background: var(--focus);
   font-size: 0.72rem;
   font-weight: 600;
+}
+
+/* ---------- responsive economy cards (mobile details architecture) ---------- */
+/* Cards are width-constrained to their container and never inherit table
+   geometry: no max-content widths, no table-column grids inside. */
+.economy-cards {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+.economy-cards .card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.economy-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.5rem;
+  min-width: 0;
+}
+.economy-card-name {
+  font-weight: 650;
+  min-width: 0;
+}
+.economy-card .facts {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+.economy-card-toggle {
+  width: 100%;
+}
+/* Details toggles must never wrap character-by-character, in tables or cards. */
+.details-toggle {
+  white-space: nowrap;
+}
+.economy-card-details {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 0.5rem;
 }
 
 /* ---------- rank-movement result + centerpiece (additive) ---------- */

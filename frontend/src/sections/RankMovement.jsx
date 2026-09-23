@@ -7,7 +7,7 @@
  * recalculates the universe or the decomposition.
  */
 
-import { useMemo, useState } from 'react';
+import { Fragment, useCallback, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
 import { METRIC_KEYS, METRICS, metricLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -272,88 +272,168 @@ function StorySentence3({ data }) {
   );
 }
 
-function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
-  const isThreeYear = yearMid != null && (r.rankMid !== undefined || r.presentInMid !== undefined);
+/**
+ * Shared structured-details primitives. Every field is its own labeled
+ * element inside a responsive dl.facts grid (never a concatenated string),
+ * so labels and values stay connected on narrow screens. Short tokens wrap
+ * only at whitespace; exact raw/audit strings keep full precision.
+ */
+function DetailField({ label, mono = false, num = false, wide = false, children }) {
+  const cls = mono ? 'mono' : num ? 'num' : undefined;
   return (
-    <details className="details">
-      <summary>Details</summary>
-      <dl className="facts">
-        <div>
-          <dt>ISO3</dt>
-          <dd className="mono">{r.iso3}</dd>
-        </div>
-        <div>
-          <dt>Status</dt>
-          <dd>{r.status}</dd>
-        </div>
-        {isThreeYear && (r.presentInA !== undefined) ? (
-          <div>
-            <dt>Present in</dt>
-            <dd>
-              {[r.presentInA ? yearA : null, r.presentInMid ? yearMid : null, r.presentInB ? yearB : null]
-                .filter((v) => v !== null)
-                .join(', ') || '—'}
-            </dd>
+    <div className={wide ? 'span-all' : undefined}>
+      <dt>{label}</dt>
+      <dd className={cls}>{children}</dd>
+    </div>
+  );
+}
+
+function DetailGroup({ title, children }) {
+  return (
+    <>
+      <h4 className="subhead-secondary">{title}</h4>
+      <dl className="dgrid">{children}</dl>
+    </>
+  );
+}
+
+/** Display text for a backend position-effect code, or null when not applicable. */
+function effectText(positionEffect) {
+  if (positionEffect === 'affects_position') return 'Affects position';
+  if (positionEffect === 'denominator_only') return 'Denominator only';
+  return null;
+}
+
+/**
+ * Mobile breakpoint hook, matching the stylesheet's own breakpoint
+ * (`@media (max-width: 40rem)` in index.css) so JS-driven shells and
+ * CSS-driven rules switch at the same width. Subscription-based (no
+ * setState-in-effect); safe when matchMedia is unavailable.
+ */
+const MOBILE_QUERY = '(max-width: 40rem)';
+
+function useIsMobile() {
+  const subscribe = useCallback((onChange) => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+    const mql = window.matchMedia(MOBILE_QUERY);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  const getSnapshot = useCallback(
+    () =>
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia(MOBILE_QUERY).matches
+        : false,
+    [],
+  );
+  return useSyncExternalStore(subscribe, getSnapshot, () => false);
+}
+
+/**
+ * Mobile shell for economy result lists. Same backend rows, same Details
+ * content components and same serial numbers as the desktop table; only the
+ * layout differs. The card is width-constrained to its container
+ * (width/max-width 100%, min-width 0) and never inherits table geometry, so
+ * Details content reflows vertically instead of stretching across a wide
+ * scrolled table. One economy expanded at a time, like the desktop tables.
+ */
+function MobileCardList({ rows, serialBase = 0, caption, renderSummary, renderDetails }) {
+  const listId = useId();
+  const [openIso, setOpenIso] = useState(null);
+  return (
+    <div className="economy-cards" role="list" aria-label={caption ?? 'Economies'}>
+      {rows.map((r, i) => {
+        const open = openIso === r.iso3;
+        const detailId = `${listId}-${r.iso3}-details`;
+        return (
+          <div className="card economy-card" role="listitem" key={r.iso3}>
+            <div className="economy-card-head">
+              <span>#{serialBase + i + 1}</span>
+              <span className="economy-card-name">
+                {r.name ?? r.iso3}
+                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
+              </span>
+              <span className="mono">{r.iso3}</span>
+            </div>
+            <dl className="facts">{renderSummary(r)}</dl>
+            <button
+              type="button"
+              className="btn btn-ghost economy-card-toggle details-toggle"
+              aria-expanded={open}
+              aria-controls={detailId}
+              onClick={() => setOpenIso(open ? null : r.iso3)}
+            >
+              {open ? 'Hide details' : 'Details'}
+            </button>
+            {open ? (
+              <div className="economy-card-details" id={detailId}>
+                {renderDetails(r)}
+              </div>
+            ) : null}
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Level-mode row details: identity, one section per selected year (rank,
+ * display and raw values kept together per year, never concatenated across
+ * years), then World Bank metadata. Renders inside a full-width detail row.
+ */
+export function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
+  const isThreeYear = yearMid != null && (r.rankMid !== undefined || r.presentInMid !== undefined);
+  const years = isThreeYear
+    ? [
+        { label: 'A', year: yearA, rank: r.rankA, display: r.displayA, raw: r.rawTextA, relation: r.relationToFocusA, present: r.presentInA },
+        { label: 'MID', year: yearMid, rank: r.rankMid, display: r.displayMid, raw: r.rawTextMid, relation: r.relationToFocusMid, present: r.presentInMid },
+        { label: 'B', year: yearB, rank: r.rankB, display: r.displayB, raw: r.rawTextB, relation: r.relationToFocusB, present: r.presentInB },
+      ]
+    : [
+        { label: 'A', year: yearA, rank: r.rankA, display: r.displayA, raw: r.rawTextA, relation: r.relationToFocusA, present: undefined },
+        { label: 'B', year: yearB, rank: r.rankB, display: r.displayB, raw: r.rawTextB, relation: r.relationToFocusB, present: undefined },
+      ];
+  const effect = effectText(r.positionEffect);
+  return (
+    <div className="details-panel">
+      <DetailGroup title="Identity">
+        <DetailField label="Economy">{r.name ?? r.iso3}</DetailField>
+        <DetailField label="ISO3" mono>{r.iso3}</DetailField>
+        <DetailField label="Status">{r.status}</DetailField>
+        {isThreeYear && r.presentInA !== undefined ? (
+          <DetailField label="Present in">
+            {[r.presentInA ? yearA : null, r.presentInMid ? yearMid : null, r.presentInB ? yearB : null]
+              .filter((v) => v !== null)
+              .join(', ') || '—'}
+          </DetailField>
         ) : null}
-        <div>
-          <dt>Relation (A{isThreeYear ? ' / MID / B' : ' / B'})</dt>
-          <dd>
-            {isThreeYear ? `${r.relationToFocusA} / ${r.relationToFocusMid} / ${r.relationToFocusB}` : `${r.relationToFocusA} / ${r.relationToFocusB}`}
-          </dd>
-        </div>
-        <div>
-          <dt>
-            Rank in {yearA}{isThreeYear ? ` / ${yearMid} / ${yearB}` : ` / ${yearB}`}
-          </dt>
-          <dd className="num">
-            {isThreeYear ? `${r.rankA ?? '—'} / ${r.rankMid ?? '—'} / ${r.rankB ?? '—'}` : `${r.rankA ?? '—'} / ${r.rankB ?? '—'}`}
-          </dd>
-        </div>
-        <div>
-          <dt>Raw value A</dt>
-          <dd className="mono">{r.rawTextA ?? '—'}</dd>
-        </div>
-        {isThreeYear ? (
-          <div>
-            <dt>Raw value MID</dt>
-            <dd className="mono">{r.rawTextMid ?? '—'}</dd>
-          </div>
-        ) : null}
-        <div>
-          <dt>Raw value B</dt>
-          <dd className="mono">{r.rawTextB ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Display A{isThreeYear ? ' / MID / B' : ' / B'}</dt>
-          <dd>
-            {isThreeYear ? `${r.displayA ?? '—'} / ${r.displayMid ?? '—'} / ${r.displayB ?? '—'}` : `${r.displayA ?? '—'} / ${r.displayB ?? '—'}`}
-          </dd>
-        </div>
-        <div>
-          <dt>Region</dt>
-          <dd>{r.region ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Income level</dt>
-          <dd>{r.incomeLevel ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Lending type</dt>
-          <dd>{r.lendingType ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Metadata note</dt>
-          <dd>{r.metadataVintageNote}</dd>
-        </div>
+        {effect !== null ? <DetailField label="Effect on India's position">{effect}</DetailField> : null}
         {r.tiedWithFocusA || r.tiedWithFocusMid || r.tiedWithFocusB ? (
-          <div>
-            <dt>Tie</dt>
-            <dd>Tied value with India; ISO3 order decides the position.</dd>
-          </div>
+          <DetailField label="Tie">Tied value with India; ISO3 order decides the position.</DetailField>
         ) : null}
-      </dl>
-    </details>
+      </DetailGroup>
+      {years.map((y, index) => (
+        <Fragment key={y.label}>
+          {index > 0 ? <hr className="ddivider" aria-hidden="true" /> : null}
+          <DetailGroup title={`Year ${y.year}`}>
+            <DetailField label="Rank" num>{y.rank ?? '—'}</DetailField>
+            <DetailField label="Value" num>{y.display ?? '—'}</DetailField>
+            <DetailField label="Raw value" mono>{y.raw ?? '—'}</DetailField>
+            <DetailField label="Relation to India">{y.relation ?? '—'}</DetailField>
+            {y.present !== undefined ? (
+              <DetailField label="Present in year">{y.present ? 'Yes' : 'No'}</DetailField>
+            ) : null}
+          </DetailGroup>
+        </Fragment>
+      ))}
+      <DetailGroup title="World Bank metadata">
+        <DetailField label="Region">{r.region ?? '—'}</DetailField>
+        <DetailField label="Income level">{r.incomeLevel ?? '—'}</DetailField>
+        <DetailField label="Lending type">{r.lendingType ?? '—'}</DetailField>
+        <DetailField label="Metadata note" wide>{r.metadataVintageNote ?? '—'}</DetailField>
+      </DetailGroup>
+    </div>
   );
 }
 
@@ -372,10 +452,15 @@ function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
  * shows the full outside dataset with combined per-year rank/value cells and
  * the backend overall relation/effect fields.
  */
-function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption, serialBase = 0 }) {
+export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption, serialBase = 0 }) {
+  const tableId = useId();
+  const [openIso, setOpenIso] = useState(null);
+  const isMobile = useIsMobile();
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
+  // +1 for the leading serial column.
+  const colCount = 7 + (showStatus ? 1 : 0);
   const hasMid = yearMid != null;
   const isYearTab = hasMid && focusYear != null;
   const isAllTab = hasMid && focusYear == null;
@@ -387,6 +472,49 @@ function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, sh
       .join(' · ') || '—';
   const combined = (r, prefix) =>
     [r[`${prefix}A`] ?? '—', r[`${prefix}Mid`] ?? '—', r[`${prefix}B`] ?? '—'].join(' / ');
+  // Mobile shell: same rows, same Details content, card layout constrained
+  // to the viewport instead of the wide table geometry.
+  if (isMobile) {
+    return (
+      <MobileCardList
+        rows={rows}
+        serialBase={serialBase}
+        caption={caption}
+        renderSummary={(r) => (
+          <>
+            {showStatus ? <DetailField label={hasMid ? 'Present in' : 'Status'}>{hasMid ? presenceOf(r) : r.status}</DetailField> : null}
+            <DetailField label="Relation to India">
+              {isYearTab ? (r[keys.relation] ?? r.relationToFocus) : r.relationToFocus}
+            </DetailField>
+            <DetailField label="Rank" num>
+              {isAllTab
+                ? combined(r, 'rank')
+                : isYearTab
+                  ? (r[keys.rank] ?? '—')
+                  : r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}
+            </DetailField>
+            <DetailField label="Value" num>
+              {isAllTab
+                ? combined(r, 'display')
+                : isYearTab
+                  ? (r[keys.display] ?? '—')
+                  : r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}
+            </DetailField>
+            <DetailField label="Effect">
+              {hasMid
+                ? (isYearTab ? r[affectsKey] : r.affectsFocusPosition)
+                  ? 'Affects position'
+                  : 'Denominator only'
+                : r.positionEffect === 'affects_position'
+                  ? 'Affects position'
+                  : 'Denominator only'}
+            </DetailField>
+          </>
+        )}
+        renderDetails={(r) => <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />}
+      />
+    );
+  }
   return (
     <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
       <table className="table table-compact">
@@ -410,42 +538,63 @@ function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, sh
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-              <td className="num">{serialBase + i + 1}</td>
-              <th scope="row">
-                {r.name ?? r.iso3}
-                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
-              </th>
-              <td className="mono">{r.iso3}</td>
-              {showStatus ? <td>{hasMid ? presenceOf(r) : r.status}</td> : null}
-              <td>{isYearTab ? (r[keys.relation] ?? r.relationToFocus) : r.relationToFocus}</td>
-              <td className="num">
-                {isAllTab
-                  ? combined(r, 'rank')
-                  : isYearTab
-                    ? (r[keys.rank] ?? '—')
-                    : r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}
-              </td>
-              <td className="num">
-                {isAllTab
-                  ? combined(r, 'display')
-                  : isYearTab
-                    ? (r[keys.display] ?? '—')
-                    : r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}
-              </td>
-              <td>
-                {hasMid
-                  ? (isYearTab ? r[affectsKey] : r.affectsFocusPosition)
-                    ? 'Affects position'
-                    : 'Denominator only'
-                  : r.positionEffect === 'affects_position'
-                    ? 'Affects position'
-                    : 'Denominator only'}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const open = openIso === r.iso3;
+            const detailId = `${tableId}-${r.iso3}-details`;
+            return (
+              <Fragment key={r.iso3}>
+                <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+                  <td className="num">{serialBase + i + 1}</td>
+                  <th scope="row">
+                    {r.name ?? r.iso3}
+                    {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
+                    <button
+                      type="button"
+                      className="btn btn-ghost details-toggle"
+                      aria-expanded={open}
+                      aria-controls={detailId}
+                      onClick={() => setOpenIso(open ? null : r.iso3)}
+                    >
+                      {open ? 'Hide details' : 'Details'}
+                    </button>
+                  </th>
+                  <td className="mono">{r.iso3}</td>
+                  {showStatus ? <td>{hasMid ? presenceOf(r) : r.status}</td> : null}
+                  <td>{isYearTab ? (r[keys.relation] ?? r.relationToFocus) : r.relationToFocus}</td>
+                  <td className="num">
+                    {isAllTab
+                      ? combined(r, 'rank')
+                      : isYearTab
+                        ? (r[keys.rank] ?? '—')
+                        : r.status === 'exited' ? (r.rankA ?? '—') : (r.rankB ?? '—')}
+                  </td>
+                  <td className="num">
+                    {isAllTab
+                      ? combined(r, 'display')
+                      : isYearTab
+                        ? (r[keys.display] ?? '—')
+                        : r.status === 'exited' ? (r.displayA ?? '—') : (r.displayB ?? '—')}
+                  </td>
+                  <td>
+                    {hasMid
+                      ? (isYearTab ? r[affectsKey] : r.affectsFocusPosition)
+                        ? 'Affects position'
+                        : 'Denominator only'
+                      : r.positionEffect === 'affects_position'
+                        ? 'Affects position'
+                        : 'Denominator only'}
+                  </td>
+                </tr>
+                {open ? (
+                  <tr className="details-row">
+                    <td colSpan={colCount} id={detailId}>
+                      <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -480,12 +629,42 @@ function yearColumnKeys(years, year) {
  * the original two-year table; [yearA, yearMid, yearB] extends it with the
  * middle-year rank, value and vs-India columns.
  */
-function CommonTable({ rows, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+  const tableId = useId();
+  const [openIso, setOpenIso] = useState(null);
+  const isMobile = useIsMobile();
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
   const years = yearMid != null ? [yearA, yearMid, yearB] : [yearA, yearB];
+  // # + Economy + ISO3 + 3 columns (rank, value, vs India) per year.
+  const colCount = 3 + 3 * years.length;
   const cols = years.map((y) => yearColumnKeys(years, y));
+  if (isMobile) {
+    return (
+      <MobileCardList
+        rows={rows}
+        serialBase={serialBase}
+        caption={caption}
+        renderSummary={(r) => (
+          <>
+            {cols.flatMap((c) => [
+              <DetailField key={`rank-${c.year}`} label={`${c.year} rank`} num>
+                {r[c.rank] ?? '—'}
+              </DetailField>,
+              <DetailField key={`value-${c.year}`} label={`${c.year} value`} num>
+                {r[c.display] ?? '—'}
+              </DetailField>,
+              <DetailField key={`vs-${c.year}`} label={`${c.year} vs India`}>
+                {r[c.relation]}
+              </DetailField>,
+            ])}
+          </>
+        )}
+        renderDetails={(r) => <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />}
+      />
+    );
+  }
   return (
     <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
       <table className="table table-compact">
@@ -515,13 +694,25 @@ function CommonTable({ rows, yearA, yearB, yearMid = null, caption, serialBase =
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-              <td className="num">{serialBase + i + 1}</td>
+          {rows.map((r, i) => {
+            const open = openIso === r.iso3;
+            const detailId = `${tableId}-${r.iso3}-details`;
+            return (
+              <Fragment key={r.iso3}>
+                <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+                  <td className="num">{serialBase + i + 1}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
-                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
+                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
+                <button
+                  type="button"
+                  className="btn btn-ghost details-toggle"
+                  aria-expanded={open}
+                  aria-controls={detailId}
+                  onClick={() => setOpenIso(open ? null : r.iso3)}
+                >
+                  {open ? 'Hide details' : 'Details'}
+                </button>
               </th>
               <td className="mono">{r.iso3}</td>
               {cols.map((c) => (
@@ -529,16 +720,25 @@ function CommonTable({ rows, yearA, yearB, yearMid = null, caption, serialBase =
                   {r[c.rank] ?? '—'}
                 </td>
               ))}
-              {cols.map((c) => (
-                <td key={`value-${c.year}`} className="num">
-                  {r[c.display] ?? '—'}
-                </td>
-              ))}
-              {cols.map((c) => (
-                <td key={`vs-${c.year}`}>{r[c.relation]}</td>
-              ))}
-            </tr>
-          ))}
+                  {cols.map((c) => (
+                    <td key={`value-${c.year}`} className="num">
+                      {r[c.display] ?? '—'}
+                    </td>
+                  ))}
+                  {cols.map((c) => (
+                    <td key={`vs-${c.year}`}>{r[c.relation]}</td>
+                  ))}
+                </tr>
+                {open ? (
+                  <tr className="details-row">
+                    <td colSpan={colCount} id={detailId}>
+                      <EconomyDetails r={r} yearA={yearA} yearB={yearB} yearMid={yearMid} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1242,63 +1442,104 @@ function growthIntervalsOf(data) {
     .map((entry) => ({ ...entry, label: growthIntervalLabel(entry.block) }));
 }
 
-function GrowthDetails({ r, intervals }) {
+/**
+ * Growth-mode row details: identity, one section per selected interval
+ * (growth, ranks, per-capita endpoints, absolute change, relations, reason
+ * when unavailable — each its own labeled field), then World Bank metadata
+ * and an exact-value raw audit group. Renders inside a full-width detail
+ * row. Interval data is keyed by backend interval key, never by position.
+ */
+export function GrowthDetails({ r, intervals, yearA, yearB, yearMid = null }) {
+  const effect = effectText(r.positionEffect);
+  const endpointYears = (key) => {
+    if (key === 'AM') return [yearA, yearMid];
+    if (key === 'MB') return [yearMid, yearB];
+    return [yearA, yearB];
+  };
+  const rawFor = (key, end) => {
+    // Canonical audit text lives on the level year fields (valueRaw);
+    // interval start/end texts are the fallback when years are unavailable.
+    const [startYear, endYear] = endpointYears(key);
+    const rawByYear = { [yearA]: r.rawTextA, [yearMid]: r.rawTextMid, [yearB]: r.rawTextB };
+    const year = end === 'start' ? startYear : endYear;
+    return rawByYear[year] ?? r.intervals?.[key]?.[end === 'start' ? 'startText' : 'endText'] ?? null;
+  };
+  const presentLabels = (intervals ?? [])
+    .filter(({ key }) => r.intervals?.[key]?.valid === true)
+    .map(({ label }) => label);
+  const hasRaw = (intervals ?? []).some(({ key }) => {
+    const b = r.intervals?.[key];
+    return Boolean(b && (b.valid || rawFor(key, 'start') !== null || rawFor(key, 'end') !== null));
+  });
   return (
-    <details className="details">
-      <summary>Details</summary>
-      <dl className="facts">
-        <div>
-          <dt>ISO3</dt>
-          <dd className="mono">{r.iso3}</dd>
-        </div>
-        <div>
-          <dt>Status</dt>
-          <dd>{r.status}</dd>
-        </div>
-        {(intervals ?? []).map(({ key, label }) => {
-          const b = r.intervals?.[key];
-          if (!b) return null;
+    <div className="details-panel">
+      <DetailGroup title="Identity">
+        <DetailField label="Economy">{r.name ?? r.iso3}</DetailField>
+        <DetailField label="ISO3" mono>{r.iso3}</DetailField>
+        <DetailField label="Status">{r.status}</DetailField>
+        <DetailField label="Present in">{presentLabels.join(' · ') || '—'}</DetailField>
+        <DetailField label="Relation to India">{r.relationToFocus ?? '—'}</DetailField>
+        {effect !== null ? <DetailField label="Effect on India's position">{effect}</DetailField> : null}
+      </DetailGroup>
+      {(intervals ?? [])
+        .filter(({ key }) => r.intervals?.[key])
+        .map(({ key, label }, index) => {
+          const b = r.intervals[key];
           return (
-            <div key={key}>
-              <dt>Growth {label}</dt>
-              <dd className="num">
-                {b.valid
-                  ? `${b.growthDisplay} (rank ${b.obsRank} observed / ${b.commonRank ?? '—'} like-for-like; ${b.startDisplay} → ${b.endDisplay}; abs ${b.absoluteDisplay})`
-                  : `n/a (${b.reasonText ?? b.reason ?? 'no calculable growth'})`}
-              </dd>
-            </div>
+            <Fragment key={key}>
+              {index > 0 ? <hr className="ddivider" aria-hidden="true" /> : null}
+              <DetailGroup title={`Growth ${label}`}>
+                {b.valid ? (
+                  <>
+                    <DetailField label="Growth" num>{b.growthDisplay}</DetailField>
+                    <DetailField label="Observed growth rank" num>#{b.obsRank}</DetailField>
+                    <DetailField label="Like-for-like growth rank" num>
+                      {b.commonRank ?? '—'}
+                    </DetailField>
+                    <DetailField label="Per-capita" num>
+                      {b.startDisplay ?? '—'} → {b.endDisplay ?? '—'}
+                    </DetailField>
+                    <DetailField label="Absolute change" num>{b.absoluteDisplay ?? '—'}</DetailField>
+                    <DetailField label="Relation to India (observed)">{b.relObs ?? '—'}</DetailField>
+                    <DetailField label="Relation to India (like-for-like)">{b.relCommon ?? '—'}</DetailField>
+                  </>
+                ) : (
+                  <>
+                    <DetailField label="Growth">n/a</DetailField>
+                    <DetailField label="Reason">{b.reasonText ?? b.reason ?? 'no calculable growth'}</DetailField>
+                  </>
+                )}
+              </DetailGroup>
+            </Fragment>
           );
         })}
-        <div>
-          <dt>Raw start/end</dt>
-          <dd className="mono">
-            {(intervals ?? [])
-              .map(({ key, label }) => {
-                const b = r.intervals?.[key];
-                return b && b.valid ? `${label}: ${b.startValue} → ${b.endValue}` : null;
-              })
-              .filter(Boolean)
-              .join(' · ') || '—'}
-          </dd>
-        </div>
-        <div>
-          <dt>Region</dt>
-          <dd>{r.region ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Income level</dt>
-          <dd>{r.incomeLevel ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Lending type</dt>
-          <dd>{r.lendingType ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Metadata note</dt>
-          <dd>{r.metadataVintageNote}</dd>
-        </div>
-      </dl>
-    </details>
+      <DetailGroup title="World Bank metadata">
+        <DetailField label="Region">{r.region ?? '—'}</DetailField>
+        <DetailField label="Income level">{r.incomeLevel ?? '—'}</DetailField>
+        <DetailField label="Lending type">{r.lendingType ?? '—'}</DetailField>
+        <DetailField label="Metadata note" wide>{r.metadataVintageNote ?? '—'}</DetailField>
+      </DetailGroup>
+      {hasRaw ? (
+        <DetailGroup title="Raw values">
+          {(intervals ?? []).flatMap(({ key, label }) => {
+            const b = r.intervals?.[key];
+            if (!b) return [];
+            const [startYear, endYear] = endpointYears(key);
+            const start = rawFor(key, 'start');
+            const end = rawFor(key, 'end');
+            if (start === null && end === null) return [];
+            return [
+              <DetailField key={`${key}-start`} label={`${label} start${startYear != null ? ` (${startYear})` : ''}`} mono>
+                {start ?? '—'}
+              </DetailField>,
+              <DetailField key={`${key}-end`} label={`${label} end${endYear != null ? ` (${endYear})` : ''}`} mono>
+                {end ?? '—'}
+              </DetailField>,
+            ];
+          })}
+        </DetailGroup>
+      ) : null}
+    </div>
   );
 }
 
@@ -1308,11 +1549,61 @@ function GrowthDetails({ r, intervals }) {
  * growth %, absolute change, observed growth rank, relation and effect.
  * Level values live in Details; ranks come only from growthPercent.
  */
-function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, serialBase = 0 }) {
+export function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, serialBase = 0, yearA, yearB, yearMid = null }) {
+  const tableId = useId();
+  const [openIso, setOpenIso] = useState(null);
+  const isMobile = useIsMobile();
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
   const shown = activeInterval ? [activeInterval] : intervals;
+  if (isMobile) {
+    return (
+      <MobileCardList
+        rows={rows}
+        serialBase={serialBase}
+        caption={caption}
+        renderSummary={(r) => {
+          const rel = activeInterval
+            ? (r.intervals?.[activeInterval.key]?.relObs ?? r.relationToFocus)
+            : r.relationToFocus;
+          return (
+            <>
+              <DetailField label="Present in">
+                {(intervals ?? [])
+                  .filter(({ key }) => r.intervals?.[key]?.valid === true)
+                  .map(({ label }) => label)
+                  .join(' · ') || '—'}
+              </DetailField>
+              <DetailField label={activeInterval ? `Relation to India in ${activeInterval.label}` : 'Relation to India'}>
+                {rel}
+              </DetailField>
+              {shown.flatMap(({ key, label }) => [
+                <DetailField key={`g-${key}`} label={`Growth ${label}`} num>
+                  {r.intervals?.[key]?.growthDisplay ?? '—'}
+                </DetailField>,
+                <DetailField key={`a-${key}`} label={`Abs change ${label}`} num>
+                  {r.intervals?.[key]?.absoluteDisplay ?? '—'}
+                </DetailField>,
+              ])}
+              {activeInterval ? (
+                <DetailField label={`Growth rank in ${activeInterval.label}`} num>
+                  {r.intervals?.[activeInterval.key]?.obsRank ?? '—'}
+                </DetailField>
+              ) : null}
+              <DetailField label="Effect">
+                {r.positionEffect === 'affects_position' ? 'Affects position' : 'Denominator only'}
+              </DetailField>
+            </>
+          );
+        }}
+        renderDetails={(r) => <GrowthDetails r={r} intervals={intervals} yearA={yearA} yearB={yearB} yearMid={yearMid} />}
+      />
+    );
+  }
+  // # + Economy + ISO3 + Present in + Relation + per shown interval
+  // (Growth + Abs change) + optional observed rank + Effect.
+  const colCount = 6 + 2 * shown.length + (activeInterval ? 1 : 0);
   const presenceOf = (r) =>
     (intervals ?? [])
       .filter(({ key }) => r.intervals?.[key]?.valid === true)
@@ -1354,32 +1645,51 @@ function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, s
             const rel = activeInterval
               ? (r.intervals?.[activeInterval.key]?.relObs ?? r.relationToFocus)
               : r.relationToFocus;
+            const open = openIso === r.iso3;
+            const detailId = `${tableId}-${r.iso3}-details`;
             return (
-              <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-                <td className="num">{serialBase + i + 1}</td>
-                <th scope="row">
-                  {r.name ?? r.iso3}
-                  {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                  <GrowthDetails r={r} intervals={intervals} />
-                </th>
-                <td className="mono">{r.iso3}</td>
-                <td>{presenceOf(r)}</td>
-                <td>{rel}</td>
-                {shown.map(({ key }) => (
-                  <td key={`g-${key}`} className="num">
-                    {r.intervals?.[key]?.growthDisplay ?? '—'}
-                  </td>
-                ))}
-                {shown.map(({ key }) => (
-                  <td key={`a-${key}`} className="num">
-                    {r.intervals?.[key]?.absoluteDisplay ?? '—'}
-                  </td>
-                ))}
-                {activeInterval ? (
-                  <td className="num">{r.intervals?.[activeInterval.key]?.obsRank ?? '—'}</td>
+              <Fragment key={r.iso3}>
+                <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+                  <td className="num">{serialBase + i + 1}</td>
+              <th scope="row">
+                {r.name ?? r.iso3}
+                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
+                <button
+                  type="button"
+                  className="btn btn-ghost details-toggle"
+                  aria-expanded={open}
+                  aria-controls={detailId}
+                  onClick={() => setOpenIso(open ? null : r.iso3)}
+                >
+                  {open ? 'Hide details' : 'Details'}
+                </button>
+              </th>
+              <td className="mono">{r.iso3}</td>
+              <td>{presenceOf(r)}</td>
+                  <td>{rel}</td>
+                  {shown.map(({ key }) => (
+                    <td key={`g-${key}`} className="num">
+                      {r.intervals?.[key]?.growthDisplay ?? '—'}
+                    </td>
+                  ))}
+                  {shown.map(({ key }) => (
+                    <td key={`a-${key}`} className="num">
+                      {r.intervals?.[key]?.absoluteDisplay ?? '—'}
+                    </td>
+                  ))}
+                  {activeInterval ? (
+                    <td className="num">{r.intervals?.[activeInterval.key]?.obsRank ?? '—'}</td>
+                  ) : null}
+                  <td>{r.positionEffect === 'affects_position' ? 'Affects position' : 'Denominator only'}</td>
+                </tr>
+                {open ? (
+                  <tr className="details-row">
+                    <td colSpan={colCount} id={detailId}>
+                      <GrowthDetails r={r} intervals={intervals} yearA={yearA} yearB={yearB} yearMid={yearMid} />
+                    </td>
+                  </tr>
                 ) : null}
-                <td>{r.positionEffect === 'affects_position' ? 'Affects position' : 'Denominator only'}</td>
-              </tr>
+              </Fragment>
             );
           })}
         </tbody>
@@ -1393,11 +1703,53 @@ function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, s
  * growth %, absolute change, start/middle/end level values and the
  * like-for-like relation per interval. No Effect column (fixed population).
  */
-function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+  const tableId = useId();
+  const [openIso, setOpenIso] = useState(null);
+  const isMobile = useIsMobile();
   if (!rows || rows.length === 0) {
     return <p className="muted">None.</p>;
   }
   const levelYears = yearMid != null ? [yearA, yearMid, yearB] : [yearA, yearB];
+  if (isMobile) {
+    const levelOf = (r, y) => {
+      if (y === yearA) return r.displayA;
+      if (y === yearB) return r.displayB;
+      return r.displayMid;
+    };
+    return (
+      <MobileCardList
+        rows={rows}
+        serialBase={serialBase}
+        caption={caption}
+        renderSummary={(r) => (
+          <>
+            {intervals.flatMap(({ key, label }) => [
+              <DetailField key={`g-${key}`} label={`Growth ${label}`} num>
+                {r.intervals?.[key]?.growthDisplay ?? '—'}
+              </DetailField>,
+              <DetailField key={`a-${key}`} label={`Abs change ${label}`} num>
+                {r.intervals?.[key]?.absoluteDisplay ?? '—'}
+              </DetailField>,
+            ])}
+            {levelYears.map((y) => (
+              <DetailField key={`v-${y}`} label={`${y} value`} num>
+                {levelOf(r, y) ?? '—'}
+              </DetailField>
+            ))}
+            {intervals.map(({ key, label }) => (
+              <DetailField key={`vs-${key}`} label={`${label} vs India`}>
+                {r.intervals?.[key]?.relCommon ?? '—'}
+              </DetailField>
+            ))}
+          </>
+        )}
+        renderDetails={(r) => <GrowthDetails r={r} intervals={intervals} yearA={yearA} yearB={yearB} yearMid={yearMid} />}
+      />
+    );
+  }
+  // # + Economy + ISO3 + per interval (Growth + Abs change + vs India) + level values.
+  const colCount = 3 + 3 * intervals.length + levelYears.length;
   const levelOf = (r, y) => {
     if (y === yearA) return r.displayA;
     if (y === yearB) return r.displayB;
@@ -1437,13 +1789,25 @@ function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, capt
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-              <td className="num">{serialBase + i + 1}</td>
+          {rows.map((r, i) => {
+            const open = openIso === r.iso3;
+            const detailId = `${tableId}-${r.iso3}-details`;
+            return (
+              <Fragment key={r.iso3}>
+                <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+                  <td className="num">{serialBase + i + 1}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
-                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-                <GrowthDetails r={r} intervals={intervals} />
+                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
+                <button
+                  type="button"
+                  className="btn btn-ghost details-toggle"
+                  aria-expanded={open}
+                  aria-controls={detailId}
+                  onClick={() => setOpenIso(open ? null : r.iso3)}
+                >
+                  {open ? 'Hide details' : 'Details'}
+                </button>
               </th>
               <td className="mono">{r.iso3}</td>
               {intervals.map(({ key }) => (
@@ -1451,21 +1815,30 @@ function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, capt
                   {r.intervals?.[key]?.growthDisplay ?? '—'}
                 </td>
               ))}
-              {intervals.map(({ key }) => (
-                <td key={`a-${key}`} className="num">
-                  {r.intervals?.[key]?.absoluteDisplay ?? '—'}
-                </td>
-              ))}
-              {levelYears.map((y) => (
-                <td key={`v-${y}`} className="num">
-                  {levelOf(r, y) ?? '—'}
-                </td>
-              ))}
-              {intervals.map(({ key }) => (
-                <td key={`vs-${key}`}>{r.intervals?.[key]?.relCommon ?? '—'}</td>
-              ))}
-            </tr>
-          ))}
+                  {intervals.map(({ key }) => (
+                    <td key={`a-${key}`} className="num">
+                      {r.intervals?.[key]?.absoluteDisplay ?? '—'}
+                    </td>
+                  ))}
+                  {levelYears.map((y) => (
+                    <td key={`v-${y}`} className="num">
+                      {levelOf(r, y) ?? '—'}
+                    </td>
+                  ))}
+                  {intervals.map(({ key }) => (
+                    <td key={`vs-${key}`}>{r.intervals?.[key]?.relCommon ?? '—'}</td>
+                  ))}
+                </tr>
+                {open ? (
+                  <tr className="details-row">
+                    <td colSpan={colCount} id={detailId}>
+                      <GrowthDetails r={r} intervals={intervals} yearA={yearA} yearB={yearB} yearMid={yearMid} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1993,6 +2366,9 @@ function GrowthResults({ data }) {
             intervals={intervals}
             activeInterval={activeTab.interval}
             serialBase={(filteredList.page - 1) * filteredList.pageSize}
+            yearA={y.a}
+            yearB={y.b}
+            yearMid={y.mid ?? null}
             caption={`Economies outside the like-for-like growth universe, ${activeTab.label}`}
           />
           <p className="footnote" aria-live="polite">
