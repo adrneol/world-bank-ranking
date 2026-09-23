@@ -206,36 +206,54 @@ export default function App() {
       </a>
       <header className="app-header app-header-compact">
         <div className="wrap header-row">
-          <div>
-            <p className="eyebrow">World Bank WDI · India GDP per capita</p>
-            <h1>
-              India ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
-            </h1>
+          <div className="brand-row">
+            <img
+              src="/world-data-rankings-icon.png"
+              alt="World Data Rankings"
+              className="brand-icon"
+              width="56"
+              height="56"
+            />
+            <div>
+              <p className="eyebrow">World Bank WDI · India GDP per capita</p>
+              <h1>
+                India ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
+              </h1>
+            </div>
           </div>
           <Tabs views={VIEWS} active={view} onChange={(v) => setFilter('view', v)} />
         </div>
       </header>
 
       <div className="wrap">
-        <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
-          {yearsLoading ? (
-            <p className="status status-loading" role="status">
-              Loading available years…
-            </p>
-          ) : null}
-          {yearsError ? (
-            <div className="status status-error" role="alert">
-              <p>Could not load available years: {yearsError.message}</p>
-              <button type="button" className="btn btn-secondary" onClick={() => setDataVersion((v) => v + 1)}>
-                Retry
-              </button>
-            </div>
-          ) : null}
-          {/* The Movement view is not shown the global filter bar: it consumes
-              none of Period start / Period end / Year / Neighbors / Compare
-              from, and its Metric comes from its own comparison controls
-              (bound to the same filter state). Every other view keeps it. */}
-          {filtersReady && view !== 'movement' ? (
+        {/*
+          The Movement and Status views are not shown the global filter bar:
+          Movement consumes none of Period start / Period end / Year /
+          Neighbors / Compare from (its Metric comes from its own comparison
+          controls bound to the same filter state), and Status
+          (DataStatus, refresh-only) consumes none of them either. Hiding
+          only the rendering — the shared filter state stays intact for the
+          views that use it. Loading/error notices still render everywhere.
+        */}
+        {yearsLoading || yearsError ? (
+          <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
+            {yearsLoading ? (
+              <p className="status status-loading" role="status">
+                Loading available years…
+              </p>
+            ) : null}
+            {yearsError ? (
+              <div className="status status-error" role="alert">
+                <p>Could not load available years: {yearsError.message}</p>
+                <button type="button" className="btn btn-secondary" onClick={() => setDataVersion((v) => v + 1)}>
+                  Retry
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {filtersReady && view !== 'movement' && view !== 'status' ? (
+          <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Data filters">
               <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
               <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
@@ -270,8 +288,8 @@ export default function App() {
                 </select>
               </Field>
             </form>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         {refreshNotice ? (
           <p className="status status-ok" role="status">
