@@ -794,6 +794,12 @@ thead .sticky-col {
   margin: 0;
 }
 
+/* Growth interval card sections: clear vertical break between the Observed
+   and Like-for-like containers; inner field boxes stack naturally. */
+.growth-section + .growth-section {
+  margin-top: 1rem;
+}
+
 .subhead-secondary {
   font-size: 0.9rem;
   color: var(--muted);

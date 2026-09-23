@@ -1563,49 +1563,13 @@ function sortGrowthRows(rows, sort) {
   });
 }
 
-function GrowthPeerLines({ iv }) {
-  const peerLine = (avgDisplay, count, scope) => (
-    <div>
-      <dt>
-        {scope} peer average (excluding India)
-      </dt>
-      <dd className="num">
-        {avgDisplay != null ? (
-          <>
-            {avgDisplay} ({count} {count === 1 ? 'peer' : 'peers'})
-          </>
-        ) : (
-          'n/a (no other economies with calculable growth)'
-        )}
-      </dd>
-    </div>
-  );
-  const diffLine = (diffDisplay, scope) => (
-    <div>
-      <dt>{scope} difference</dt>
-      <dd className="num">{diffDisplay != null ? diffDisplay : 'n/a'}</dd>
-    </div>
-  );
-  return (
-    <>
-      <h4 className="facts-group-title">Observed</h4>
-      <dl className="facts">
-        {peerLine(iv.peerAvgObservedDisplay, iv.peerCountObserved, 'Observed')}
-        {diffLine(iv.vsPeerObservedDisplay, 'Observed')}
-      </dl>
-      <h4 className="facts-group-title">Like-for-like</h4>
-      <dl className="facts">
-        {peerLine(iv.peerAvgCommonDisplay, iv.peerCountCommon, 'Like-for-like')}
-        {diffLine(iv.vsPeerCommonDisplay, 'Like-for-like')}
-      </dl>
-      <p className="footnote">
-        Peer average (excluding India) is an unweighted mean of peer growth values. Differences are
-        percentage-point subtractions and never affect ranking.
-      </p>
-    </>
-  );
-}
-
+/**
+ * One self-contained growth interval card. Visual hierarchy (existing classes
+ * only): 1. growth % hero, 2. growth + like-for-like ranks, 3. per-capita
+ * start → end and absolute change (secondary), 4. compact Benchmark
+ * subsection (observed, then like-for-like), 5. subordinate indicator line,
+ * 6. verification inside a collapsed Details row.
+ */
 function GrowthIntervalCard({ iv, metric }) {
   if (!iv || !iv.available) {
     return (
@@ -1618,49 +1582,105 @@ function GrowthIntervalCard({ iv, metric }) {
       </div>
     );
   }
+  // Presentation-only wording: backend display strings are reused verbatim
+  // except the abbreviated "pp" suffix, which is expanded to the full phrase
+  // for readability. No values are recalculated here.
+  const ppText = (display) =>
+    display != null ? display.replace(/ pp$/, ' percentage points') : 'n/a';
+  const economiesText = (count) => `${count} ${count === 1 ? 'economy' : 'economies'}`;
+  // One self-contained comparison section (observed OR like-for-like): a
+  // bordered container holding four small subtle field boxes (universe,
+  // rank, average, difference). Labels carry the interval so values from
+  // different intervals can never be confused. Existing classes only.
+  const statBox = (label, value, valueClass, key) => (
+    <div key={key} className="denominators">
+      <p className="card-unit">{label}</p>
+      <div className={valueClass}>{value}</div>
+    </div>
+  );
+  const compareSection = ({
+    heading,
+    label,
+    universeLabel,
+    universeCount,
+    rankLabel,
+    rankText,
+    avgLabel,
+    avgDisplay,
+    avgCount,
+    diffLabel,
+    diffDisplay,
+    groupLabel,
+  }) => (
+    <div className="facts-group growth-section" role="group" aria-label={groupLabel}>
+      <h4 className="facts-group-title">{heading}</h4>
+      {statBox(`India's growth · ${label}`, iv.indiaGrowthDisplay ?? 'n/a', 'card-rank', 'india')}
+      {statBox(`${universeLabel} · ${label}`, economiesText(universeCount), 'card-rank', 'universe')}
+      {statBox(`${rankLabel} · ${label}`, rankText, 'card-rank', 'rank')}
+      {statBox(
+        `${avgLabel} · ${label}`,
+        avgDisplay != null ? `${avgDisplay} · ${economiesText(avgCount)}` : 'n/a (no other economies with calculable growth)',
+        'card-rank',
+        'average',
+      )}
+      {statBox(`${diffLabel} · ${label}`, ppText(diffDisplay), 'duo-rank', 'difference')}
+    </div>
+  );
   return (
     <div className="card">
       <h3>
         Growth {growthIntervalLabel(iv)} <span className="card-unit">YoY % growth</span>
       </h3>
-      <p className="card-rank" aria-label={`India growth ${iv.indiaGrowthDisplay} in ${growthIntervalLabel(iv)}`}>
+      <p className="card-unit">India&apos;s growth</p>
+      <p className="card-result-value" aria-label={`India growth ${iv.indiaGrowthDisplay} in ${growthIntervalLabel(iv)}`}>
         {iv.indiaGrowthDisplay ?? 'n/a'}
       </p>
       <p className="card-unit">
         Per-capita: {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}
       </p>
       <p className="card-unit">Absolute change: {iv.absoluteDisplay ?? 'n/a'}</p>
-      <p className="card-unit">
-        Growth rank: {iv.fullGrowthRank != null ? `#${iv.fullGrowthRank} / ${iv.denominatorObserved}` : 'n/a'}{' '}
-        (observed)
-      </p>
-      <p className="card-unit">
-        Like-for-like: {iv.commonGrowthRank != null ? `#${iv.commonGrowthRank} / ${iv.denominatorCommon}` : 'n/a'}
+      {compareSection({
+        heading: 'Observed',
+        label: growthIntervalLabel(iv),
+        universeLabel: 'Observed growth universe',
+        universeCount: iv.denominatorObserved,
+        rankLabel: "India's observed growth rank",
+        rankText: iv.fullGrowthRank != null ? `#${iv.fullGrowthRank} / ${iv.denominatorObserved}` : 'n/a',
+        avgLabel: 'Average growth of other economies',
+        avgDisplay: iv.peerAvgObservedDisplay,
+        avgCount: iv.peerCountObserved,
+        diffLabel: "India's growth vs observed average",
+        diffDisplay: iv.vsPeerObservedDisplay,
+        groupLabel: `Observed comparison for ${growthIntervalLabel(iv)}`,
+      })}
+      {compareSection({
+        heading: 'Like-for-like comparison',
+        label: growthIntervalLabel(iv),
+        universeLabel: 'Like-for-like growth universe',
+        universeCount: iv.denominatorCommon,
+        rankLabel: "India's like-for-like growth rank",
+        rankText: iv.commonGrowthRank != null ? `#${iv.commonGrowthRank} / ${iv.denominatorCommon}` : 'n/a',
+        avgLabel: 'Average growth of other economies in the like-for-like universe',
+        avgDisplay: iv.peerAvgCommonDisplay,
+        avgCount: iv.peerCountCommon,
+        diffLabel: "India's growth vs like-for-like average",
+        diffDisplay: iv.vsPeerCommonDisplay,
+        groupLabel: `Like-for-like comparison for ${growthIntervalLabel(iv)}`,
+      })}
+      <p className="footnote">
+        The average uses the same economies in the like-for-like comparison and excludes India.
       </p>
       <p className="card-code mono">
         {metric.indicatorCode} · {metric.unit}
       </p>
-    </div>
-  );
-}
-
-function GrowthStory({ data, intervals }) {
-  const growth = data.focusMovement?.growth ?? {};
-  const parts = (intervals ?? [])
-    .map(({ key }) => growth[key])
-    .filter((iv) => iv && iv.available)
-    .map((iv) => `${growthIntervalLabel(iv)} ${iv.indiaGrowthDisplay} (growth rank #${iv.fullGrowthRank}/${iv.denominatorObserved})`);
-  if (parts.length === 0) return null;
-  return (
-    <div>
-      <p>
-        India&apos;s per-capita growth by interval: {parts.join(' · ')}. Ranks order economies by growth
-        percentage alone; absolute per-capita change never affects rank.
-      </p>
-      <p>
-        Like-for-like growth ranks use one shared universe of {data.universe.common} economies with calculable
-        growth in every interval shown.
-      </p>
+      <details className="details">
+        <summary>Verification</summary>
+        <p className="mono footnote">Backend verification: {iv.identityText}</p>
+        <p className="footnote">
+          Peer averages exclude India and differences are percentage-point subtractions; neither affects
+          ranking.
+        </p>
+      </details>
     </div>
   );
 }
@@ -1752,22 +1772,11 @@ function GrowthResults({ data }) {
           <GrowthIntervalCard key={key} iv={growth[key]} metric={metric} />
         ))}
       </div>
-      {intervals.map(({ key }) => {
-        const iv = growth[key];
-        if (!iv || !iv.available) return null;
-        return (
-          <div key={key} className="explanation" role="note" aria-label={`Result in words for ${growthIntervalLabel(iv)}`}>
-            <GrowthPeerLines iv={iv} />
-            <p className="mono footnote">Backend verification: {iv.identityText}</p>
-          </div>
-        );
-      })}
-      <div className="explanation" role="note" aria-label="Growth story">
-        <GrowthStory data={data} intervals={intervals} />
-      </div>
       <p className="footnote">
-        Growth ranks order economies by growth percentage alone (rank 1 is the highest growth). Denominators
-        count {u.membershipRule}.
+        Growth ranks order economies by growth percentage alone (rank 1 is the highest growth). Like-for-like
+        ranks share one universe of {u.common} economies with calculable growth in every interval shown.
+        Denominators count {u.membershipRule}. A percentage-point difference is India&apos;s growth rate minus
+        the average growth rate.
       </p>
 
       <h3 className="subhead">Like-for-like comparison</h3>
