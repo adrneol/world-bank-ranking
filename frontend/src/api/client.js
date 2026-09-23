@@ -71,8 +71,8 @@ const get = (path, params, options) => request(path, { ...options, params });
 export const api = {
   health: (options) => get('/api/health', {}, options),
   years: (options) => get('/api/years', {}, options),
-  indiaRanking: ({ startYear, endYear, country } = {}, options) =>
-    get('/api/india/gdp-ranking', { startYear, endYear, country }, options),
+  indiaRanking: ({ startYear, endYear, country, subject } = {}, options) =>
+    get('/api/india/gdp-ranking', { startYear, endYear, country, subject }, options),
   ranking: ({ indicator, year, page, pageSize, search, country } = {}, options) =>
     get('/api/ranking', { indicator, year, page, pageSize, search, country }, options),
   rankVerify: ({ indicator, year, country, neighbors } = {}, options) =>
@@ -81,8 +81,8 @@ export const api = {
     get('/api/yoy-ranking', { indicator, year, page, pageSize, search, country }, options),
   yoyVerify: ({ indicator, year, country, neighbors } = {}, options) =>
     get('/api/yoy-ranking/verify', { indicator, year, country, neighbors }, options),
-  coverage: ({ year, country, fromYear, toYear, indicator } = {}, options) =>
-    get('/api/coverage', { year, country, fromYear, toYear, indicator }, options),
+  coverage: ({ year, country, fromYear, toYear, indicator, subject } = {}, options) =>
+    get('/api/coverage', { year, country, fromYear, toYear, indicator, subject }, options),
   comparisonLevel: ({ indicator, yearA, yearB, yearMid, country, detail, mode } = {}, options) =>
     get(
       '/api/comparison/level',

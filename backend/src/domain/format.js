@@ -21,6 +21,26 @@ export function formatNumber(value, options = {}) {
 }
 
 /**
+ * PRESENTATION-ONLY display scales.
+ *
+ * A metric may declare `displayScaleHint` (Total GDP values are on the order of
+ * 10^12). The hint changes ONLY the human-readable string produced in this
+ * module: the raw value, value_raw, ranking, growth, tie-breaking and every
+ * calculation keep the untouched World Bank number. Metrics without a hint
+ * render exactly as they always have (GDP-per-capita output is unchanged).
+ */
+const DISPLAY_SCALES = Object.freeze({
+  trillions: Object.freeze({ divisor: 1e12, suffix: ' trillion', decimals: 2 }),
+});
+
+/** The display scale declared by a metric, or null when it declares none. */
+export function displayScaleFor(metric) {
+  const hint = metric?.displayScaleHint;
+  if (!hint) return null;
+  return DISPLAY_SCALES[hint] ?? null;
+}
+
+/**
  * Raw value plus its display form for one metric.
  *
  * @param {number|null} value raw World Bank value
@@ -29,12 +49,20 @@ export function formatNumber(value, options = {}) {
 export function formatValue(value, metric) {
   const symbol = metric?.currencySymbol ?? '$';
   const unit = metric?.unitLong ?? metric?.unit ?? null;
+  const scale = displayScaleFor(metric);
+  const plain = formatNumber(value, { decimals: 0 });
   return {
     raw: value === null || value === undefined ? null : Number(value),
-    formatted: formatNumber(value, { decimals: 0 }) === null ? null : `${symbol}${formatNumber(value, { decimals: 0 })}`,
+    formatted:
+      plain === null
+        ? null
+        : scale
+          ? `${symbol}${formatNumber(Number(value) / scale.divisor, { decimals: scale.decimals })}${scale.suffix}`
+          : `${symbol}${plain}`,
     unit,
     currencySymbol: symbol,
-    decimals: 0,
+    decimals: scale ? scale.decimals : 0,
+    ...(scale ? { displayScale: metric.displayScaleHint } : {}),
   };
 }
 
@@ -67,6 +95,7 @@ export function formatPercentagePoints(value, options = {}) {
 export function describeMetric(metric) {
   return {
     key: metric.key,
+    subject: metric.subject,
     indicatorCode: metric.indicatorCode,
     label: metric.label,
     shortLabel: metric.shortLabel,
@@ -75,8 +104,11 @@ export function describeMetric(metric) {
     currencySymbol: metric.currencySymbol,
     group: metric.group,
     priceBasis: metric.priceBasis,
+    ppp: metric.ppp === true,
+    baseYear: metric.baseYear ?? null,
+    displayScale: metric.displayScaleHint ?? null,
     worldBankPage: metric.worldBankPage,
   };
 }
 
-export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, describeMetric };
+export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, describeMetric, displayScaleFor };

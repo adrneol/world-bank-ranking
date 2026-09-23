@@ -31,10 +31,11 @@ test('clean database passes null/aggregate/orphan/duplicate/year/finite checks',
 
   const universe = buildUniverse([...EDGE_METADATA, ...EDGE_BLANK_METADATA]);
   repository.upsertCountries(db, universe.countries);
-  const { METRIC_KEYS } = await import('../src/config.js');
+  const { ALL_METRIC_KEYS } = await import('../src/config.js');
   const eligibleIds = new Set(universe.eligible.map((c) => c.id));
   const eligibleRows = EDGE_OBSERVATIONS.filter((r) => r.value !== null && eligibleIds.has(r.iso3));
-  for (const metricKey of METRIC_KEYS) {
+  // A production-like database holds EVERY configured metric, both subjects.
+  for (const metricKey of ALL_METRIC_KEYS) {
     repository.upsertIndicator(db, { ...METRICS[metricKey], name: 'x', unit: 'u', source: 'WDI' });
     const indicator = repository.getIndicatorByMetricKey(db, metricKey);
     repository.upsertObservations(
@@ -59,16 +60,34 @@ test('partial indicator set fails H loudly instead of silently ranking a subset'
   // seedEdgeCaseDb ingests exactly one indicator.
   const { db } = await seedEdgeCaseDb();
   const report = await run(db);
-  assert.equal(statusOf(report, 'H.four_indicators'), 'fail');
-  assert.match(JSON.stringify(report.checks.find((c) => c.check === 'H.four_indicators').detail.found), /NY\.GDP\.PCAP\.CD/);
+  assert.equal(statusOf(report, 'H.registry_indicators'), 'fail');
+  assert.match(JSON.stringify(report.checks.find((c) => c.check === 'H.registry_indicators').detail.found), /NY\.GDP\.PCAP\.CD/);
   assert.equal(report.passed, false);
+});
+
+test('an unexpected indicator fails H (no series is silently accepted)', async () => {
+  const { db, repository } = await seedEdgeCaseDb();
+  // Smuggle in a series that is NOT part of the curated registry.
+  repository.upsertIndicator(db, {
+    key: 'unregistered_series',
+    indicatorCode: 'NY.GDP.MKTP.KN',
+    label: 'GDP (constant LCU)',
+    unit: 'constant LCU',
+    group: 'usd',
+    priceBasis: 'constant',
+  });
+  const report = await run(db);
+  const check = report.checks.find((c) => c.check === 'H.registry_indicators');
+  assert.equal(check.status, 'fail');
+  assert.match(JSON.stringify(check.detail.found), /NY\.GDP\.MKTP\.KN/);
+  assert.match(JSON.stringify(check.detail.expected), /NY\.GDP\.MKTP\.CD/);
 });
 
 test('empty database passes vacuously (nothing ingested yet)', async () => {
   const { db } = await createMemoryTestDb();
   const report = await run(db);
   assert.equal(report.passed, true);
-  for (const check of ['G.pagination_provenance', 'H.four_indicators', 'I.india_observations']) {
+  for (const check of ['G.pagination_provenance', 'H.registry_indicators', 'I.india_observations', 'K.registry_consistency']) {
     assert.equal(statusOf(report, check), 'pass', check);
   }
 });

@@ -15,7 +15,7 @@
  * exits 0 — it never alters the ranking algorithm to reproduce old values.
  */
 
-import config, { FOCUS_COUNTRY, METRICS, METRIC_KEYS } from '../config.js';
+import config, { ALL_METRIC_KEYS, FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
   buildUniverse,
   classifyObservation,
@@ -75,7 +75,7 @@ async function main() {
   console.log('World Bank live audit — India GDP per capita ranking');
   console.log(`  API base : ${config.worldBank.baseUrl}`);
   console.log(`  Years    : ${args.years.join(', ')}`);
-  console.log(`  Metrics  : ${METRIC_KEYS.map((k) => METRICS[k].indicatorCode).join(', ')}`);
+  console.log(`  Metrics  : ${ALL_METRIC_KEYS.map((k) => METRICS[k].indicatorCode).join(', ')}`);
   console.log('');
 
   const metadata = await fetchCountryMetadata({});
@@ -93,7 +93,7 @@ async function main() {
 
   // Fetch each indicator once for the full span (fewer requests, same rows).
   const seriesByMetric = {};
-  for (const metricKey of METRIC_KEYS) {
+  for (const metricKey of ALL_METRIC_KEYS) {
     const metric = METRICS[metricKey];
     const series = await fetchIndicatorSeries(metric.indicatorCode, minYear, maxYear, {});
     seriesByMetric[metricKey] = series;
@@ -106,7 +106,7 @@ async function main() {
   const results = [];
   let mismatches = 0;
 
-  for (const metricKey of METRIC_KEYS) {
+  for (const metricKey of ALL_METRIC_KEYS) {
     const metric = METRICS[metricKey];
     const series = seriesByMetric[metricKey];
     const rowsByYear = new Map();

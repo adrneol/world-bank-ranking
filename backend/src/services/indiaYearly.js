@@ -13,7 +13,7 @@
  * recompute value, YoY, rank or denominator (specification section 15).
  */
 
-import { FOCUS_COUNTRY, METRICS, METRIC_KEYS } from '../config.js';
+import { FOCUS_COUNTRY, METRICS, METRIC_KEYS, getSubject, metricKeysForSubject, subjectOf } from '../config.js';
 import {
   countEligibleCountries,
   getCountry,
@@ -51,7 +51,11 @@ function emptyCell(metric, reason, eligibleUniverse) {
  */
 export function buildIndiaYearlyRows(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const metricKeys = options.metricKeys ?? METRIC_KEYS;
+  // Subject-scoped: the GDP-per-capita four remain the default so every existing
+  // URL returns exactly the same payload; a subject (or explicit metricKeys list)
+  // selects that subject's own metrics. Subjects are never mixed in one response.
+  const metricKeys =
+    options.metricKeys ?? (options.subject ? metricKeysForSubject(options.subject) : METRIC_KEYS);
   const eligibleUniverse = countEligibleCountries(db);
 
   const metricInfo = {};
@@ -149,8 +153,12 @@ export function buildIndiaYearlyRows(db, options = {}) {
 
   const focusCountry = getCountry(db, focusIso3);
 
+  const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
+
   return {
     focus: { iso3: focusIso3, name: focusCountry?.name ?? FOCUS_COUNTRY.name },
+    subject: subjectKey,
+    subjectLabel: getSubject(subjectKey).label,
     eligibleUniverse,
     startYear: overallRange.minYear,
     endYear: overallRange.maxYear,

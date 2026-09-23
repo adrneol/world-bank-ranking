@@ -1,8 +1,12 @@
-# World Bank — India GDP per Capita Ranking
+# World Bank — India GDP Ranking (GDP per Capita + Total GDP)
 
 A data-verification application that retrieves World Bank World Development
-Indicators (WDI) and independently calculates India's yearly GDP-per-capita
-value, year-over-year change, rank, and denominator for four indicators.
+Indicators (WDI) and independently calculates India's yearly value,
+year-over-year change, rank, and denominator for eight indicators grouped
+into two analysis subjects: GDP per capita (four indicators) and Total GDP
+(four indicators). Both subjects flow through the same generic ranking / YoY
+/ comparison engines; each metric keeps its own independent ranking and
+denominator, and subjects are never mixed in one panel.
 
 > The World Bank provides the underlying observations. Historical country ranks
 > shown by this application are calculated by this application from those
@@ -10,16 +14,20 @@ value, year-over-year change, rank, and denominator for four indicators.
 
 ## Overview
 
-For each of four GDP-per-capita indicators, the application ingests official
-World Bank observations, filters out aggregate entities, ranks every eligible
-country/economy by raw value, and shows exactly where India stands — with the
-raw numbers, the neighboring countries, and the audit trail needed to verify
-each result. A React frontend presents the results; an Express API serves
-backend-calculated numbers; SQLite stores the retrieved observations.
+For each of eight World Bank indicators (four GDP-per-capita, four Total GDP),
+the application ingests official World Bank observations, filters out
+aggregate entities, ranks every eligible country/economy by raw value, and
+shows exactly where India stands — with the raw numbers, the neighboring
+countries, and the audit trail needed to verify each result. A React frontend
+presents the results; an Express API serves backend-calculated numbers;
+SQLite stores the retrieved observations. The frontend's Analysis selector
+(GDP per capita / Total GDP) switches the active subject; the metric key
+(`?metric=…`) remains the single source of truth, so existing per-capita URLs
+keep working unchanged.
 
 ## Features
 
-- Four World Bank GDP-per-capita indicators, ranked independently
+- Eight World Bank indicators in two subjects (GDP per capita, Total GDP), each ranked independently
 - India yearly table: value, YoY %, rank and denominator per year and metric
 - Year-range filtering and selected-year comparison
 - Level rank verification with configurable neighbor windows
@@ -34,17 +42,29 @@ backend-calculated numbers; SQLite stores the retrieved observations.
 
 ## Indicators
 
-| Indicator | World Bank code | Unit |
-|---|---|---|
-| Nominal GDP per capita | NY.GDP.PCAP.CD | current US$ |
-| Nominal GDP per capita | NY.GDP.PCAP.KD | constant 2015 US$ |
-| GDP per capita, PPP | NY.GDP.PCAP.PP.CD | current international $ |
-| GDP per capita, PPP | NY.GDP.PCAP.PP.KD | constant 2021 international $ |
+| Subject | Indicator | Metric key | World Bank code | Unit |
+|---|---|---|---|---|
+| GDP per capita | Nominal GDP per capita | `nominal_current` | NY.GDP.PCAP.CD | current US$ |
+| GDP per capita | Nominal GDP per capita | `nominal_constant` | NY.GDP.PCAP.KD | constant 2015 US$ |
+| GDP per capita | GDP per capita, PPP | `ppp_current` | NY.GDP.PCAP.PP.CD | current international $ |
+| GDP per capita | GDP per capita, PPP | `ppp_constant` | NY.GDP.PCAP.PP.KD | constant 2021 international $ |
+| Total GDP | Total GDP | `total_current` | NY.GDP.MKTP.CD | current US$ |
+| Total GDP | Total GDP (real GDP) | `total_constant` | NY.GDP.MKTP.KD | constant 2015 US$ |
+| Total GDP | Total GDP, PPP | `total_ppp_current` | NY.GDP.MKTP.PP.CD | current international $ |
+| Total GDP | Total GDP, PPP | `total_ppp_constant` | NY.GDP.MKTP.PP.KD | constant 2021 international $ |
 
 The constant-price series come directly from the corresponding World Bank
 indicators. They are not derived from current-price data, price indices, or
-any frontend conversion. The four series have different units and are never
-averaged or combined into a score.
+any frontend conversion. In World Bank terminology, constant-price GDP *is*
+real GDP; there is no separate "real GDP at current prices" series, and the
+application never synthesizes one. The series have different units and are
+never averaged or combined into a score — not within a subject, and never
+across subjects.
+
+Total GDP values are on the order of trillions of US$ (e.g. India 2025
+`NY.GDP.MKTP.CD` = 3,956,067,115,771.63). They are displayed scaled
+(e.g. `$3.96 trillion`) only at presentation time; ranking, YoY, comparison,
+tie detection, and audit always use the untouched raw value.
 
 ## How Ranking Works
 
@@ -205,11 +225,12 @@ this project has none to configure.
 
 ## Testing
 
-- Backend: `npm test` in `backend/` — 141 tests covering configuration,
-  country universe, ranking, ties, denominators, YoY, YoY ranking, pagination,
-  World Bank client behavior (retries, pagination completeness, error
-  envelopes), ingestion, refresh locking, cache TTL, coverage cases, services,
-  and HTTP endpoints. All 141 pass.
+- Backend: `npm test` in `backend/` — 220 tests covering configuration,
+  subject/metric registry, country universe, ranking, ties, denominators, YoY,
+  YoY ranking, pagination, World Bank client behavior (retries, pagination
+  completeness, error envelopes), ingestion (both subjects), refresh locking,
+  cache TTL, coverage cases, services, per-capita regression, Total GDP math
+  parity and API, and HTTP endpoints. All 220 pass.
 - Frontend: `npm run lint` and `npm run build` in `frontend/` — both pass.
   Integration is verified against the running backend (all views, filters,
   pagination, search, verification, refresh) with headless-browser checks.

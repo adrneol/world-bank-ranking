@@ -16,7 +16,17 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import config, { FOCUS_COUNTRY, METRIC_KEYS, SOURCE_INFO, getMetric } from './config.js';
+import config, {
+  ALL_METRIC_KEYS,
+  FOCUS_COUNTRY,
+  METRICS,
+  METRIC_KEYS,
+  SOURCE_INFO,
+  SUBJECT_KEYS,
+  describeSubjects,
+  getMetric,
+  getSubject,
+} from './config.js';
 import { closeDb, getDb } from './db/index.js';
 import {
   countAggregateCountries,
@@ -31,6 +41,7 @@ import {
   listIndicators,
 } from './db/repository.js';
 import { describeUniverseRule } from './domain/universe.js';
+import { describeMetric } from './domain/format.js';
 import { buildLevelComparisonResponse, COMPARISON_ERROR_CODES } from './services/comparisonService.js';
 import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
@@ -105,12 +116,30 @@ function parseYear(value, name) {
 function parseMetric(value, fallback = null) {
   if (value === undefined || value === null || value === '') {
     if (fallback) return fallback;
-    throw httpError(400, `Missing indicator. Valid keys: ${METRIC_KEYS.join(', ')} (or an exact World Bank indicator code).`, 'INVALID_INDICATOR');
+    throw httpError(400, `Missing indicator. Valid keys: ${ALL_METRIC_KEYS.join(', ')} (or an exact World Bank indicator code).`, 'INVALID_INDICATOR');
   }
   try {
     return getMetric(String(value)).key;
   } catch {
-    throw httpError(400, `Unknown indicator "${value}". Valid keys: ${METRIC_KEYS.join(', ')} (or an exact World Bank indicator code).`, 'INVALID_INDICATOR');
+    throw httpError(400, `Unknown indicator "${value}". Valid keys: ${ALL_METRIC_KEYS.join(', ')} (or an exact World Bank indicator code).`, 'INVALID_INDICATOR');
+  }
+}
+
+/**
+ * Optional analysis-subject filter (additive; never required). Only curated
+ * registry subjects are accepted; anything else fails closed with 400 so the
+ * frontend can never invent a subject server-side.
+ */
+function parseOptionalSubject(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  try {
+    return getSubject(String(value)).key;
+  } catch {
+    throw httpError(
+      400,
+      `Unknown analysis subject "${value}". Valid subjects: ${SUBJECT_KEYS.join(', ')}.`,
+      'INVALID_SUBJECT',
+    );
   }
 }
 
@@ -197,9 +226,11 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     if (startYear !== undefined && endYear !== undefined && startYear > endYear) {
       throw httpError(400, 'Invalid range: startYear must not exceed endYear.', 'INVALID_RANGE');
     }
+    const subject = parseOptionalSubject(req.query.subject);
     const result = buildIndiaYearlyRows(h, {
       ...(startYear !== undefined ? { startYear } : {}),
       ...(endYear !== undefined ? { endYear } : {}),
+      ...(subject ? { subject } : {}),
       focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
     });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -314,12 +345,15 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   app.get('/api/coverage', ah(async (req, res) => {
     const h = handle();
     const year = parseYear(req.query.year, 'year');
+    const subject = parseOptionalSubject(req.query.subject);
     const panel = buildCoveragePanel(h, {
       ...(year !== undefined ? { year } : {}),
+      ...(subject ? { subject } : {}),
       focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
     });
     const yoyPanel = buildYoyCoveragePanel(h, {
       ...(year !== undefined ? { year } : {}),
+      ...(subject ? { subject } : {}),
       focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
     });
 
@@ -435,7 +469,11 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       source: SOURCE_INFO,
       apiBaseUrl: config.worldBank.baseUrl,
       indicators: listIndicators(h),
-      expectedIndicators: METRIC_KEYS.map((k) => getMetric(k)),
+      expectedIndicators: ALL_METRIC_KEYS.map((k) => getMetric(k)),
+      subjects: describeSubjects().map((subject) => ({
+        ...subject,
+        metrics: subject.metricKeys.map((key) => describeMetric(METRICS[key])),
+      })),
       universe: {
         total: countAllCountries(h),
         eligible: countEligibleCountries(h),

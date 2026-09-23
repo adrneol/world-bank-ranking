@@ -10,7 +10,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api/client.js';
-import { METRIC_KEYS, metricLabel, resolveMetricKey } from './config/metrics.js';
+import {
+  SUBJECTS,
+  metricKeysForSubject,
+  metricLabel,
+  resolveMetricKey,
+  subjectLabel,
+  subjectOf,
+} from './config/metrics.js';
 import { Field } from './components/ui.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
 import Overview from './sections/Overview.jsx';
@@ -157,9 +164,12 @@ export default function App() {
         if (rawMid > lo && rawMid < hi) yearMid = rawMid;
       }
     }
-    // Rank-movement ranking basis: per-capita level (default) or YoY % growth.
+    // Rank-movement ranking basis: level value (default) or YoY % growth.
     const basis = filters.basis === 'growth' ? 'growth' : 'level';
-    return { startYear, endYear, year, metric, neighbors, fromYear, view, yearA, yearB, yearMid, basis };
+    // The analysis subject is derived from the metric key (single source of
+    // truth): nominal_* metrics imply GDP per capita, total_* imply Total GDP.
+    const subject = subjectOf(metric);
+    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis };
   }, [filters, availableYears, maxYear, minYear, defaultStart]);
 
   // Mirror effective state to the URL (UI state only, never business logic).
@@ -215,7 +225,7 @@ export default function App() {
               height="56"
             />
             <div>
-              <p className="eyebrow">World Bank WDI · India GDP per capita</p>
+              <p className="eyebrow">World Bank WDI · India {subjectLabel(effective.subject)}</p>
               <h1>
                 India ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
               </h1>
@@ -258,9 +268,28 @@ export default function App() {
               <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
               <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
               <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
+              <Field label="Analysis" htmlFor="f-subject">
+                <select
+                  id="f-subject"
+                  value={effective.subject}
+                  onChange={(e) => {
+                    const next = metricKeysForSubject(e.target.value);
+                    // The metric key is the single state: switching analysis
+                    // selects that subject's first metric (or keeps the
+                    // current one when it already belongs to the subject).
+                    setFilter('metric', next.includes(effective.metric) ? effective.metric : next[0]);
+                  }}
+                >
+                  {Object.values(SUBJECTS).map((subject) => (
+                    <option key={subject.key} value={subject.key}>
+                      {subject.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Metric" htmlFor="f-metric">
                 <select id="f-metric" value={effective.metric} onChange={(e) => setFilter('metric', e.target.value)}>
-                  {METRIC_KEYS.map((key) => (
+                  {metricKeysForSubject(effective.subject).map((key) => (
                     <option key={key} value={key}>
                       {metricLabel(key)}
                     </option>
@@ -303,12 +332,12 @@ export default function App() {
         <main id="main" key={`${dataVersion}:${view}`}>
           {filtersReady && view === 'overview' ? (
             <>
-              <Overview year={effective.year} />
-              <YearComparison year={effective.year} />
+              <Overview year={effective.year} subject={effective.subject} />
+              <YearComparison year={effective.year} subject={effective.subject} />
             </>
           ) : null}
           {filtersReady && view === 'data' ? (
-            <YearlyTable startYear={effective.startYear} endYear={effective.endYear} />
+            <YearlyTable startYear={effective.startYear} endYear={effective.endYear} subject={effective.subject} />
           ) : null}
           {filtersReady && view === 'rank' ? (
             <div role="tabpanel" id="panel-rank" aria-labelledby="tab-rank">
@@ -338,7 +367,7 @@ export default function App() {
           {filtersReady && view === 'yoy' ? (
             <div role="tabpanel" id="panel-yoy" aria-labelledby="tab-yoy">
               <p className="denominators">
-                YoY ranking orders countries by <strong>percentage change</strong>, not GDP-per-capita level.
+                YoY ranking orders countries by <strong>percentage change</strong>, not {subjectLabel(effective.subject)} level.
               </p>
               <SubTabs options={YOY_SUBS} active={yoySub} onChange={setYoySub} label="YoY workspace views" />
               {yoySub === 'ranking' ? (
@@ -349,7 +378,7 @@ export default function App() {
             </div>
           ) : null}
           {filtersReady && view === 'coverage' ? (
-            <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} />
+            <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} subject={effective.subject} />
           ) : null}
           {filtersReady && view === 'audit' ? (
             <AuditSource year={effective.year} metricKey={effective.metric} />

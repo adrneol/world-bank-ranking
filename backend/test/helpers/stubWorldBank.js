@@ -15,6 +15,12 @@ import {
   seriesEnvelope,
   snapshot,
 } from '../fixtures/snapshot.js';
+import {
+  TOTAL_GDP_LAST_UPDATED,
+  totalGdpIndicatorMetadataRow,
+  totalGdpMetricKeyForCode,
+  totalGdpRows,
+} from '../fixtures/totalGdp.js';
 
 /** Point the application at this stub. Call BEFORE importing src modules. */
 export function useStubBaseUrl(baseUrl) {
@@ -48,10 +54,25 @@ export async function startStubWorldBank(options = {}) {
     invalidJson: false,
   };
 
+  // Per-capita metrics are served from the committed versioned snapshot; the
+  // Total GDP subject is served from its own offline fixture (the versioned
+  // snapshot is deliberately never regenerated for the new subject).
+  const isSnapshotMetric = (metricKey) => Boolean(snapshot.indicators[metricKey]);
+  const envelopeFor = (metricKey) => {
+    if (isSnapshotMetric(metricKey)) return seriesEnvelope(metricKey);
+    const rows = totalGdpRows(metricKey);
+    return [
+      { page: 1, pages: 1, per_page: rows.length, total: rows.length, sourceid: '2', lastupdated: TOTAL_GDP_LAST_UPDATED },
+      rows,
+    ];
+  };
+  const metadataRowFor = (metricKey) =>
+    isSnapshotMetric(metricKey) ? indicatorMetadataRow(metricKey) : totalGdpIndicatorMetadataRow(metricKey);
+
   const metricKeyForCode = (code) =>
     Object.keys(snapshot.indicators).find(
       (key) => snapshot.indicators[key].indicatorCode === code,
-    ) ?? null;
+    ) ?? totalGdpMetricKeyForCode(code);
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -96,7 +117,7 @@ export async function startStubWorldBank(options = {}) {
         send([{ message: [{ id: '120', key: 'Invalid value', value: 'The provided parameter value is not valid' }] }]);
         return;
       }
-      const [baseMeta, baseRows] = seriesEnvelope(metricKey);
+      const [baseMeta, baseRows] = envelopeFor(metricKey);
       const rows = state.seriesRowsFor ? state.seriesRowsFor(metricKey, baseRows) : baseRows;
       const dateFilter = params.date ? String(params.date).split(':') : null;
       const filtered = dateFilter
@@ -124,8 +145,8 @@ export async function startStubWorldBank(options = {}) {
         return;
       }
       send([
-        { page: 1, pages: 1, per_page: 5, total: 1, sourceid: '2', lastupdated: snapshot.indicators[metricKey].lastUpdated },
-        [indicatorMetadataRow(metricKey)],
+        { page: 1, pages: 1, per_page: 5, total: 1, sourceid: '2', lastupdated: isSnapshotMetric(metricKey) ? snapshot.indicators[metricKey].lastUpdated : TOTAL_GDP_LAST_UPDATED },
+        [metadataRowFor(metricKey)],
       ]);
       return;
     }

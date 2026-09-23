@@ -9,7 +9,7 @@
 
 import { Fragment, useCallback, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
-import { METRIC_KEYS, METRICS, metricLabel } from '../config/metrics.js';
+import { METRICS, SUBJECTS, metricKeysForSubject, metricLabel, subjectOf } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { Field, Section, StatusBlock } from '../components/ui.jsx';
 
@@ -39,11 +39,28 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
   const validMidYears = (availableYears ?? []).filter(
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
+  const subject = subjectOf(metricKey);
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
+      <Field label="Analysis" htmlFor="mv-subject">
+        <select
+          id="mv-subject"
+          value={subject}
+          onChange={(e) => {
+            const next = metricKeysForSubject(e.target.value);
+            onMetric(next.includes(metricKey) ? metricKey : next[0]);
+          }}
+        >
+          {Object.values(SUBJECTS).map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+      </Field>
       <Field label="Metric" htmlFor="mv-metric">
         <select id="mv-metric" value={metricKey} onChange={(e) => onMetric(e.target.value)}>
-          {METRIC_KEYS.map((key) => (
+          {metricKeysForSubject(subject).map((key) => (
             <option key={key} value={key}>
               {metricLabel(key)}
             </option>
@@ -52,7 +69,9 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
       </Field>
       <Field label="Basis" htmlFor="mv-basis">
         <select id="mv-basis" value={basis} onChange={(e) => onBasis(e.target.value)}>
-          <option value={RANKING_BASIS.LEVEL}>Per-capita level</option>
+          <option value={RANKING_BASIS.LEVEL}>
+            {subject === 'gdp_total' ? 'Total GDP level (value)' : 'Per-capita level (value)'}
+          </option>
           <option value={RANKING_BASIS.GROWTH}>YoY % growth</option>
         </select>
       </Field>
@@ -1444,7 +1463,7 @@ function growthIntervalsOf(data) {
 
 /**
  * Growth-mode row details: identity, one section per selected interval
- * (growth, ranks, per-capita endpoints, absolute change, relations, reason
+ * (growth, ranks, level endpoints, absolute change, relations, reason
  * when unavailable — each its own labeled field), then World Bank metadata
  * and an exact-value raw audit group. Renders inside a full-width detail
  * row. Interval data is keyed by backend interval key, never by position.
@@ -1496,7 +1515,7 @@ export function GrowthDetails({ r, intervals, yearA, yearB, yearMid = null }) {
                     <DetailField label="Like-for-like growth rank" num>
                       {b.commonRank ?? '—'}
                     </DetailField>
-                    <DetailField label="Per-capita" num>
+                    <DetailField label="Level" num>
                       {b.startDisplay ?? '—'} → {b.endDisplay ?? '—'}
                     </DetailField>
                     <DetailField label="Absolute change" num>{b.absoluteDisplay ?? '—'}</DetailField>
@@ -1938,7 +1957,7 @@ function sortGrowthRows(rows, sort) {
 
 /**
  * One self-contained growth interval card. Visual hierarchy (existing classes
- * only): 1. growth % hero, 2. growth + like-for-like ranks, 3. per-capita
+ * only): 1. growth % hero, 2. growth + like-for-like ranks, 3. level
  * start → end and absolute change (secondary), 4. compact Benchmark
  * subsection (observed, then like-for-like), 5. subordinate indicator line,
  * 6. verification inside a collapsed Details row.
@@ -2009,7 +2028,7 @@ function GrowthIntervalCard({ iv, metric }) {
         {iv.indiaGrowthDisplay ?? 'n/a'}
       </p>
       <p className="card-unit">
-        Per-capita: {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}
+        Level: {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}
       </p>
       <p className="card-unit">Absolute change: {iv.absoluteDisplay ?? 'n/a'}</p>
       {compareSection({
@@ -2401,7 +2420,7 @@ function GrowthResults({ data }) {
       </h3>
       <p>
         Every economy in this table has calculable growth in every interval shown. Ranking is by growth
-        percentage alone; absolute per-capita change is shown for context and never affects rank.
+        percentage alone; absolute level change is shown for context and never affects rank.
       </p>
       <p className="footnote">
         The summary above is already complete. Open this only to inspect the like-for-like economies.

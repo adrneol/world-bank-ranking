@@ -13,7 +13,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { FOCUS_COUNTRY, METRICS, METRIC_KEYS, SOURCE_INFO, config, getMetric } from '../src/config.js';
+import { ALL_METRIC_KEYS, FOCUS_COUNTRY, METRICS, METRIC_KEYS, SOURCE_INFO, config, getMetric } from '../src/config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.resolve(here, '..');
@@ -28,15 +28,54 @@ test('exactly four primary metrics are configured', () => {
 });
 
 test('the four World Bank indicator codes are exact and never substituted', () => {
+  // The GDP-per-capita subject is frozen: same keys, same codes, same order.
+  // (Deliberate generalization, see plan §16C: the old blanket ban on the
+  // substring 'NY.GDP.MKTP' existed to prevent unverified substitution. Four
+  // MKTP codes are now verified members of the curated registry, so the guard
+  // is an exact allow-list plus an explicit forbid-list instead of a substring
+  // ban. Unverified expansion is still rejected.)
   assert.equal(METRICS.nominal_current.indicatorCode, 'NY.GDP.PCAP.CD');
   assert.equal(METRICS.nominal_constant.indicatorCode, 'NY.GDP.PCAP.KD');
   assert.equal(METRICS.ppp_current.indicatorCode, 'NY.GDP.PCAP.PP.CD');
   assert.equal(METRICS.ppp_constant.indicatorCode, 'NY.GDP.PCAP.PP.KD');
 
-  const codes = METRIC_KEYS.map((key) => METRICS[key].indicatorCode);
-  assert.equal(new Set(codes).size, 4, 'each metric must use its own indicator code');
-  for (const forbidden of ['NY.GNP', 'NY.GDP.MKTP', 'NV.IND', 'FP.CPI', 'NY.GDP.PCAP.PP.KD'.replace('PP.KD', 'PP.CD')]) {
-    assert.ok(!codes.some((code) => code.includes(forbidden)) || forbidden === 'NY.GDP.PCAP.PP.CD');
+  // The Total GDP subject is exactly the four verified raw WDI series.
+  assert.equal(METRICS.total_current.indicatorCode, 'NY.GDP.MKTP.CD');
+  assert.equal(METRICS.total_constant.indicatorCode, 'NY.GDP.MKTP.KD');
+  assert.equal(METRICS.total_ppp_current.indicatorCode, 'NY.GDP.MKTP.PP.CD');
+  assert.equal(METRICS.total_ppp_constant.indicatorCode, 'NY.GDP.MKTP.PP.KD');
+
+  // The curated registry is exactly these eight codes — no more, no fewer.
+  const allowed = [
+    'NY.GDP.PCAP.CD',
+    'NY.GDP.PCAP.KD',
+    'NY.GDP.PCAP.PP.CD',
+    'NY.GDP.PCAP.PP.KD',
+    'NY.GDP.MKTP.CD',
+    'NY.GDP.MKTP.KD',
+    'NY.GDP.MKTP.PP.CD',
+    'NY.GDP.MKTP.PP.KD',
+  ];
+  const codes = ALL_METRIC_KEYS.map((key) => METRICS[key].indicatorCode);
+  assert.equal(ALL_METRIC_KEYS.length, 8);
+  assert.equal(new Set(codes).size, 8, 'each metric must use its own indicator code');
+  assert.deepEqual([...codes].sort(), [...allowed].sort());
+
+  // Series that exist in WDI but are NOT usable here may never be registered:
+  // local-currency levels are not cross-country comparable, growth percentages
+  // must never enter the level/YoY engine, and unrelated families (GNI,
+  // industry share, CPI) are out of scope.
+  for (const forbidden of [
+    'NY.GDP.MKTP.KN',
+    'NY.GDP.MKTP.CN',
+    'NY.GDP.MKTP.KD.ZG',
+    'NY.GDP.PCAP.KD.ZG',
+    'NY.GNP.PCAP.CD',
+    'FP.CPI.TOTL.ZG',
+    'NV.IND.TOTL.ZS',
+    'NY.GDP.TOTAL.CD',
+  ]) {
+    assert.ok(!codes.includes(forbidden), `${forbidden} must not be registered`);
   }
 });
 
@@ -69,7 +108,7 @@ test('the World Bank API base URL and the no-API-key rule', () => {
   assert.match(envExample, /NO API KEY/i);
 });
 
-test('.env.example documents the four indicator variables and the defaults', () => {
+test('.env.example documents the indicator variables and the defaults', () => {
   const envExample = fs.readFileSync(path.join(backendRoot, '.env.example'), 'utf8');
   for (const variable of [
     'WORLD_BANK_API_BASE_URL',
@@ -77,6 +116,10 @@ test('.env.example documents the four indicator variables and the defaults', () 
     'WORLD_BANK_NOMINAL_CONSTANT_INDICATOR',
     'WORLD_BANK_PPP_CURRENT_INDICATOR',
     'WORLD_BANK_PPP_CONSTANT_INDICATOR',
+    'WORLD_BANK_TOTAL_CURRENT_INDICATOR',
+    'WORLD_BANK_TOTAL_CONSTANT_INDICATOR',
+    'WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR',
+    'WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR',
     'DEFAULT_START_YEAR',
     'DEFAULT_END_YEAR',
     'CACHE_TTL_HOURS',

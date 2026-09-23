@@ -33,7 +33,7 @@
  *   rowsUnknownCountry     rows whose ISO3 is absent from the metadata entirely
  */
 
-import { METRICS, METRIC_KEYS, config } from '../config.js';
+import { ALL_METRIC_KEYS, METRICS, config } from '../config.js';
 import { getDb } from '../db/index.js';
 import {
   acquireRefreshLock,
@@ -398,7 +398,7 @@ export async function refreshData(options = {}) {
     requestedStartYear,
     requestedEndYear,
   );
-  const metricKeys = options.indicators ?? METRIC_KEYS;
+  const metricKeys = options.indicators ?? ALL_METRIC_KEYS;
   const trigger = options.trigger ?? 'manual';
 
   const totals = {

@@ -1,0 +1,452 @@
+I have completed the codebase audit, the World Bank indicator verification, and the architecture analysis. No files were modified (Plan mode).
+
+Tooling note (honesty about validation): the workspace terminal in this session returns exit code 1 with no observable output completion (shell-integration failure), so I could not execute npm test. Every architectural claim below is traced to source lines I read, and every World Bank claim was verified by live API calls whose raw payloads are quoted. Running the 141-test backend suite must be done from Act mode.
+
+ARCHITECTURE & IMPLEMENTATION PROPOSAL — TOTAL GDP ALONGSIDE GDP PER CAPITA
+1. EXECUTIVE SUMMARY
+Yes — the existing analytical engine can support TOTAL GDP without duplicating any engine, and without changing existing per-capita behaviour.
+
+Evidence from the actual code:
+
+The domain engines are already pure numeric series processors. domain/ranking.js ranks {iso3, value}[] by "value DESC, ISO3 ASC" and explicitly documents "Method (identical for every metric and every year)"; domain/yoy.js computes ((cur/prev)-1)*100 from "RAW World Bank values"; domain/yoyRanking.js, domain/comparison.js, domain/growthComparison.js (like-for-like VALID(A) ∩ VALID(B), entered/exited/outside, decomposition identity) and domain/coverage.js all receive plain observation arrays. None of them reads a metric, a unit, a subject, or a metric-specific rule.
+The persistence layer is already indicator-generic: observations(country_id, indicator_id, year, value, value_raw, ...) with PRIMARY KEY (country_id, indicator_id, year). indicators holds code UNIQUE + metric_key UNIQUE. No structural migration is needed to store four more series.
+The ingestion pipeline is registry-driven: wb/ingest.js loops metricKeys (default METRIC_KEYS), calls the generic fetchIndicatorSeries(metric.indicatorCode, start, end), applies the one universe rule from domain/universe.js, and isolates per-indicator failures (wb/ingest.js:484-532). Nothing in it is per-capita-specific.
+The API layer identifies a metric by req.query.indicator through parseMetric() → getMetric() (server.js:105-115), which is registry-validated and backend-authoritative.
+The real obstacles are not mathematical — they are five concrete couplings:
+
+#	Blocker	Evidence
+B1	indicators.metric_key is globally UNIQUE and ingest_year_stats PK includes metric_key	schema.sql:50-52, schema.sql:125-141
+B2	Integrity check H asserts exactly four indicators	services/integrity.js:114-127
+B3	config.test.js asserts exactly four metrics and forbids NY.GDP.MKTP	test/config.test.js:21-41
+B4	METRIC_KEYS is a flat global list consumed by cards/table columns/filters	config.js:123, App.jsx:263, Overview.jsx:39, YearlyTable.jsx:69, YearComparison.jsx:51
+B5	Per-capita wording is baked into wire-visible strings and page chrome	growthComparisonService.js:525-527, RankMovement.jsx:55,1499,2012, App.jsx:218,341, YoyRanking.jsx:49, index.html:9-10
+Smallest safe extension: introduce a subject layer above the existing metric registry, keep METRICS/METRIC_KEYS byte-identical (so the per-capita subject is literally the same objects, same keys, same DB rows, same URLs), and give Total GDP namespaced metric keys over the same generic observation store. Four new verified World Bank series, no schema change, no engine change, no duplicated pages, no duplicated calculation.
+
+2. CURRENT ARCHITECTURE (as actually built)
+
+World Bank Indicators API  (https://api.worldbank.org/v2, OPEN, no key)
+   │  GET /country                        → wb/client.js: fetchCountryMetadata()
+   │  GET /indicator/{code}               → wb/client.js: fetchIndicatorMetadata()
+   │  GET /country/all/indicator/{code}   → wb/client.js: fetchIndicatorSeries()
+   │      (buildUrl / getWithRetry / parseEnvelope / fetchAllPages / checkPaginationCompleteness)
+   ▼
+INGESTION  wb/ingest.js  refreshData()
+   ├─ SQLite cross-process lock + in-process flag   (refresh_locks, ingest.js:366-394)
+   ├─ TEMP-table stash of countries/indicators/observations before writing (ingest.js:319-353)
+   ├─ country metadata → DOMAIN UNIVERSE  domain/universe.js buildUniverse()
+   │     aggregate iff region.id === "NA" ‖ region.value === "Aggregates" ‖ blank ISO3
+   ├─ per-metric loop  ingestIndicator(metricKey)   (ingest.js:141-260)
+   │     classifyObservation() precedence: missing → non-finite → invalid year →
+   │     blank ISO3 → aggregate entity → unknown country
+   └─ fetch_runs + ingest_year_stats audit rows; restore-on-total-failure
+   ▼
+STORAGE  db/schema.sql  (SQLite: countries, indicators, observations, fetch_runs,
+         ingest_year_stats, refresh_locks)  ·  all SQL in db/repository.js
+   observations: value REAL (calculation) + value_raw TEXT (audit) · missing = ABSENT ROW
+   ▼
+DOMAIN ENGINES (pure, no I/O)  backend/src/domain/
+   ranking.js        value DESC, ISO3 ASC → ordinal ranks · denominator = valid rows
+   yoy.js            ((cur/prev)-1)*100 · non-positive base → null + reason code
+   yoyRanking.js     rankByYoy · buildYoyRows (both years required, prev > 0)
+   comparison.js     like-for-like common universe · entered/exited/outside · identity check
+   growthComparison.js  same machinery over YoY %
+   coverage.js       CASE A/B/C/D explanations, YoY coverage, invented-cause guard
+   universe.js       THE single eligibility rule (+ describeUniverseRule())
+   format.js         PRESENTATION ONLY (raw + formatted side by side)
+   ▼
+SERVICES  backend/src/services/   (orchestration + integrity; no ranking math)
+   indiaYearly · fullRanking · rankVerification · yoyVerification · comparisonService
+   growthComparisonService · coverageService · integrity · vintage · attribution
+   ▼
+REST API  backend/src/server.js   (+ methodologyBlock(), error contract 400/409/500, 404)
+   /api/health /api/years /api/india/gdp-ranking /api/ranking /api/ranking/verify
+   /api/yoy-ranking /api/yoy-ranking/verify /api/comparison/level /api/coverage
+   /api/observations /api/countries /api/metadata /api/data-status /api/integrity
+   /api/data/refresh        metric identity = ?indicator=<metricKey | exact WB code>
+   ▼
+FRONTEND  React 19 + Vite (display only; never computes ranks/YoY/denominators)
+   api/client.js (single URL owner) → App.jsx state ↔ URL (?metric=…) → sections/*
+   Overview · Data(YearlyTable) · Rank(LevelVerification|FullRanking) · Movement
+   YoY(YoyRanking|YoyVerification) · Coverage · Audit · Status
+Where each concern lives
+
+Concern	Location
+Raw data enters	wb/client.js → wb/ingest.js
+Indicators defined	config.js METRICS (4 entries) + env overrides
+Metric identity	metric.key (API/UI), metric.indicatorCode (World Bank), indicators.metric_key (DB)
+Calculations	domain/* (pure) — never in services, never in the frontend
+Ranking	domain/ranking.js (+ describeRankChange)
+Comparison universes	domain/comparison.js, domain/growthComparison.js
+Frontend receives results	section components render backend numbers verbatim
+Duplicated logic frontend/backend	None found. Frontend has only a display registry (config/metrics.js, header comment: "Display-only … nothing here participates in any calculation") and utils/format.js for presentation.
+3. CURRENT PER-CAPITA IMPLEMENTATION (exact)
+backend/src/config.js:71-120 — the only metric registry in the product:
+
+key	env var (default)	indicator code	label	unit	group / priceBasis
+nominal_current	WORLD_BANK_NOMINAL_CURRENT_INDICATOR	NY.GDP.PCAP.CD	Nominal GDP per capita - current US$	current US$	nominal / current
+nominal_constant	WORLD_BANK_NOMINAL_CONSTANT_INDICATOR	NY.GDP.PCAP.KD	Nominal GDP per capita - constant 2015 US$	constant 2015 US$	nominal / constant
+ppp_current	WORLD_BANK_PPP_CURRENT_INDICATOR	NY.GDP.PCAP.PP.CD	GDP per capita PPP - current international $	current international $	ppp / current
+ppp_constant	WORLD_BANK_PPP_CONSTANT_INDICATOR	NY.GDP.PCAP.PP.KD	GDP per capita PPP - constant 2021 international $	constant 2021 international $	ppp / constant
+Mechanics per metric: same ingestion; separate indicators row; separate observations set; own denominator (eligible entities with a valid value that year); own level ranking; own YoY set (valid pairs, prev > 0); own YoY ranking; own coverage; own neighbor window; own comparison universe. The four are never averaged, summed or scored (PROJECT_REQUIREMENTS.md §3; Overview.jsx:63-64).
+
+Existing URL/API contract (must not change): UI ?metric=nominal_current (App.jsx:171) → API GET /api/ranking?indicator=nominal_current&year=…. getMetric() also accepts the exact World Bank code (config.js:131-137).
+
+Terminology defect worth recording (do not silently change): the labels "Nominal GDP per capita — constant 2015 US$" and "…constant 2021 international $" call a constant-price series "Nominal". The code itself is correct (priceBasis: 'constant'); only the human label is loose. Fixing it changes existing UI text, so it is an explicit, optional follow-up — never a side effect of this feature.
+
+4. WORLD BANK INDICATOR AUDIT (verified live, 2026-09-23)
+Every row below was verified by calling https://api.worldbank.org/v2/indicator/{code}?format=json and /country/IND/indicator/{code}?format=json during this session. Raw evidence is quoted in §4.2. WDI catalogue declares 1,498 indicators in source 2.
+
+4.1 Verified table
+Concept	Code	Official name (verbatim)	Unit	Price basis	PPP	Comparability across countries	Zero/negative possible	Suitable for level ranking	Suitable for computed YoY	Coverage / latest
+Total GDP, current US$ (a.k.a. "nominal GDP")	NY.GDP.MKTP.CD	GDP (current US$)	current US$ (unit field is ""; API decimal: 0)	current	no	Yes (US$ at current prices)	value > 0 in practice; schema permits any finite number	Yes	Yes (base > 0)	1960→2025; India 2025 = 3,956,067,115,771.63; 265 rows for 2024 incl. aggregates
+Total GDP, constant US$ (this is "real GDP" in WB terminology)	NY.GDP.MKTP.KD	GDP (constant 2015 US$)	constant 2015 US$	constant (reference year 2015)	no	Yes	as above	Yes	Yes	India 2025 = 3,693,970,992,045.56
+Total GDP, PPP current	NY.GDP.MKTP.PP.CD	GDP, PPP (current international $)	current international $	current	yes	Yes (PPP-converted)	as above	Yes	Yes	India 2025 = 17,197,369,286,822
+Total GDP, PPP constant	NY.GDP.MKTP.PP.KD	GDP, PPP (constant 2021 international $)	constant 2021 international $	constant (reference year 2021)	yes	Yes	as above	Yes	Yes	India 2025 = 14,695,849,780,451.9
+GDP growth (annual %)	NY.GDP.MKTP.KD.ZG	GDP growth (annual %)	% (name carries the unit; unit is "")	percent change of constant-price series	no	Yes	Yes — negative exists (India 2020 = -5.77772470687303)	Yes as a level/percent ranking; NOT meaningful to run the computed-YoY engine on it	No — double applies change semantics	India 2019–2021 verified
+GDP, current LCU	NY.GDP.MKTP.CN	GDP (current LCU)	local currency units	current	no	No — not cross-country comparable	—	No	Not applicable	exists
+GDP, constant LCU	NY.GDP.MKTP.KN	GDP (constant LCU)	local currency units; "reference year … varies by country"	constant, country-specific base	no	No	—	No	Not applicable	exists
+Per-capita growth (context only)	NY.GDP.PCAP.KD.ZG	GDP per capita growth (annual %)	%	constant-price per-capita change	no	Yes	negative possible	—	N/A	exists
+4.2 Evidence (verbatim excerpts)
+NY.GDP.MKTP.CD → "GDP (current US$)"; sourceNote: "This indicator is expressed in current prices, meaning no adjustment has been made to account for price changes over time. This indicator is expressed in United States dollars."
+NY.GDP.MKTP.KD → "GDP (constant 2015 US$)"; "The reference year for this adjustment is 2015."
+NY.GDP.MKTP.PP.CD → "GDP, PPP (current international $)"; "expressed in current international dollars, converted by purchasing power parities (PPPs)"
+NY.GDP.MKTP.PP.KD → "GDP, PPP (constant 2021 international $)"; "The reference year for this adjustment is 2021."
+Aggregate rows exist in the total-GDP series and carry real ISO3-like codes: 2024 page 1 returned AFE "Africa Eastern and Southern", ARB "Arab World", EAS "East Asia & Pacific" … while meta.total = 265 for the year. The existing metadata-driven universe rule (region.id === "NA") removes them, plus the blank-ISO3 rule removes income groups.
+Vintage consistency: live lastupdated = 2026-07-13 — the same vintage the app already records (README, wb-snapshot.json).
+4.3 Terminology determination (required by §3 of your brief)
+current-price GDP = NY.GDP.MKTP.CD ("GDP (current US$)"). Never call it "real".
+constant-price GDP = NY.GDP.MKTP.KD ("GDP (constant 2015 US$)"); in World Bank terminology "real GDP" is a synonym for constant-price GDP — there is no separate "real GDP" indicator. The application should use "constant 2015 US$" in UI text and may map the term "real GDP" only as an explicit gloss.
+PPP GDP current = NY.GDP.MKTP.PP.CD; PPP GDP constant = NY.GDP.MKTP.PP.KD (base 2021).
+"real GDP at current prices" is a contradiction and exists as no series → NOT AVAILABLE AS A RAW WORLD BANK INDICATOR; must never be produced by deflating/rebasing.
+A non-PPP constant series with a base other than 2015 (e.g. "GDP, constant 2021 US$"): NOT AVAILABLE AS A RAW WORLD BANK INDICATOR in the verified candidate set — rebasing KD is forbidden by the app's raw-data rule.
+"GDP (constant LCU)" / "GDP (current LCU)" exist but are not cross-country comparable → unusable for a country ranking.
+GDP growth (annual %) exists as a raw series, but feeding a percent series into the YoY engine double-applies change; if ever surfaced it must be a distinct, explicitly-scoped decision.
+Fabricated-code control test: NY.GDP.TOTAL.CD → [{"message":[{"id":"120","key":"Invalid value","value":"The provided parameter value is not valid"}]}] — the client already parses this error envelope and fails fast (wb/client.js:75-85). This is exactly why codes must be verified, never derived by analogy from PCAP → MKTP.
+5. REUSABILITY ANALYSIS (what is reused unchanged)
+Module	Verdict	Why
+wb/client.js	unchanged	fetchIndicatorSeries(code, …), fetchIndicatorMetadata(code), pagination-completeness, error envelope — all code-driven
+wb/ingest.js	unchanged	loops any metricKeys, isolates failures, stash/restore, locks, year stats
+db/schema.sql	unchanged	country-indicator-year-value store; no subject/unit columns needed
+db/repository.js	unchanged	every query is keyed on indicator.id; upsertIndicator(db, metric) writes metric.key generically
+domain/ranking.js	unchanged	numeric only
+domain/yoy.js / yoyRanking.js	unchanged	numeric only, same non-positive-base guard
+domain/comparison.js / growthComparison.js	unchanged	like-for-like & decomposition are measure-independent
+domain/coverage.js / universe.js	unchanged	"valid observation" is measure-independent
+domain/format.js	unchanged code path, one additive optional per-metric display hint (see §12/§13)	presentation only; must stay presentation only
+`services/indiaYearly	fullRanking	rankVerification
+server.js routes	unchanged; validation already registry-driven	parseMetric() rejects everything not registered
+frontend/src/api/client.js	unchanged	param name is already indicator (value-agnostic)
+frontend/src/hooks/useApi.js, components/*, utils/format.js	unchanged	value-agnostic
+frontend sections	changed only where they iterate the metric list (Overview, YearComparison, YearlyTable, Coverage, Movement metric select, App filter bar)	these iterate METRIC_KEYS
+Modules that must change (small, enumerated): config.js (additive registry), services/integrity.js (check H), services/* default scoping for the multi-metric panels, domain/format.js (optional display hint), frontend config/metrics.js + §6 list, plus docs.
+
+6. CURRENT COUPLING / HARD-CODING — every place assuming GDP per capita
+Backend — semantic (must change for correctness, not math):
+
+config.js:64-120 — flat METRICS; labels say "GDP per capita"; group/priceBasis only.
+config.js:123 — METRIC_KEYS is the list of everything.
+services/integrity.js:16-23,114-127 — check H "four_indicators"; after adding 4 series this check goes red (codes.length === 8).
+services/growthComparisonService.js:525-527 — wire strings positive_means_per_capita_increased (presentation/semantics of sign) — wrong for total GDP.
+services/coverageService.js:43-45,111-113 — panels default to all METRIC_KEYS (would render 8 metrics in one table).
+services/indiaYearly.js:54 — metricKeys = options.metricKeys ?? METRIC_KEYS.
+wb/ingest.js:401 — options.indicators ?? METRIC_KEYS (refresh default set).
+server.js:438 — /api/metadata expectedIndicators: METRIC_KEYS.map(getMetric).
+Doc comments naming GDP-per-capita: domain/yoyRanking.js:6-7, domain/growthComparison.js:4, server.js:282, db/schema.sql:2,46-52, README.md, PROJECT_REQUIREMENTS.md §1 ("Do NOT add … total GDP … unless explicitly requested later" — which this task now does).
+Frontend — labels/structure: 10. config/metrics.js:9-40 — flat 4-entry display registry + METRIC_KEYS. 11. App.jsx:218 header eyebrow "World Bank WDI · India GDP per capita"; App.jsx:341 "…not GDP-per-capita level"; App.jsx:261-269 Metric <select> over all keys. 12. Overview.jsx:39,63-64 — four-card loop + "four series" footnote. 13. YearComparison.jsx:7,32,51 — "four-metric" table over METRIC_KEYS. 14. YearlyTable.jsx:62,69-88 — caption "India GDP per capita by year for all four World Bank indicators", columns over METRIC_KEYS. 15. Coverage.jsx:8,60,95,109 — metric rows via metricLabel. 16. RankMovement.jsx:44-52 metric select; :55 basis label "Per-capita level"; :1499 Per-capita; :2012 Per-capita:; :1447-1448,1941-1943,2404 comments. 17. YoyRanking.jsx:49 — "Ordered by GDP-per-capita percentage change". 18. index.html:9-10 — title/meta description.
+
+Tests/docs: 19. test/config.test.js:21-41 — asserts exactly the 4 keys and forbids NY.GDP.MKTP (:38). 20. test/integrity.test.js (H check), test/fixtures/wb-snapshot.json (built by scripts/createSnapshot.js:93 looping METRIC_KEYS), test/fixtures/edgeCases.js (EDGE_METRIC_KEY). 21. README.md (title, features, indicators table, methodology), PROJECT_REQUIREMENTS.md, backend/package.json:5, frontend/package.json:5 descriptions.
+
+Everything else (≈60 of the 83 files) is measure-agnostic.
+
+7. PROPOSED DOMAIN MODEL
+Concept: ANALYSIS SUBJECT → METRIC → World Bank indicator → observations. One engine, many subjects.
+
+
+SUBJECT: gdp_per_capita                    SUBJECT: gdp_total
+  metric: nominal_current  ─┐                metric: total_nominal_current   ─┐
+  metric: nominal_constant  ├─ same engines  metric: total_nominal_constant   ├─ same engines
+  metric: ppp_current       │  same universe metric: total_ppp_current        │  same universe
+  metric: ppp_constant     ─┘  same storage  metric: total_ppp_constant      ─┘  same storage
+        │                                              │
+        └── NY.GDP.PCAP.*                              └── NY.GDP.MKTP.*   (verified codes only)
+Rules that make it safe:
+
+The per-capita subject IS the current registry, untouched. METRICS and METRIC_KEYS keep their exact 4 entries and order → identical DB rows, identical DB keys, identical URLs, identical responses, identical tests.
+Metric keys are globally unique and namespaced per subject. nominal_current stays per-capita; total GDP uses total_*. This is forced by indicators.metric_key UNIQUE and ingest_year_stats (fetch_run_id, metric_key, year). It also makes ?metric=nominal_current permanently unambiguous (your §11 requirement) with no new required parameter.
+A metric declares its subject (metric.subject), so the subject is derivable from any metric key on both sides — no second source of truth, no subject/metric disagreement possible.
+Nothing is derived from another series. Each metric carries its own verified indicatorCode; the app never multiplies, divides, deflates or rebases to create a series.
+No subject-level math. A subject is only a grouping for navigation and for the multi-metric panels. Ranks/YoY/denominators remain strictly per-metric, exactly as today (PROJECT_REQUIREMENTS.md §3).
+Future subjects (inflation, population, trade) need only: (a) a subject entry, (b) verified indicator codes, (c) nothing else. That is the justified-now abstraction. Not justified now: per-subject table schemas, per-subject engines, per-subject endpoints, a subject column in observations, a generic indicator-onboarding framework, or dynamic indicator discovery at runtime (that would break "backend authoritative + curated").
+GDP growth (annual %) should remain out of scope now: it is a percentage series whose semantic is already a change, so the level + YoY model must first be explicitly re-scoped for it (documented as future work, §18).
+8. PROPOSED METRIC REGISTRY (conceptual sketch — not an implementation patch)
+
+// backend/src/config.js — ADDITIVE ONLY. Existing METRICS entries keep their exact
+// key, order, indicatorCode, label, unit, priceBasis. Nothing above is edited.
+
+export const SUBJECTS = Object.freeze({
+  gdp_per_capita: Object.freeze({
+    key: 'gdp_per_capita',
+    label: 'GDP per capita',
+    metricKeys: Object.freeze(['nominal_current','nominal_constant','ppp_current','ppp_constant']),
+  }),
+  gdp_total: Object.freeze({
+    key: 'gdp_total',
+    label: 'Total GDP',
+    metricKeys: Object.freeze([
+      'total_nominal_current', 'total_nominal_constant',
+      'total_ppp_current',     'total_ppp_constant',
+    ]),
+  }),
+});
+
+// New metrics: same shape as existing ones + `subject`, `ppp`, `baseYear`, and an
+// OPTIONAL display hint consumed ONLY by domain/format.js (presentation only).
+export const METRICS = Object.freeze({
+  /* … 4 existing entries unchanged … */
+
+  total_nominal_current: Object.freeze({
+    key: 'total_nominal_current',
+    subject: 'gdp_total',
+    indicatorCode: str('WORLD_BANK_TOTAL_NOMINAL_CURRENT_INDICATOR', 'NY.GDP.MKTP.CD'), // VERIFIED
+    label: 'GDP — current US$',                  // NOT "real", NOT "nominal-because-constant"
+    shortLabel: 'Current US$',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'current',
+    priceBasis: 'current',
+    ppp: false,
+    displayScaleHint: 'trillions',               // presentation only; per-capita entries keep none
+    worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.CD',
+  }),
+  total_nominal_constant: Object.freeze({ /* NY.GDP.MKTP.KD    — constant, reference year 2015 */ }),
+  total_ppp_current:      Object.freeze({ /* NY.GDP.MKTP.PP.CD — PPP, current                    */ }),
+  total_ppp_constant:     Object.freeze({ /* NY.GDP.MKTP.PP.KD — PPP, constant, ref. year 2021   */ }),
+});
+
+export const METRIC_KEYS = Object.freeze(['nominal_current','nominal_constant','ppp_current','ppp_constant']); // UNCHANGED
+export const ALL_METRIC_KEYS = Object.freeze(Object.keys(METRICS));   // ingestion/registry-wide
+export function subjectOf(metricKey) { … }                            // → 'gdp_per_capita' | 'gdp_total'
+export function metricKeysForSubject(subjectKey) { … }
+export function describeSubjects() { … }                              // /api/metadata + frontend
+Hard rules encoded here: getMetric() still throws on unknown keys/codes; no metric may exist without a subject; no subject may reference a metric outside METRICS; a startup/test invariant asserts every indicatorCode is unique and that the four per-capita codes are exactly as today.
+
+9. PROPOSED API ARCHITECTURE (old and new contracts)
+Unchanged (byte-for-byte):
+
+
+GET /api/ranking?indicator=nominal_current&year=2025&country=IND&neighbors=5
+GET /api/india/gdp-ranking?startYear=2000&endYear=2025
+GET /api/yoy-ranking?indicator=ppp_constant&year=2025
+GET /api/comparison/level?indicator=nominal_constant&yearA=2004&yearB=2014&mode=level
+GET /api/coverage?year=2025            GET /api/observations?indicator=…&year=…&country=…
+→ per-capita subject, identical numbers, identical denominators, identical tie ordering.
+
+New capability (additive):
+
+
+GET /api/ranking?indicator=total_nominal_current&year=2025
+GET /api/comparison/level?indicator=total_ppp_constant&yearA=2004&yearB=2014
+Because metric_key is globally unique, the subject is implied by the metric — no new required parameter, therefore no ambiguity is introduced into existing URLs.
+
+Additive metadata so the frontend never hard-codes validity:
+
+
+GET /api/metadata   →  + "subjects": [ { key, label, metricKeys:[…] } ]
+                       "indicators": [ …8 rows incl. subject … ]
+                       "expectedIndicators": [ …8 … ]
+GET /api/indicators →  (optional new, thin) registry echo for machine-readable agents
+GET /api/india/gdp-ranking?subject=gdp_total   (optional, additive)
+Response schema: every metric-bearing response keeps its existing fields and gains metric.subject (via describeMetric) — additive, so old consumers ignore it.
+
+Optional Phase-2 sugar (only if you want subject in the URL for canonical/SEO links): accept ?subject=gdp_total&metric=nominal_current server-side and canonicalise it to total_nominal_current in the response (metric.canonicalKey), rejecting contradictions with 400 INVALID_SUBJECT_METRIC. Do not make the frontend depend on it; keep metric as the single identity. Trade-off: one extra validation branch and a second input shape, in exchange for friendlier canonical URLs.
+
+Caching: there is no HTTP cache layer (CACHE_TTL_HOURS governs the SQLite data cache, not responses), so no cache-key collisions are introduced; if response caching is ever added, key it on (endpoint, indicator, year(s), pagination, focus).
+
+10. DATABASE IMPACT
+No schema migration. Verified: observations(country_id, indicator_id, year, value, value_raw, wb_last_updated, fetched_at) is already a generic country-indicator-year store; countries.is_aggregate is the single central verdict; indicators accepts any (code, metric_key) pair. Four new indicators ⇒ four new indicators rows and ~4 × countries × years observation rows.
+
+Two explicit constraints to respect (not migrations, design rules):
+
+indicators.metric_key UNIQUE (schema.sql:51) ⇒ new keys must be namespaced (total_*). Reusing nominal_current would either violate the constraint or silently re-point the per-capita indicator to a total-GDP code — a catastrophic regression.
+ingest_year_stats PK (fetch_run_id, metric_key, year) (schema.sql:139) ⇒ again distinct keys.
+The in-place column migrator (db/index.js:29-59 ADDED_COLUMNS) means an existing local cache keeps working; it simply lacks the new indicator rows until the next refresh. No value is ever deleted or rewritten, so the existing 4-series cache stays valid.
+
+11. INGESTION IMPACT
+No second pipeline. The flow for the new series is exactly today's:
+
+Register the four verified codes in config.js (env-overridable, .env.example documented).
+Refresh: POST /api/data/refresh (already accepts a narrowed indicators array — useful for a cheap staged first load) or the default/TTL/boot path. If the default becomes ALL_METRIC_KEYS, the first post-deploy refresh ingests 8 series. Cost estimate: per indicator-year-range one request at WB_PER_PAGE=20000 (India-inclusive series ≈ 266 entities × years ≪ 20 000 rows/page), i.e. +4–8 HTTP requests and ≈ +23 000 rows (the current 4-series cache holds 23 320 rows per the recorded snapshot) — one-time; the response is roughly a doubling of refresh duration, not a redesign.
+Normalisation: identical — classifyObservation() precedence, blank-ISO3 rule, aggregate rejection (verified that total-GDP aggregate rows exist and are caught), null-never-zero, value_raw canonical decimal.
+Audit: fetch_runs + ingest_year_stats gain rows with the new metric_key; each new series is independently auditable (its own wb_last_updated, counters, year stats).
+Failure isolation: a broken new series does not abort a refresh (ingest.js:522-531) — the per-capita dataset keeps serving.
+12. CALCULATION IMPACT
+Reused with zero changes: level ranking + tie-break + denominator; YoY %; YoY ranking + YoY denominator; like-for-like common universe; entered/exited/outside universes; rank-movement decomposition and its self-verification; observed/eligible universe logic; coverage cases (A/B/C/D) and their invented-cause guard; India-relative placement (above/below/crossed); rank movement across periods; pagination/search.
+
+Property-by-property check for total GDP (data-integrity audit, §15 of your brief):
+
+Property	Per-capita today	Total GDP	Verdict
+Growth formula ((cur/prev)-1)*100	applied to levels	levels, strictly positive bases	identical, valid
+Zero start value	guard: base ≤ 0 → null + reason	GDP levels > 0 in practice; guard still correct if ever 0	unchanged
+Negative values	levels are positive	levels are positive (growth indicator can be negative but is out of scope)	unchanged
+Missing observations	row absent → never 0	same	unchanged
+Ties	value DESC, ISO3 ASC, ordinal ranks	same rule; fewer ties expected, and they are impossible to mis-handle because the sort is a total order	unchanged
+Observed universe	eligible ∩ valid	same (per indicator-year)	unchanged
+Common universe	VALID(A) ∩ VALID(B) per metric	same, computed on total-GDP series	unchanged
+Entered/exited/outside	from universe sets	same	unchanged
+Above/below/crossed India	position arithmetic	same	unchanged
+Long-period growth, denominator consistency, rounding, raw precision	raw REAL used for math, value_raw for audit, formatting at presentation	same	unchanged
+Denominator level differs between subjects	217 eligible; per-capita valid ≈ 200s	total GDP typically has more valid countries than per-capita (population denominators) and it is measured independently	expected difference, must be documented and tested — not a bug
+Magnitude/unit display	thousands of US$ → $2,481	trillions → $3,956,067,115,772	presentation decision required (below)
+Cross-subject comparability	n/a	never compare total_* with nominal_*; different units	rule must be stated in responses/UI
+Formatting (presentation-only, domain/format.js): formatValue currently renders decimals: 0 with a $ prefix for every metric. For total GDP that yields long strings such as $3,956,067,115,772. Recommended additive change: per-metric display hints (e.g. displayScaleHint: 'trillions') consumed only by format.js, so per-capita output is bit-identical (they carry no hint), while total GDP can render $3.96 trillion alongside the untouched raw value and value_raw. Raw precision, ranking math and tie detection remain unaffected — this is the only "calculation-adjacent" file to touch, and only in the presentation half that the file's own header declares off-limits to calculations.
+
+13. DATA-INTEGRITY GUARANTEES
+Curated registry only. getMetric() throws on anything unregistered; parseMetric() maps that to 400 INVALID_INDICATOR. No route accepts an arbitrary indicator code into SQL or into the World Bank fetch path.
+Verified codes. Registration requires the code to pass /v2/indicator/{code} (documented in .env.example and enforced by a test that pins all 8 codes exactly, mirroring config.test.js:30-41).
+No synthetic series. No multiplication/division/deflation/rebasing anywhere; the app's only arithmetic is ranking comparison and percentage change on stored observations. Constant-price series come from the World Bank, never derived (README already states this and must be extended, not weakened).
+No cross-subject mixing. Every response names metric {key, subject, indicatorCode, unit}; every panel is scoped to one subject; rankings are computed per metric only.
+Fail-closed comparisons. comparisonService already throws COMPARISON_INVARIANT_FAILED rather than returning partial numbers — the new series inherits that.
+Integrity checks generalised, not relaxed: H becomes "every configured metric exists in indicators with the exact configured code, and no unexpected code is present" (still catches partial ingests). Checks A–G, I, J stay exactly as they are.
+Frontend never authoritative: the subject/metric lists come from the backend (/api/metadata, /api/years), and any unknown key in a URL resolves to the per-capita default exactly as resolveMetricKey does today (App.jsx:137).
+14. UI / UX ARCHITECTURE
+Keep the navigation Overview · Data · Rank · Movement · YoY · Coverage · Audit · Status and put the subject selector inside the existing global filter bar, which already contains a Metric <select id="f-metric"> (App.jsx:261-269).
+
+Option A (recommended) — "Analysis" + "Metric" selects in the existing filter bar.
+
+ANALYSIS [ GDP per capita ▼ ] (values from the backend registry; default = gdp_per_capita).
+METRIC [ Nominal Current ▼ ] — options filtered to the chosen subject (4 per-capita, or 4 total GDP).
+Selecting a metric writes the same ?metric= parameter (namespaced key); the Analysis select is a view over the metric key, so there is exactly one piece of state and zero URL changes.
+Fits the current layout exactly (one extra Field in .filter-grid, same components/CSS classes).
+Every existing view then operates on the selected subject: cards become the subject's four, the yearly table keeps one row per year × 4 metric groups, Rank/Movement/YoY/Coverage/Audit pass the same namespaced metric key to unchanged endpoints.
+Complexity: low. Scaling to inflation/population/trade = registry entries only.
+Disadvantage: the subject is one click deeper than a tab (mitigated by the header eyebrow showing the active subject).
+Option B — segmented subject control under the header (ANALYSIS SUBJECT [GDP per capita][Total GDP]), SubTabs component already exists (components/Tabs.jsx, used for Rank/YoY sub-views).
+
+Pros: most discoverable, visually "second-level navigation", clearly separates "what" from "which version".
+Cons: adds a second state variable alongside ?metric=, so the two can disagree unless the subject is always derived from the metric — i.e. extra reconciliation code; also steals vertical space on mobile.
+Complexity: low-medium. Scales well.
+Option C — subjects in the main navigation (GDP · GDP per capita · Inflation …) — reject: crowds the nav, multiplies page sets, and directly contradicts your §10. High complexity, poor scaling.
+
+Recommendation: Option A, tied to the actual codebase: (i) one existing Field pattern, no new nav, no new state variable, no URL change; (ii) it composes with the already-present sub-tabs; (iii) the metric-key-as-identity invariant is preserved, which is what keeps ?metric=nominal_current safe; (iv) it scales by configuration. Concretely: Overview cards and the yearly/comparison tables iterate metricKeysForSubject(activeSubject) instead of METRIC_KEYS; for the per-capita subject the rendered output is identical to today.
+
+Sub-item: rename the Movement Basis option "Per-capita level" → "Level (value)" and the detail labels "Per-capita" → "Level"/"Value", and make the YoY/Overview/W-T copy subject-aware ("percentage change", "Total GDP"), since these strings are currently per-capita-specific (RankMovement.jsx:55,1499,2012, YoyRanking.jsx:49, App.jsx:341, Overview.jsx:63).
+
+15. BACKWARD COMPATIBILITY
+Surface	Guarantee	Mechanism
+?metric=nominal_current (and the other 3 keys)	unchanged meaning	keys are untouched and remain per-capita; the new keys are disjoint
+?metric=NY.GDP.PCAP.CD (code form)	unchanged	getMetric() code path untouched
+Unknown/blank metric in URL	unchanged fallback to nominal_current	resolveMetricKey untouched
+?view/year/startYear/endYear/neighbors/fromYear/yearA/yearB/yearMid/basis	unchanged	no param added, renamed or removed; PARAMS untouched
+API contracts (indicator= value space)	strictly extended, never re-pointed	new keys only; responses gain optional metric.subject
+Ranking/growth/tie/universe/like-for-like/outside/audit numbers	identical	domain/* and repository.js byte-identical; METRIC_KEYS order preserved
+Formatting of per-capita values	identical	display hints are opt-in per metric; per-capita entries define none
+Existing tests	pass except the two that assert the old scope (see §16)	left untouched; the two scope-guards are deliberately generalized
+16. TEST PLAN (must pass before release)
+A. Regression proof that per-capita is untouched (highest priority)
+
+perCapitaKeysFrozen.test.js — deepEqual(METRIC_KEYS, [nominal_current, nominal_constant, ppp_current, ppp_constant]); per-capita indicatorCodes exactly as today; every metric belongs to exactly one subject; all 8 indicatorCodes unique.
+perCapitaGolden.test.js — seed the existing 4-metric fixture (test/helpers/testDb.js, fixtures/wb-snapshot.json) and assert exact India value/rank/denominator/YoY + neighbour windows for several years (2004, 2014, 2025 where present) for all 4 per-capita metrics, before/after the change, using stored expectations. Include the YoY-rank denominator, comparisons mode=level and mode=yoy, and the entered/exited/outside decomposition counts.
+apiContract.test.js — snapshot the JSON shape (keys) of every endpoint response for the per-capita subject; confirm ?indicator=nominal_current returns identical payload with the additive subject field only.
+httpPerCapitaUnchanged.test.js — the existing server.test.js/comparisonApi.test.js/growthComparisonApi.test.js must pass unmodified.
+B. New coverage for Total GDP 5. Registry: 4 total-GDP keys; verified codes (NY.GDP.MKTP.CD/KD/PP.CD/PP.KD); units and base years (2015 / 2021) declared; subject === 'gdp_total'; getMetric('total_ppp_constant') → 'NY.GDP.MKTP.PP.KD'; getMetric('ny.gdp.mktp.cd') throws. 6. Ingestion (stub WB server): both series land in observations under distinct indicator_id; aggregate rows (ARB, AFE, blank ISO3) counted in the right audit counters and never stored; null never stored as 0; value_raw round-trips; ingest_year_stats rows for the new keys; a failing new series does not abort the refresh. 7. Math parity on synthetic data: for a crafted total-GDP series, rank/YoY/YoY-rank/common-universe/entered-exited/outside results equal independently hand-computed expectations (mirroring ranking.test.js, yoy.test.js, comparison.test.js, numerical.test.js style). 8. Edge cases: tie in total GDP (identical values, ISO3 order), missing year inside a range, single-country universe, prev == 0, huge magnitudes (1e13) preserved exactly, formatValue raw vs display. 9. Denominator independence: same year, total GDP denominator ≠ per-capita denominator when coverage differs, and neither leaks into the other. 10. Negative/percentage guard: assert the app never computes YoY on a percent series (i.e. NY.GDP.MKTP.KD.ZG is not registered) — an explicit "unsupported metric" test. 11. API: /api/ranking|verify|yoy-ranking|yoy-ranking/verify|comparison/level|coverage|observations|india/gdp-ranking for each of the 4 new keys; unknown key → 400 INVALID_INDICATOR; invalid subject/metric pair → 400 (if Phase-2 sugar lands); /api/metadata exposes subjects. 12. Integrity: check H passes with 8 series and fails on a partial/foreign set; A–G, I, J unchanged. 13. Frontend: npm run lint, npm run build, plus query-state checks — ?metric=nominal_current renders the per-capita subject; ?metric=total_nominal_current renders Total GDP with the right unit labels; unknown ?metric=xyz falls back exactly as today; the Movement subject/metric selects cannot disagree. 14. Optional live smoke (not in CI): npm run audit:live-style script extended to verify the new codes return data for IND and that aggregate rows are present-but-excluded.
+
+C. Deliberate, documented test-scope edits (only these two) 15. test/config.test.js — split the "exactly four metrics" assertion into "the per-capita subject is exactly these four keys/codes" + "every registered metric belongs to a subject and all codes are unique"; replace the blanket NY.GDP.MKTP prohibition with the exact, verified allow-list (NY.GDP.MKTP.CD, NY.GDP.MKTP.KD, NY.GDP.MKTP.PP.CD, NY.GDP.MKTP.PP.KD) while continuing to forbid NY.GDP.MKTP.KN, NY.GDP.MKTP.CN, NY.GDP.MKTP.KD.ZG, NY.GNP*, FP.CPI*, NV.IND*. Rationale documented in the test header: the old guard existed to prevent unverified substitution; the new guard prevents unverified expansion while permitting the verified set. 16. test/integrity.test.js — H expectation updated to the curated registry set (still fails loudly on partial ingests).
+
+17. MIGRATION PLAN (ordered, each step independently verifiable)
+Design lock — approve this document (subjects, namespaced keys, Option A UI, formatting policy, growth-out-of-scope).
+Registry — add SUBJECTS, subject/ppp/baseYear fields, 4 new metric entries, ALL_METRIC_KEYS, subjectOf, metricKeysForSubject, describeSubjects; extend .env.example; keep METRICS/METRIC_KEYS semantics for the 4 existing entries. Tests: A1 + B5.
+Integrity + service scoping — generalise check H; make multi-metric panels (buildCoveragePanel, buildYoyCoveragePanel, buildIndiaYearlyRows) accept a subject/metricKeys scope whose default remains the per-capita four, so unchanged URLs produce unchanged payloads. Tests: A2/A3/A4 + B9/B12.
+Ingestion default — ingest list for boot/TTL/manual default becomes ALL_METRIC_KEYS (explicitly validated subset still supported). Tests: B6.
+API metadata — /api/metadata adds subjects + 8 indicators; describeMetric adds subject. Tests: A3 + B11.
+Presentation — optional per-metric display hints in domain/format.js (per-capita unaffected) + subject-aware wording in the few backend strings (growthComparisonService sign convention). Tests: A2 (byte-identical per-capita formatting) + B8.
+Data load — run ingestion (npm run ingest or POST /api/data/refresh with indicators: [the four total_*] first for a staged load), then verify /api/integrity is green and /api/coverage shows the new series with their own denominators.
+Frontend — extend config/metrics.js with subjects (additive), add the Analysis select, replace METRIC_KEYS iteration with metricKeysForSubject(activeSubject) in Overview/YearComparison/YearlyTable/Coverage, make Movement + YoY + Audit copy subject-aware, update the header eyebrow and index.html title/description. Tests: A4 + B13.
+Docs — README (title, indicator table, methodology, "subjects" section, terminology glossary), PROJECT_REQUIREMENTS.md (record the approved scope extension), package.json descriptions.
+Full verification — 141 existing backend tests + new ones green; frontend lint + build green; manual UI pass over all 8 tabs in both subjects; live cross-check of a few values against data.worldbank.org (India 2025 total GDP blocks are already captured in §4).
+Release note — first refresh after deploy costs ≈2× time and adds ≈23 k rows; a subject is never mixed; ranks remain application-calculated.
+18. RISKS
+Risk	Impact	Mitigation
+Reusing per-capita metric keys for total GDP	Would violate metric_key UNIQUE or silently re-point nominal_current to NY.GDP.MKTP.CD — a catastrophic, silent per-capita corruption	Namespaced keys + A1 frozen-key test
+integrity.js check H goes red after ingest	/api/data-status, boot log and the Status tab report a failure	Generalise H in the same change as the registry (step 3), before ingest (step 7)
+Panels that default to "all metrics" start returning 8 metrics	Yearly/coverage payload growth; a Total GDP row appearing in a per-capita table	Subject-scoped defaults = per-capita four; subject-scoped frontend iteration
+Snapshot fixture regeneration (createSnapshot.js loops METRIC_KEYS)	Regenerating would rewrite wb-snapshot.json and invalidate existing snapshot expectations	Keep METRIC_KEYS as the per-capita four; add a separate --subject option and a new fixture file for total GDP (never overwrite the existing one)
+Formatting regression	Trillions rendered with 0 decimals look odd; changing shared formatting would alter per-capita display	Opt-in display hints per metric; A2 asserts per-capita display strings unchanged
+Terminology misuse (current vs constant, "real")	Misleading analysis, contradicts your §3	Verified code↔name↔base-year table (§4), UI labels state the unit and base year; a docs glossary; "real GDP" only ever glossed as constant-price
+Cross-series comparison by a user (e.g. total vs per-capita in one table)	Invalid comparison of different units	Subjects are separate selectable groups; a metric can only be rendered inside its subject's view; responses carry unit + subject
+Percent-series leakage (GDP growth)	YoY of a % series is meaningless and would silently appear plausible	Not registered; explicit unsupported-metric test (B10)
+Refresh duration doubles / larger cache	Slower first refresh, bigger SQLite file	Staged refresh via indicators param; per-indicator failure isolation; ~23 k extra rows only
+Test-scope edits mistaken for regressions	Loss of the "no substitution" safety net	Both edits are deliberate, documented in-test, and replace a blanket ban with an exact verified allow-list
+Frontend/backend disagreement on valid subjects	Wrong metric shown	Backend-provided /api/metadata.subjects; frontend falls back like today; backend remains authoritative
+Live WDI revision of a code's base year	Displayed unit wrong	wb_last_updated vintage recorded per observation and displayed; unit comes from the registry, updated deliberately; a test pins the declared base years
+19. RECOMMENDED ARCHITECTURE
+Subjects over an untouched metric registry, namespaced metric keys, one numeric engine, one endpoint set.
+
+SUBJECTS (gdp_per_capita, gdp_total) group metrics; each metric declares subject.
+Per-capita: METRICS/METRIC_KEYS unchanged → same DB rows, same URLs, same numbers, same tests.
+Total GDP: total_nominal_current|total_nominal_constant|total_ppp_current|total_ppp_constant → verified NY.GDP.MKTP.CD|KD|PP.CD|PP.KD.
+Storage, ingestion, ranking, YoY, comparison, coverage, verification: unchanged code.
+API: same routes, same indicator= parameter, strictly extended value space, additive subject metadata (+ optional Phase-2 subject= canonicalisation).
+UI: existing 8 tabs untouched; one Analysis select + a subject-filtered Metric select in the existing filter bar; tables/cards iterate the active subject's four metrics.
+Explicitly deferred: GDP growth as a subject, inflation/population/trade, SSR/prerendering for bots (the design keeps it open: metric keys are canonical identities and the API is already the machine-readable representation; a future server-rendered page can be driven by the same registry), per-subject tables, dynamic indicator discovery.
+Tradeoffs considered and rejected
+
+Alternative	Rejected because
+Duplicate the engine (totalGdpRanking.js, totalGdpComparison.js, …)	The math is already measure-independent; duplication would double the surface for divergence in tie handling, universe rules and audit behaviour — directly against your §6
+Duplicate the page set (/gdp/total/rank …)	Triples the UI surface and the test matrix for a grouping concern
+One giant flat 8-metric dropdown	Breaks the "four independent series, never combined" presentation, mixes units in one table, and does not scale to a third subject
+Reuse identical metric keys per subject + add a subject column	Requires schema/unique-constraint migration on indicators and ingest_year_stats, changes every getIndicatorByMetricKey call and every existing test — a large blast radius for zero functional gain
+Store country × metric × subject × year in a new table	The existing observation store already models it; a new table would fragment the audit trail
+20. WHAT NOT TO CHANGE
+domain/ranking.js, domain/yoy.js, domain/yoyRanking.js, domain/comparison.js, domain/growthComparison.js, domain/coverage.js, domain/universe.js — no edits.
+db/schema.sql — no edits (no new column, no new table, no constraint change).
+All SQL in db/repository.js — no edits (queries are indicator-keyed already).
+wb/client.js and the shape of wb/ingest.js — no edits beyond the ingest default list.
+The four per-capita METRICS entries, their order, their keys, their codes, their units, their env-var names.
+METRIC_KEYS' value and order (used by every existing default).
+All existing routes, parameter names and status/error codes; no route renaming, no versioning churn.
+The 8 navigation tabs, the URL parameter set, and the frontend's "display-only" discipline.
+Ranking rules: value DESC + ISO3 ASC ordinal ranks, distinct ranks for ties; denominators = eligible ∩ valid; missing ≠ 0; YoY null-with-reason for non-positive bases.
+The like-for-like/common-universe methodology and the decomposition identity.
+Raw-precision storage (value REAL for math, value_raw for audit) and formatting-only-at-presentation.
+Existing test expectations for per-capita results (only the two scope-guard tests in §16C are deliberately generalised).
+The source-attribution wording ("Rank calculated from World Bank WDI observations.") and the "no API key" rule.
+FINAL ANSWER TO THE REQUIRED QUESTION
+"Can the existing analytical engine support TOTAL GDP by treating it as another economic measure over the same type of country-year observations, while preserving the current GDP-PER-CAPITA system unchanged?"
+
+Yes — with one constraint that is architectural bookkeeping, not mathematics: metric identity must be namespaced per subject, because indicators.metric_key is globally UNIQUE and ingest_year_stats keys on metric_key.
+
+Why it works: every analytical module consumes {iso3, value} / {iso3, year, value} arrays and nothing else (ranking.js header: "Method (identical for every metric and every year)"; yoy.js: "uses RAW World Bank values"). Persistence is a generic (country, indicator, year, value) store. Ingestion is a loop over registry entries calling a generic client. Validation is registry-driven and backend-authoritative. Therefore four additional verified World Bank series (NY.GDP.MKTP.CD, NY.GDP.MKTP.KD, NY.GDP.MKTP.PP.CD, NY.GDP.MKTP.PP.KD) flow through the same pipeline and the same engines and produce valid ranks, YoY, YoY ranks, like-for-like universes, entered/exited/outside sets, coverage and verification — with no engine change and no schema change.
+
+Smallest safe architectural extension (exact list):
+
+config.js: add SUBJECTS (gdp_per_capita, gdp_total), add subject/ppp/baseYear (+ optional display hint) to metrics, add the 4 total_* entries with verified codes; leave the 4 per-capita entries and METRIC_KEYS exactly as they are.
+services/integrity.js: generalise check H to the curated registry set.
+services/coverageService.js + services/indiaYearly.js + wb/ingest.js: subject-scoped defaults (per-capita default preserved) and a registry-wide ingest list.
+server.js: /api/metadata exposes subjects; describeMetric adds subject. No route or parameter changes.
+Frontend: subject-aware display registry + one Analysis select in the existing filter bar; iterate the active subject's four metrics instead of METRIC_KEYS; make the handful of per-capita-specific strings subject-aware.
+Tests: two deliberate scope-guard generalisations (config "four metrics/forbids MKTP", integrity check H) + the new per-capita freeze/golden regression tests and the Total GDP suites in §16.
+Docs: README + PROJECT_REQUIREMENTS.md scope note; .env.example gains the new variables.
+Explicitly not implemented (raw-data rule): any derived/synthetic series — rebased constant-price GDP, "real GDP at current prices", GDP assembled from components, deflated series, or any code not verified against /v2/indicator/{code} (control test: NY.GDP.TOTAL.CD returns the World Bank error envelope and must stay unusable). GDP growth (annual %) exists as a raw series but is deliberately out of scope now, because the level+YoY model would double-apply change semantics to a percent series.
+
+No files were modified. If you want me to implement this, toggle to 
+Act Mode (⌘⇧A) and I will execute the §17 migration plan in order — starting with the registry + integrity generalisation so that the existing 141 backend tests (plus the new per-capita freeze/golden tests) can be run and reported green before any Total GDP data is loaded.
+
+IMPLEMENTATION RECORD (added after build; the plan above remains the architecture source of truth):
+- Implemented as planned with one naming revision: the Total GDP metric keys are
+  total_current / total_constant / total_ppp_current / total_ppp_constant
+  (not the `total_nominal_*` sketch in §7–§8 — the sketch's `total_nominal_constant`
+  contradicted the plan's own terminology rule that constant-price GDP is never
+  "nominal"). Env vars: WORLD_BANK_TOTAL_CURRENT_INDICATOR,
+  WORLD_BANK_TOTAL_CONSTANT_INDICATOR, WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR,
+  WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR (PPP names unchanged from the sketch).
+- Integrity check H was generalized AND renamed H.four_indicators → H.registry_indicators
+  (wire-visible name change), plus a new K.registry_consistency check.
+- Growth-comparison sign strings were generalized to subject-neutral wording
+  ("positive_means_the_value_increased_over_the_interval") rather than per-subject copy.
+- Backend suite: 220/220 green (incl. new perCapitaRegression, subjects, totalGdp suites).
+  Live WDI verification (all four MKTP codes; India 2025 values match the stored raw
+  values exactly) and a staged Total GDP refresh (+21,785 observations; integrity green;
+  per-capita untouched) were completed before the frontend stage. Frontend follows
+  Option A (Analysis + Metric selects; metric key stays the single state).
+

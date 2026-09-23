@@ -5,17 +5,17 @@
  */
 
 import { api } from '../api/client.js';
-import { METRIC_KEYS, metricLabel } from '../config/metrics.js';
+import { metricLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function Coverage({ year, metricKey, fromYear, toYear }) {
+export default function Coverage({ year, metricKey, fromYear, toYear, subject = 'gdp_per_capita' }) {
   // The backend requires fromYear AND toYear together for an explanation;
   // omit both when no comparison year is selected.
   const compare = fromYear != null && toYear != null ? { fromYear, toYear } : {};
-  const depsKey = `coverage:${year ?? ''}:${metricKey}:${fromYear ?? ''}:${toYear ?? ''}`;
+  const depsKey = `coverage:${year ?? ''}:${metricKey}:${fromYear ?? ''}:${toYear ?? ''}:${subject}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.coverage({ year, ...compare, indicator: metricKey, country: 'IND' }, { signal }),
+    (signal) => api.coverage({ year, ...compare, indicator: metricKey, country: 'IND', subject }, { signal }),
     depsKey,
     { enabled: year != null },
   );
@@ -124,7 +124,8 @@ export default function Coverage({ year, metricKey, fromYear, toYear }) {
             <p className="footnote">Tip: set a “compare from” year in the filter bar to explain a denominator change.</p>
           )}
           <p className="footnote">
-            Known metrics: {METRIC_KEYS.map(metricLabel).join(' · ')}. Coverage can differ between metrics and years.
+            Known metrics: {metrics.map((m) => metricLabel(m.metric.key)).join(' · ')}. Coverage can differ between
+            metrics and years.
           </p>
         </>
       ) : null}

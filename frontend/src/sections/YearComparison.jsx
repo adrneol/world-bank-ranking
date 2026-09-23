@@ -1,19 +1,20 @@
 /**
- * Selected-year four-metric comparison.
+ * Selected-year comparison across the active subject's four metrics.
  * Reuses the yearly endpoint for a single year so the numbers are identical
  * to the yearly table. No combined/overall score is ever derived.
  */
 
 import { api } from '../api/client.js';
-import { METRIC_KEYS, METRICS } from '../config/metrics.js';
+import { METRICS, metricKeysForSubject } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function YearComparison({ year }) {
-  const depsKey = `compare:${year ?? ''}`;
+export default function YearComparison({ year, subject = 'gdp_per_capita' }) {
+  const keys = metricKeysForSubject(subject);
+  const depsKey = `compare:${year ?? ''}:${subject}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.indiaRanking({ startYear: year, endYear: year }, { signal }),
+    (signal) => api.indiaRanking({ startYear: year, endYear: year, subject }, { signal }),
     depsKey,
     { enabled: year != null },
   );
@@ -48,7 +49,7 @@ export default function YearComparison({ year }) {
               </tr>
             </thead>
             <tbody>
-              {METRIC_KEYS.map((key) => {
+              {keys.map((key) => {
                 const cell = row[key];
                 const meta = METRICS[key];
                 return (

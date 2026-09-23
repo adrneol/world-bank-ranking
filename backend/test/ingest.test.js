@@ -28,10 +28,11 @@ test('deriveFetchRange reaches back one extra year for YoY', async () => {
   assert.deepEqual(deriveFetchRange(2000, 2025), { fetchedStartYear: 1999, fetchedEndYear: 2025 });
 });
 
-test('refreshData ingests metadata plus all four indicators from the stub', async () => {
+test('refreshData ingests metadata plus EVERY configured indicator (both subjects) from the stub', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const repository = await import('../src/db/repository.js');
   const { refreshData } = await import('../src/wb/ingest.js');
+  const { ALL_METRIC_KEYS, METRIC_KEYS } = await import('../src/config.js');
   stub.reset();
 
   const db = createMemoryDb();
@@ -40,7 +41,15 @@ test('refreshData ingests metadata plus all four indicators from the stub', asyn
   assert.equal(summary.status, 'success');
   assert.equal(summary.eligibleUniverse, 217);
   assert.ok(summary.rowsUpserted > 0, 'observations written');
-  assert.equal(summary.perIndicator.length, 4);
+  // The refresh is registry-wide: exactly the configured metrics, no more, no
+  // fewer. The GDP-per-capita default set stays four, so no per-capita view
+  // silently expands to eight metrics.
+  assert.equal(ALL_METRIC_KEYS.length, 8, 'four GDP-per-capita + four Total GDP metrics');
+  assert.equal(METRIC_KEYS.length, 4, 'the GDP-per-capita default set stays four');
+  assert.deepEqual(
+    summary.perIndicator.map((entry) => entry.metricKey).sort(),
+    [...ALL_METRIC_KEYS].sort(),
+  );
   for (const entry of summary.perIndicator) {
     assert.equal(entry.error, undefined, `indicator ${entry.metricKey} must not fail`);
   }
@@ -58,6 +67,19 @@ test('refreshData ingests metadata plus all four indicators from the stub', asyn
   assert.ok(aggregates.length > 0);
   const aggregateIds = new Set(aggregates.map((row) => row.id));
   assert.equal(rows.some((row) => aggregateIds.has(row.iso3)), false);
+
+  // Total GDP travels through the SAME pipeline: the live-verified IND 2025
+  // value must be stored verbatim (raw precision preserved).
+  const { liveIndia2025 } = await import('./fixtures/totalGdp.js');
+  const totalIndicator = repository.getIndicatorByMetricKey(db, 'total_current');
+  assert.ok(totalIndicator, 'Total GDP indicator registered by the same refresh');
+  assert.equal(totalIndicator.code, 'NY.GDP.MKTP.CD');
+  const indiaTotal = repository
+    .getEligibleObservations(db, totalIndicator.id, 2025)
+    .find((row) => row.iso3 === 'IND');
+  assert.ok(indiaTotal, 'India 2025 Total GDP observation stored');
+  assert.equal(indiaTotal.value, liveIndia2025('total_current'));
+  assert.equal(Number(indiaTotal.valueRaw), liveIndia2025('total_current'));
 
   // Audit trail recorded.
   const run = repository.getLatestFetchRun(db, { status: 'success' });

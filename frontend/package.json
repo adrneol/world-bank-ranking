@@ -2,7 +2,7 @@
   "name": "worldbank-india-gdp-ranking-frontend",
   "private": true,
   "version": "1.0.0",
-  "description": "Frontend: auditable UI for India's World Bank GDP per capita rankings. Displays backend-calculated results only; never calculates ranks.",
+  "description": "Frontend: auditable UI for India's World Bank GDP rankings (GDP per capita and Total GDP). Displays backend-calculated results only; never calculates ranks.",
   "type": "module",
   "scripts": {
     "dev": "vite",

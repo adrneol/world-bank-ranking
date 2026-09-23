@@ -46,7 +46,7 @@ export default function YoyRanking({ year, metricKey }) {
     <Section
       id="yoy-ranking"
       title="YoY ranking (separate from level ranking)"
-      subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by GDP-per-capita percentage change — not by value.`}
+      subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by percentage change — not by value.`}
     >
       {!loading && !error && data ? (
         <p className="denominators" role="status">

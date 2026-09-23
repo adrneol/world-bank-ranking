@@ -8,15 +8,16 @@
  */
 
 import { api } from '../api/client.js';
-import { METRIC_KEYS, METRICS } from '../config/metrics.js';
+import { METRICS, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { StatusBlock } from '../components/ui.jsx';
 
-export default function Overview({ year }) {
-  const depsKey = `overview:${year ?? ''}`;
+export default function Overview({ year, subject = 'gdp_per_capita' }) {
+  const keys = metricKeysForSubject(subject);
+  const depsKey = `overview:${year ?? ''}:${subject}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.indiaRanking({ startYear: year, endYear: year }, { signal }),
+    (signal) => api.indiaRanking({ startYear: year, endYear: year, subject }, { signal }),
     depsKey,
     { enabled: year != null },
   );
@@ -36,7 +37,7 @@ export default function Overview({ year }) {
             </span>
           </h2>
           <div className="cards">
-            {METRIC_KEYS.map((key) => {
+            {keys.map((key) => {
               const meta = METRICS[key];
               const cell = row[key];
               return (
@@ -60,8 +61,8 @@ export default function Overview({ year }) {
             })}
           </div>
           <p className="footnote">
-            Rank calculated from World Bank WDI observations. The four series use different units and are never
-            combined or scored against each other.
+            Rank calculated from World Bank WDI observations. The four {subjectLabel(subject)} series use different
+            units and are never combined or scored against each other.
           </p>
         </>
       ) : null}

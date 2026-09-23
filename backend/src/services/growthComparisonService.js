@@ -522,8 +522,8 @@ export function buildGrowthComparisonResponse(db, options = {}) {
       growth,
       rankMeaning: 'rank_1_is_highest_growth',
       signConvention: {
-        growthValues: 'positive_means_per_capita_increased',
-        absoluteChange: 'positive_means_per_capita_increased',
+        growthValues: 'positive_means_the_value_increased_over_the_interval',
+        absoluteChange: 'positive_means_the_value_increased_over_the_interval',
         vsPeer: 'positive_means_india_grew_faster_than_peers_by_that_many_percentage_points',
       },
     },

@@ -2,7 +2,7 @@
   "name": "worldbank-india-gdp-ranking-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Backend: World Bank WDI ingestion, country universe filtering, ranking + YoY engines for India's GDP per capita.",
+  "description": "Backend: World Bank WDI ingestion, country universe filtering, ranking + YoY engines for India's GDP per capita and Total GDP.",
   "type": "module",
   "engines": {
     "node": ">=22.5.0"

@@ -6,7 +6,7 @@
 
 import { Fragment } from 'react';
 import { api } from '../api/client.js';
-import { METRIC_KEYS, metricLabel } from '../config/metrics.js';
+import { metricKeysForSubject, metricLabel, subjectLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
@@ -37,10 +37,11 @@ function MetricCell({ cell }) {
   );
 }
 
-export default function YearlyTable({ startYear, endYear }) {
-  const depsKey = `yearly:${startYear ?? ''}:${endYear ?? ''}`;
+export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_capita' }) {
+  const keys = metricKeysForSubject(subject);
+  const depsKey = `yearly:${startYear ?? ''}:${endYear ?? ''}:${subject}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.indiaRanking({ startYear, endYear }, { signal }),
+    (signal) => api.indiaRanking({ startYear, endYear, subject }, { signal }),
     depsKey,
     { enabled: startYear != null && endYear != null },
   );
@@ -59,14 +60,14 @@ export default function YearlyTable({ startYear, endYear }) {
         <div className="table-scroll" role="region" aria-label="India yearly data table" tabIndex={0}>
           <table className="table table-yearly">
             <caption className="sr-only">
-              India GDP per capita by year for all four World Bank indicators
+              India {subjectLabel(subject)} by year for all four World Bank indicators
             </caption>
             <thead>
               <tr>
                 <th scope="col" className="sticky-col">
                   Year
                 </th>
-                {METRIC_KEYS.map((key) => (
+                {keys.map((key) => (
                   <th scope="colgroup" colSpan={3} key={key} className="metric-group">
                     {metricLabel(key)}
                   </th>
@@ -74,7 +75,7 @@ export default function YearlyTable({ startYear, endYear }) {
               </tr>
               <tr>
                 <th scope="col" className="sticky-col" aria-label="Year" />
-                {METRIC_KEYS.map((key) => (
+                {keys.map((key) => (
                   <Fragment key={key}>
                     <th scope="col" className="num">
                       Value
@@ -95,7 +96,7 @@ export default function YearlyTable({ startYear, endYear }) {
                   <th scope="row" className="sticky-col">
                     {row.year}
                   </th>
-                  {METRIC_KEYS.map((key) => (
+                  {keys.map((key) => (
                     <MetricCell key={key} cell={row[key]} />
                   ))}
                 </tr>

@@ -10,7 +10,7 @@
  *      specification's CASE A/B/C/D form, with FACTS ONLY (section 6)
  */
 
-import { FOCUS_COUNTRY, METRICS, METRIC_KEYS } from '../config.js';
+import { FOCUS_COUNTRY, METRICS, METRIC_KEYS, getSubject, metricKeysForSubject, subjectOf } from '../config.js';
 import {
   countEligibleCountries,
   countEligibleObservations,
@@ -42,7 +42,10 @@ export function coverageForMetricYear(db, indicatorId, year, eligibleUniverse) {
  */
 export function buildCoveragePanel(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const metricKeys = options.metricKeys ?? METRIC_KEYS;
+  // Subject-scoped (per-capita four by default, so existing URLs are unchanged).
+  const metricKeys =
+    options.metricKeys ?? (options.subject ? metricKeysForSubject(options.subject) : METRIC_KEYS);
+  const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
   const available = listAvailableYears(db);
   const eligibleUniverse = countEligibleCountries(db);
   const year = options.year ?? available.maxYear;
@@ -93,6 +96,8 @@ export function buildCoveragePanel(db, options = {}) {
 
   return {
     year,
+    subject: subjectKey,
+    subjectLabel: getSubject(subjectKey).label,
     minYear: available.minYear,
     maxYear: available.maxYear,
     availableYears: available.years,
@@ -110,7 +115,10 @@ export function buildCoveragePanel(db, options = {}) {
  */
 export function buildYoyCoveragePanel(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const metricKeys = options.metricKeys ?? METRIC_KEYS;
+  // Subject-scoped (per-capita four by default, so existing URLs are unchanged).
+  const metricKeys =
+    options.metricKeys ?? (options.subject ? metricKeysForSubject(options.subject) : METRIC_KEYS);
+  const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
   const eligibleUniverse = countEligibleCountries(db);
 
   const metrics = metricKeys.map((metricKey) => {
@@ -154,6 +162,8 @@ export function buildYoyCoveragePanel(db, options = {}) {
 
   return {
     year: options.year ?? null,
+    subject: subjectKey,
+    subjectLabel: getSubject(subjectKey).label,
     eligibleUniverse,
     metrics,
     source: sourceAttribution(),

@@ -9,18 +9,23 @@
  *   E. invalid year (null or outside the plausible WDI range)
  *   F. non-finite value (NaN / Infinity must never be stored)
  *   G. incomplete API pagination (latest success run recorded pages/requests)
- *   H. missing indicator (exactly the four primary indicators)
+ *   H. registry consistency (stored indicators == the curated registry exactly:
+ *      every configured metric present, with its exact configured World Bank
+ *      code, and no unexpected indicator silently accepted)
  *   I. missing India observation (IND present for every ingested indicator)
  *   J. inconsistent country metadata (blank ids, blank ISO3 on eligible rows)
+ *   K. metric registry self-consistency (unique metric keys, unique World Bank
+ *      codes, every metric reachable from exactly one subject)
  *
  * check() returns a report; it never throws on a failed CHECK (only on a
  * broken database connection). Callers decide whether a failure blocks
  * startup/refresh or is logged as a warning.
  */
 
-import { METRICS, METRIC_KEYS } from '../config.js';
+import { ALL_METRIC_KEYS, METRICS, assertRegistryIntegrity } from '../config.js';
 
-const EXPECTED_CODES = Object.freeze(METRIC_KEYS.map((k) => METRICS[k].indicatorCode).sort());
+const EXPECTED_CODES = Object.freeze(ALL_METRIC_KEYS.map((k) => METRICS[k].indicatorCode).sort());
+const EXPECTED_METRIC_KEYS = Object.freeze([...ALL_METRIC_KEYS].sort());
 
 function result(check, passed, detail = null) {
   return { check, status: passed ? 'pass' : 'fail', detail };
@@ -111,18 +116,33 @@ export function runIntegrityChecks(db) {
     );
   }
 
-  // H. Exactly the four primary indicators, with exact codes.
-  // An empty database passes vacuously (nothing ingested yet); a partially
-  // ingested database (1-3 indicators) fails loudly instead of silently
-  // ranking a subset of the four series.
-  const codes = db.prepare('SELECT code FROM indicators ORDER BY code').all().map((r) => r.code).sort();
+  // H. Registry consistency: the stored indicators must be EXACTLY the curated
+  // registry — every configured metric present, with its exact configured World
+  // Bank code and metric key, and no unexpected indicator accepted. An empty
+  // database passes vacuously (nothing ingested yet); a partially ingested
+  // database fails loudly instead of silently ranking a subset of the subjects.
+  // Generalized from the historical "exactly four indicators" rule: it is not
+  // weaker, it is registry-driven (it fails on any missing OR extra series).
+  const storedIndicators = db.prepare('SELECT code, metric_key FROM indicators').all();
+  const codes = storedIndicators.map((r) => r.code).sort();
+  const storedMetricKeys = storedIndicators.map((r) => r.metric_key).sort();
   const hPassed =
-    codes.length === 0 || (codes.length === 4 && JSON.stringify(codes) === JSON.stringify(EXPECTED_CODES));
+    storedIndicators.length === 0 ||
+    (codes.length === EXPECTED_CODES.length &&
+      JSON.stringify(codes) === JSON.stringify(EXPECTED_CODES) &&
+      JSON.stringify(storedMetricKeys) === JSON.stringify(EXPECTED_METRIC_KEYS));
   checks.push(
-    result('H.four_indicators', hPassed, {
+    result('H.registry_indicators', hPassed, {
       found: codes,
+      foundMetricKeys: storedMetricKeys,
       expected: [...EXPECTED_CODES],
-      note: codes.length === 0 ? 'empty database: indicators not ingested yet' : null,
+      expectedMetricKeys: [...EXPECTED_METRIC_KEYS],
+      note:
+        storedIndicators.length === 0
+          ? 'empty database: indicators not ingested yet'
+          : storedIndicators.length !== EXPECTED_CODES.length
+            ? `pending ingest: ${storedIndicators.length} of ${EXPECTED_CODES.length} configured indicators stored; run a refresh`
+            : null,
     }),
   );
 
@@ -152,6 +172,23 @@ export function runIntegrityChecks(db) {
     result('J.metadata_consistency', blankIds === 0 && eligibleBlankIso === 0, {
       blankIds,
       eligibleBlankIso,
+    }),
+  );
+
+  // K. Registry self-consistency: unique metric keys, unique World Bank codes,
+  // and every metric reachable from exactly one subject. config.js asserts this
+  // at import time; reporting it here makes a broken registry visible through
+  // the API instead of only at boot.
+  let registryError = null;
+  try {
+    assertRegistryIntegrity();
+  } catch (error) {
+    registryError = error.message;
+  }
+  checks.push(
+    result('K.registry_consistency', registryError === null, {
+      error: registryError,
+      metrics: ALL_METRIC_KEYS.length,
     }),
   );
 
