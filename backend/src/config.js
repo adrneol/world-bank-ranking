@@ -396,8 +396,19 @@ export const config = Object.freeze({
     ? str('DATABASE_FILE', 'data/worldbank.db')
     : path.join(BACKEND_ROOT, str('DATABASE_FILE', 'data/worldbank.db')),
 
+  // Default ANALYSIS range (UI default view). Kept at 2000 → latest stored so
+  // the default user experience is unchanged by historical coverage work.
   defaultStartYear: int('DEFAULT_START_YEAR', 2000),
   defaultEndYear: int('DEFAULT_END_YEAR', 2025),
+
+  // Default INGESTION range (what a refresh fetches when no explicit years are
+  // given). Reaches the earliest relevant World Bank observations (≈1960 for
+  // the non-PPP series, 1990 for PPP) and the current calendar year, so newly
+  // published World Bank years are picked up automatically. The pipeline stores
+  // only what the World Bank returns; missing years stay missing. Per-metric
+  // availability is preserved — no common start year is fabricated.
+  ingestStartYear: int('INGEST_START_YEAR', 1960),
+  ingestEndYear: int('INGEST_END_YEAR', new Date().getFullYear()),
 
   cacheTtlHours: num('CACHE_TTL_HOURS', 24),
   neighborsDefault: int('RANK_NEIGHBORS_DEFAULT', 5),

@@ -392,8 +392,8 @@ export async function refreshData(options = {}) {
     error.lockedBy = lockedBy;
     throw error;
   }
-  const requestedStartYear = options.startYear ?? config.defaultStartYear;
-  const requestedEndYear = options.endYear ?? config.defaultEndYear;
+  const requestedStartYear = options.startYear ?? config.ingestStartYear;
+  const requestedEndYear = options.endYear ?? config.ingestEndYear;
   const { fetchedStartYear, fetchedEndYear } = deriveFetchRange(
     requestedStartYear,
     requestedEndYear,

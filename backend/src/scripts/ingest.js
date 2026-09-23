@@ -2,7 +2,10 @@
  * CLI: ingest World Bank data into the local SQLite cache.
  *
  * Usage:
- *   node src/scripts/ingest.js [--start 2000] [--end 2025] [--force]
+ *   node src/scripts/ingest.js [--start 1960] [--end 2026] [--force]
+ *
+ * Without explicit years the historical ingest range applies
+ * (INGEST_START_YEAR..INGEST_END_YEAR, defaults 1960..current year).
  *
  * Without --force the script still refreshes (it is an explicit command), but
  * it reports clearly what it is about to do.
@@ -14,7 +17,7 @@ import { countObservations, getYearRange } from '../db/repository.js';
 import { refreshData } from '../wb/ingest.js';
 
 function parseArgs(argv) {
-  const args = { start: config.defaultStartYear, end: config.defaultEndYear };
+  const args = { start: config.ingestStartYear, end: config.ingestEndYear };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '--start') args.start = Number.parseInt(argv[i + 1], 10);

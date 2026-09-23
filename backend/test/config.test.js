@@ -122,11 +122,19 @@ test('.env.example documents the indicator variables and the defaults', () => {
     'WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR',
     'DEFAULT_START_YEAR',
     'DEFAULT_END_YEAR',
+    'INGEST_START_YEAR',
+    'INGEST_END_YEAR',
     'CACHE_TTL_HOURS',
     'RANK_NEIGHBORS_DEFAULT',
   ]) {
     assert.ok(envExample.includes(variable), `.env.example must document ${variable}`);
   }
+});
+
+test('ingestion range reaches historical World Bank data while UI defaults stay put', () => {
+  // The default ANALYSIS view still opens at 2000; only ingestion reaches back.
+  assert.equal(config.ingestStartYear, 1960);
+  assert.equal(config.ingestEndYear, new Date().getFullYear());
 });
 
 test('defaults match the specification and the focus country is India', () => {
