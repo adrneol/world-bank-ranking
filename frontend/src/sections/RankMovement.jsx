@@ -1685,6 +1685,130 @@ function GrowthIntervalCard({ iv, metric }) {
   );
 }
 
+/**
+ * Per-interval growth decomposition summary. Display-only: every count, rank
+ * and identity comes from the backend growth response. Each interval is
+ * decomposed independently (FULL − OUTSIDE ABOVE = COMMON); interval results
+ * are never added together.
+ */
+function GrowthDecomposition({ data, intervals }) {
+  const u = data.universe;
+  const growth = data.focusMovement?.growth ?? {};
+  const effectText = (n) =>
+    n === 1 ? '+1 position' : n === 0 ? '0 positions' : `+${n} positions`;
+  return (
+    <>
+      <h3 className="subhead">What changed outside the common growth comparison set?</h3>
+      <p>
+        Economies outside the common growth universe are economies with calculable growth for an interval
+        but which are not part of the shared like-for-like growth universe. They explain why India&apos;s
+        observed growth rank can differ from its like-for-like growth rank.
+      </p>
+      <div className="partition" role="group" aria-label="Observed growth-set partitions">
+        {intervals.map(({ key, label }) => {
+          const observed = u[key]?.observed ?? 0;
+          const outside = u[key]?.outside ?? 0;
+          return (
+            <div className="partition-row" key={key}>
+              <span className="partition-year">{label} observed growth set</span>
+              <span
+                className="partition-bar"
+                aria-label={`${label} observed growth set: ${u.common} common plus ${outside} outside equals ${observed}`}
+              >
+                <span className="partition-common">{u.common} common</span>
+                <span className="partition-delta">
+                  {outside} outside
+                </span>
+              </span>
+              <span className="partition-total num">
+                {observed} = {u.common} + {outside}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="footnote">
+        Common means the same economies included in the like-for-like growth comparison. Outside means
+        economies that have calculable growth for that interval but are not in the shared common growth
+        universe.
+      </p>
+
+      <h3 className="subhead">Outside-common growth economies above India</h3>
+      <dl className="facts">
+        {intervals.map(({ key, label }) => {
+          const iv = growth[key];
+          if (!iv || !iv.available) return null;
+          return (
+            <div key={key}>
+              <dt>{label}</dt>
+              <dd className="num">{iv.outsideAbove ?? 0}</dd>
+            </div>
+          );
+        })}
+      </dl>
+      <p>
+        Only outside-common economies ranked above India affect India&apos;s observed growth rank.
+        Outside-common economies below India do not push India&apos;s position number downward — which is
+        why a large outside count can still produce a small rank effect.
+      </p>
+
+      <h3 className="subhead">Growth-rank decomposition</h3>
+      <div className="cards" role="region" aria-label="Per-interval growth-rank decomposition">
+        {intervals.map(({ key, label }) => {
+          const iv = growth[key];
+          if (!iv || !iv.available) return null;
+          return (
+            <div className="card" key={key}>
+              <h3>
+                {label} <span className="card-unit">growth-rank decomposition</span>
+              </h3>
+              <dl className="facts">
+                <div>
+                  <dt>Observed growth rank</dt>
+                  <dd className="num">
+                    {iv.fullGrowthRank != null ? `#${iv.fullGrowthRank} / ${iv.denominatorObserved}` : 'n/a'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Like-for-like growth rank</dt>
+                  <dd className="num">
+                    {iv.commonGrowthRank != null ? `#${iv.commonGrowthRank} / ${iv.denominatorCommon}` : 'n/a'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Observed-growth-set effect</dt>
+                  <dd className="num">
+                    {effectText(iv.outsideAbove ?? 0)} ({signMeaning(iv.outsideAbove ?? 0)})
+                  </dd>
+                </div>
+              </dl>
+              <p className="mono" aria-label={`Decomposition equation for ${label}`}>
+                {iv.fullGrowthRank} − {iv.outsideAbove} = {iv.commonGrowthRank}
+              </p>
+              <p className="footnote">
+                Observed growth rank − outside-common economies ranked above India = like-for-like growth
+                rank. This identity is per interval; intervals are never added together.
+              </p>
+              <p className="mono footnote">Backend verification: {iv.identityText}</p>
+            </div>
+          );
+        })}
+      </div>
+      {u.intervals?.length === 1 ? (
+        <p>
+          For a single growth interval, the like-for-like universe is the full calculable growth population,
+          so there is no outside-population rank effect.
+        </p>
+      ) : null}
+      <p className="footnote">
+        Observed growth rank − outside-common economies above India = like-for-like growth rank. Economies
+        excluded from an interval&apos;s growth population may have a missing endpoint, a non-positive
+        starting value, or another existing YoY validity reason.
+      </p>
+    </>
+  );
+}
+
 function GrowthResults({ data }) {
   const u = data.universe;
   const y = data.years;
@@ -1992,6 +2116,8 @@ function GrowthResults({ data }) {
           </div>
         </>
       ) : null}
+
+      <GrowthDecomposition data={data} intervals={intervals} />
 
       <h3 className="subhead">Evidence &amp; provenance</h3>
       <details className="details">
