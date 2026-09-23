@@ -36,3 +36,7 @@ coverage/
 # Internal requirements document (author's working spec; intentionally
 # untracked — see README for the public product description)
 PROJECT_REQUIREMENTS.md
+
+# Private planning/audit document (author's working notes; intentionally
+# untracked and never committed)
+/audit+pruposedSolution.txt

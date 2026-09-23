@@ -23,7 +23,10 @@ presents the results; an Express API serves backend-calculated numbers;
 SQLite stores the retrieved observations. The frontend's Analysis selector
 (GDP per capita / Total GDP) switches the active subject; the metric key
 (`?metric=…`) remains the single source of truth, so existing per-capita URLs
-keep working unchanged.
+keep working unchanged. Stored coverage reaches back to 1960 for non-PPP
+series (1990 for PPP series) and the year selector is always derived from
+actually stored World Bank years, so a newly published World Bank year becomes
+selectable after refresh with no code change.
 
 ## Features
 
@@ -31,8 +34,10 @@ keep working unchanged.
 - India yearly table: value, YoY %, rank and denominator per year and metric
 - Year-range filtering and selected-year comparison
 - Level rank verification with configurable neighbor windows
-- Full country ranking with pagination and country/ISO3 search
-- Separate YoY ranking with its own denominator, plus YoY verification
+- Full country ranking with pagination and search by country, ISO3, or exact analytical rank
+- Separate YoY ranking with its own denominator, plus YoY verification (numeric search uses YoY rank)
+- Historical coverage back to 1960 (non-PPP) / 1990 (PPP) with a data-driven year selector
+- Movement-table search, relation filters, sorting, and pagination that never renumber backend ranks
 - YoY coverage (current/previous valid counts, valid pairs)
 - Data coverage panels and evidence-only changing-totals explanations
 - Rank movement comparison (Movement tab): like-for-like common universe, entered/exited analysis, verified decomposition
@@ -66,6 +71,16 @@ Total GDP values are on the order of trillions of US$ (e.g. India 2025
 (e.g. `$3.96 trillion`) only at presentation time; ranking, YoY, comparison,
 tie detection, and audit always use the untouched raw value.
 
+Terminology used in the UI: *nominal* means the current-price series and
+*real* means the constant-price series (constant-price GDP is what the World
+Bank calls real GDP). Current-price data is never labelled real, and no
+"real GDP at current prices" series exists or is created. PPP values are
+converted via purchasing power parities (constant PPP series use a 2021
+reference year; constant non-PPP series use 2015). Historical availability
+differs by indicator family: non-PPP series reach back to 1960 while PPP
+series begin in 1990 — each metric keeps its own actual coverage and no
+common start year is fabricated.
+
 ## How Ranking Works
 
 - The eligible universe is built from World Bank country metadata.
@@ -83,6 +98,25 @@ tie detection, and audit always use the untouched raw value.
 - YoY % is `((currentRaw / previousRaw) − 1) × 100` on raw values. Missing or
   non-positive bases yield no value (never 0%). YoY ranking orders countries
   by percentage change with its own denominator of valid pairs.
+
+## Historical Data Coverage
+
+Stored coverage follows what the World Bank actually returns — it is not a
+hard-coded range:
+
+- Non-PPP indicators: 1960 → latest stored year (currently 2025).
+- PPP indicators: 1990 → latest stored year (currently 2025).
+- Missing years stay missing: no interpolation, no forward-fill, no zeros.
+- A newly published World Bank year becomes selectable after a refresh; no
+  frontend year list needs editing.
+
+Distinguish *available historical data* from the *default analysis range*:
+the UI opens at 2000 → latest stored year, but any stored year (back to 1960
+where available) is directly selectable, including for movement intervals
+such as 1960 → 1970. The first stored year of a series has level values but
+no YoY (there is no previous-year base); a YoY is also unavailable across any
+gap — the response carries an explicit reason code instead of bridging years.
+Long-period growth (e.g. 1960 → 2025) needs only both endpoints to be valid.
 
 ## Data Coverage
 
@@ -125,6 +159,39 @@ For one indicator and two years (`GET /api/comparison/level`):
   counters, metadata-universe comparison, completeness, fingerprint, limits,
   and the denominator explanation. Region/income metadata is labelled as the
   retrieved vintage, not as historical fact.
+
+## Search and Filtering
+
+Filtering changes visibility only — it never recomputes ranks, denominators,
+universes, or growth values:
+
+- Text search matches country name or ISO3 (case-insensitive substring).
+- A purely numeric search (e.g. `100`, `#100`, ` 100 `) means the **exact**
+  analytical rank #100 in the table being viewed — never a substring, so
+  `10` does not match #100 or #101. A requested rank with no row shows an
+  explicit empty state naming the missing rank.
+- In Movement tables the `#` column always shows the row's backend analytical
+  rank (end-year rank, year-specific rank, or interval growth rank depending
+  on the table), so searching, relation filters, sorting, and pagination never
+  renumber what is displayed. Rows without a rank in the shown context display
+  an em-dash rather than a fabricated number.
+- On the YoY page, numeric search uses the **YoY rank**, not the level rank.
+- Backend `/api/ranking` and `/api/yoy-ranking` searches behave the same way:
+  the full ranked list is computed first, then filtered, so matches keep
+  authoritative ranks on any page.
+
+## What This Project Does Not Calculate
+
+- No GDP growth-percentage series is treated as a level series
+  (`NY.GDP.MKTP.KD.ZG`, `NY.GDP.PCAP.KD.ZG` and local-currency codes are
+  rejected by the metric registry).
+- No synthetic, rebased, deflated, or otherwise derived series are generated;
+  constant-price observations come only from the World Bank.
+- No external forecasts or projections are ingested. The application uses data
+  published through the selected World Bank WDI indicators and does not
+  substitute IMF, government, or other external forecasts/projections.
+- No cross-unit comparison: per-capita and Total GDP values are never mixed,
+  and PPP, current-price, and constant-price values are never combined.
 
 ## Architecture
 
@@ -218,6 +285,8 @@ Local-only files (`.env`, `.env.local`) are never committed.
 | `PORT` | backend | API listen port (default 3001). |
 | `CACHE_TTL_HOURS` | backend | Cache freshness window (default 24). |
 | `DATABASE_FILE` | backend | SQLite file (default `data/worldbank.db`). |
+| `DEFAULT_START_YEAR` / `DEFAULT_END_YEAR` | backend | Default analysis parameters (currently 2000 / 2025). The available-year selector remains data-driven and is derived from stored World Bank observations. |
+| `INGEST_START_YEAR` / `INGEST_END_YEAR` | backend | Default refresh fetch range (defaults 1960 / current calendar year, so future World Bank years are picked up). |
 
 See `frontend/.env.example` and `backend/.env.example`. Real `.env` /
 `.env.local` files are local-only and never committed. Never commit secrets;
@@ -225,12 +294,13 @@ this project has none to configure.
 
 ## Testing
 
-- Backend: `npm test` in `backend/` — 220 tests covering configuration,
+- Backend: `npm test` in `backend/` — 230 tests covering configuration,
   subject/metric registry, country universe, ranking, ties, denominators, YoY,
-  YoY ranking, pagination, World Bank client behavior (retries, pagination
-  completeness, error envelopes), ingestion (both subjects), refresh locking,
-  cache TTL, coverage cases, services, per-capita regression, Total GDP math
-  parity and API, and HTTP endpoints. All 220 pass.
+  YoY ranking, pagination, search (text and exact-rank), World Bank client
+  behavior (retries, pagination completeness, error envelopes), ingestion
+  (both subjects, historical ranges), refresh locking, cache TTL, coverage
+  cases, services, per-capita regression, Total GDP math parity and API,
+  historical year handling, and HTTP endpoints. All 230 pass.
 - Frontend: `npm run lint` and `npm run build` in `frontend/` — both pass.
   Integration is verified against the running backend (all views, filters,
   pagination, search, verification, refresh) with headless-browser checks.
@@ -241,8 +311,11 @@ SQLite acts as a persistent cache: the application does not query the World
 Bank on every frontend request. Data is refreshed when the database is empty
 (automatic on server start), when the cache exceeds its TTL (automatic
 background refresh, guarded so concurrent requests share one run), or
-manually via `POST /api/data/refresh`. Refresh state, lock state, and recent
-runs are visible through `GET /api/data-status`. A failed refresh is recorded
+manually via `POST /api/data/refresh`. Without explicit years a refresh
+fetches the historical ingest range (defaults 1960 through the current
+calendar year) for all eight indicators, storing only what the World Bank
+returns. Refresh state, lock state, and recent runs are visible through
+`GET /api/data-status`. A failed refresh is recorded
 and the previous valid dataset keeps serving; automatic retries back off
 instead of looping.
 
