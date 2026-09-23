@@ -1343,6 +1343,14 @@ export function verifyThreeYearComparison(comparison) {
   return { passed: checks.every((check) => check.status === 'pass'), checks };
 }
 
+/**
+ * Shared small helpers, exported additively so the growth comparison module
+ * can reuse the exact same set algebra, rank indexing and positional
+ * relation logic instead of re-implementing them. Level behavior is
+ * untouched: these were already the single implementations in this module.
+ */
+export { toRankIndex, relationTo, sortedUnique, sameMembers };
+
 export default {
   COMPARISON_MODE,
   ECONOMY_STATUS,
@@ -1358,6 +1366,10 @@ export default {
   verifyComparison,
   verifyThreeYearComparison,
   compareByValueDesc,
+  toRankIndex,
+  relationTo,
+  sortedUnique,
+  sameMembers,
 };
 
 

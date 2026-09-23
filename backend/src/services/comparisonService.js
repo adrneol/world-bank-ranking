@@ -38,6 +38,7 @@ export const COMPARISON_ERROR_CODES = Object.freeze({
   INVALID_YEAR: 'INVALID_YEAR',
   INVALID_INDICATOR: 'INVALID_INDICATOR',
   INVALID_BREAKER: 'INVALID_POINT_BREAKER',
+  INVALID_MODE: 'INVALID_COMPARISON_MODE',
 });
 
 export function comparisonError(code, message, httpStatus = 500) {

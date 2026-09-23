@@ -33,7 +33,9 @@ function signMeaning(n) {
   return 'no change in position number';
 }
 
-function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, onYearA, onYearB, onYearMid, onMetric, onSwap }) {
+const RANKING_BASIS = Object.freeze({ LEVEL: 'level', GROWTH: 'growth' });
+
+function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, basis = 'level', onYearA, onYearB, onYearMid, onMetric, onBasis, onSwap }) {
   const validMidYears = (availableYears ?? []).filter(
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
@@ -46,6 +48,12 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, on
               {metricLabel(key)}
             </option>
           ))}
+        </select>
+      </Field>
+      <Field label="Basis" htmlFor="mv-basis">
+        <select id="mv-basis" value={basis} onChange={(e) => onBasis(e.target.value)}>
+          <option value={RANKING_BASIS.LEVEL}>Per-capita level</option>
+          <option value={RANKING_BASIS.GROWTH}>YoY % growth</option>
         </select>
       </Field>
       <Field label="Year A (earlier)" htmlFor="mv-yearA">
@@ -1208,7 +1216,842 @@ function ThreeYearResults({ data }) {
   );
 }
 
-export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, onYearA, onYearB, onYearMid = null, onMetric }) {
+/**
+ * YoY % growth mode helpers and results.
+ *
+ * Display-only: every growth value, rank, average, difference, count and
+ * sentence comes from GET /api/comparison/level&mode=yoy. Client-side
+ * search/filter/sort/pagination never recalculates growth or averages.
+ * Ranking variable is ALWAYS growthPercent; absolute change and level values
+ * are context and never influence rank, sort-by-growth, relations or counts.
+ */
+
+/** Short label for one growth interval, e.g. "2004→2014". */
+function growthIntervalLabel(g) {
+  if (!g) return '—';
+  return `${g.startYear}→${g.endYear}`;
+}
+
+/** Interval descriptors (key + label) from a growth response, in AM/MB/AB order. */
+function growthIntervalsOf(data) {
+  const keys = data?.universe?.intervals ?? ['AB'];
+  const growth = data?.focusMovement?.growth ?? {};
+  return keys
+    .map((key) => ({ key, block: growth[key] ?? null }))
+    .filter((entry) => entry.block !== null)
+    .map((entry) => ({ ...entry, label: growthIntervalLabel(entry.block) }));
+}
+
+function GrowthDetails({ r, intervals }) {
+  return (
+    <details className="details">
+      <summary>Details</summary>
+      <dl className="facts">
+        <div>
+          <dt>ISO3</dt>
+          <dd className="mono">{r.iso3}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>{r.status}</dd>
+        </div>
+        {(intervals ?? []).map(({ key, label }) => {
+          const b = r.intervals?.[key];
+          if (!b) return null;
+          return (
+            <div key={key}>
+              <dt>Growth {label}</dt>
+              <dd className="num">
+                {b.valid
+                  ? `${b.growthDisplay} (rank ${b.obsRank} observed / ${b.commonRank ?? '—'} like-for-like; ${b.startDisplay} → ${b.endDisplay}; abs ${b.absoluteDisplay})`
+                  : `n/a (${b.reasonText ?? b.reason ?? 'no calculable growth'})`}
+              </dd>
+            </div>
+          );
+        })}
+        <div>
+          <dt>Raw start/end</dt>
+          <dd className="mono">
+            {(intervals ?? [])
+              .map(({ key, label }) => {
+                const b = r.intervals?.[key];
+                return b && b.valid ? `${label}: ${b.startValue} → ${b.endValue}` : null;
+              })
+              .filter(Boolean)
+              .join(' · ') || '—'}
+          </dd>
+        </div>
+        <div>
+          <dt>Region</dt>
+          <dd>{r.region ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Income level</dt>
+          <dd>{r.incomeLevel ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Lending type</dt>
+          <dd>{r.lendingType ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>Metadata note</dt>
+          <dd>{r.metadataVintageNote}</dd>
+        </div>
+      </dl>
+    </details>
+  );
+}
+
+/**
+ * Outside/excluded table in growth mode. Columns are per displayed interval
+ * (the active tab's interval, or every interval on the All tab):
+ * growth %, absolute change, observed growth rank, relation and effect.
+ * Level values live in Details; ranks come only from growthPercent.
+ */
+function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, serialBase = 0 }) {
+  if (!rows || rows.length === 0) {
+    return <p className="muted">None.</p>;
+  }
+  const shown = activeInterval ? [activeInterval] : intervals;
+  const presenceOf = (r) =>
+    (intervals ?? [])
+      .filter(({ key }) => r.intervals?.[key]?.valid === true)
+      .map(({ label }) => label)
+      .join(' · ') || '—';
+  return (
+    <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
+      <table className="table table-compact">
+        {caption ? <caption className="sr-only">{caption}</caption> : null}
+        <thead>
+          <tr>
+            <th scope="col" className="num">
+              #
+            </th>
+            <th scope="col">Economy</th>
+            <th scope="col">ISO3</th>
+            <th scope="col">Present in</th>
+            <th scope="col">Relation to India{activeInterval ? ` in ${activeInterval.label}` : ''}</th>
+            {shown.map(({ key, label }) => (
+              <th key={`g-${key}`} scope="col" className="num">
+                Growth {label}
+              </th>
+            ))}
+            {shown.map(({ key, label }) => (
+              <th key={`a-${key}`} scope="col" className="num">
+                Abs change {label}
+              </th>
+            ))}
+            {activeInterval ? (
+              <th scope="col" className="num">
+                Growth rank in {activeInterval.label}
+              </th>
+            ) : null}
+            <th scope="col">Effect</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const rel = activeInterval
+              ? (r.intervals?.[activeInterval.key]?.relObs ?? r.relationToFocus)
+              : r.relationToFocus;
+            return (
+              <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+                <td className="num">{serialBase + i + 1}</td>
+                <th scope="row">
+                  {r.name ?? r.iso3}
+                  {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
+                  <GrowthDetails r={r} intervals={intervals} />
+                </th>
+                <td className="mono">{r.iso3}</td>
+                <td>{presenceOf(r)}</td>
+                <td>{rel}</td>
+                {shown.map(({ key }) => (
+                  <td key={`g-${key}`} className="num">
+                    {r.intervals?.[key]?.growthDisplay ?? '—'}
+                  </td>
+                ))}
+                {shown.map(({ key }) => (
+                  <td key={`a-${key}`} className="num">
+                    {r.intervals?.[key]?.absoluteDisplay ?? '—'}
+                  </td>
+                ))}
+                {activeInterval ? (
+                  <td className="num">{r.intervals?.[activeInterval.key]?.obsRank ?? '—'}</td>
+                ) : null}
+                <td>{r.positionEffect === 'affects_position' ? 'Affects position' : 'Denominator only'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Like-for-like growth table. One shared universe ranked per interval:
+ * growth %, absolute change, start/middle/end level values and the
+ * like-for-like relation per interval. No Effect column (fixed population).
+ */
+function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+  if (!rows || rows.length === 0) {
+    return <p className="muted">None.</p>;
+  }
+  const levelYears = yearMid != null ? [yearA, yearMid, yearB] : [yearA, yearB];
+  const levelOf = (r, y) => {
+    if (y === yearA) return r.displayA;
+    if (y === yearB) return r.displayB;
+    return r.displayMid;
+  };
+  return (
+    <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
+      <table className="table table-compact">
+        {caption ? <caption className="sr-only">{caption}</caption> : null}
+        <thead>
+          <tr>
+            <th scope="col" className="num">
+              #
+            </th>
+            <th scope="col">Economy</th>
+            <th scope="col">ISO3</th>
+            {intervals.map(({ key, label }) => (
+              <th key={`g-${key}`} scope="col" className="num">
+                Growth {label}
+              </th>
+            ))}
+            {intervals.map(({ key, label }) => (
+              <th key={`a-${key}`} scope="col" className="num">
+                Abs change {label}
+              </th>
+            ))}
+            {levelYears.map((y) => (
+              <th key={`v-${y}`} scope="col" className="num">
+                {y} value
+              </th>
+            ))}
+            {intervals.map(({ key, label }) => (
+              <th key={`vs-${key}`} scope="col">
+                {label} vs India
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.iso3} className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
+              <td className="num">{serialBase + i + 1}</td>
+              <th scope="row">
+                {r.name ?? r.iso3}
+                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
+                <GrowthDetails r={r} intervals={intervals} />
+              </th>
+              <td className="mono">{r.iso3}</td>
+              {intervals.map(({ key }) => (
+                <td key={`g-${key}`} className="num">
+                  {r.intervals?.[key]?.growthDisplay ?? '—'}
+                </td>
+              ))}
+              {intervals.map(({ key }) => (
+                <td key={`a-${key}`} className="num">
+                  {r.intervals?.[key]?.absoluteDisplay ?? '—'}
+                </td>
+              ))}
+              {levelYears.map((y) => (
+                <td key={`v-${y}`} className="num">
+                  {levelOf(r, y) ?? '—'}
+                </td>
+              ))}
+              {intervals.map(({ key }) => (
+                <td key={`vs-${key}`}>{r.intervals?.[key]?.relCommon ?? '—'}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Relation filter predicate for growth tables (growth positions only). */
+function matchesGrowthRelation(r, filter, intervals, which = 'common') {
+  const relOf = (key) =>
+    which === 'common' ? r.intervals?.[key]?.relCommon : r.intervals?.[key]?.relObs;
+  const rels = (intervals ?? [])
+    .map(({ key }) => relOf(key))
+    .filter((v) => v === 'above' || v === 'below');
+  const byKey = (key, want) => relOf(key) === want;
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'aboveAll':
+      return rels.length > 0 && rels.every((v) => v === 'above');
+    case 'belowAll':
+      return rels.length > 0 && rels.every((v) => v === 'below');
+    case 'crossed': {
+      return new Set(rels).size > 1;
+    }
+    default:
+      if (filter.startsWith('above:')) return byKey(filter.slice('above:'.length), 'above');
+      if (filter.startsWith('below:')) return byKey(filter.slice('below:'.length), 'below');
+      return true;
+  }
+}
+
+/** Relation-filter options derived from the growth intervals. */
+function growthRelationOptions(intervals) {
+  const options = [{ value: 'all', label: 'All' }];
+  for (const { key, label } of intervals ?? []) {
+    options.push({ value: `above:${key}`, label: `Above India in ${label}` });
+    options.push({ value: `below:${key}`, label: `Below India in ${label}` });
+  }
+  options.push({ value: 'aboveAll', label: 'Above India in all intervals' });
+  options.push({ value: 'belowAll', label: 'Below India in all intervals' });
+  options.push({ value: 'crossed', label: 'Crossed India between intervals' });
+  return options;
+}
+
+/** Sort options for growth tables: growth %, growth rank, absolute change. */
+function growthSortOptions(intervals) {
+  const options = [];
+  for (const { key, label } of intervals ?? []) {
+    options.push({ value: `growth:${key}:desc`, label: `Growth ${label} — high to low` });
+    options.push({ value: `growth:${key}:asc`, label: `Growth ${label} — low to high` });
+  }
+  for (const { key, label } of intervals ?? []) {
+    options.push({ value: `rank:${key}:asc`, label: `Growth rank ${label} — best first` });
+    options.push({ value: `rank:${key}:desc`, label: `Growth rank ${label} — lowest first` });
+  }
+  for (const { key, label } of intervals ?? []) {
+    options.push({ value: `abs:${key}:desc`, label: `Absolute change ${label} — high to low` });
+    options.push({ value: `abs:${key}:asc`, label: `Absolute change ${label} — low to high` });
+  }
+  return options;
+}
+
+/**
+ * Sort with backend semantics: growth percent, like-for-like growth rank and
+ * absolute change sort by backend numerics (never display strings); ties keep
+ * backend order via ISO3. Absolute change is explicitly named and never
+ * masquerades as growth ranking.
+ */
+function sortGrowthRows(rows, sort) {
+  const copy = [...rows];
+  const byIso3 = (x, y) => (x.iso3 < y.iso3 ? -1 : x.iso3 > y.iso3 ? 1 : 0);
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const m = /^(growth|rank|abs):(AM|MB|AB):(asc|desc)$/.exec(sort ?? '');
+  if (!m) {
+    return copy.sort(
+      (x, y) => (num(y.intervals?.AB?.growthPercent) ?? -Infinity) - (num(x.intervals?.AB?.growthPercent) ?? -Infinity) || byIso3(x, y),
+    );
+  }
+  const [, kind, key, dir] = m;
+  const val = (r) => {
+    const b = r.intervals?.[key];
+    if (!b) return null;
+    if (kind === 'growth') return num(b.growthPercent);
+    if (kind === 'abs') return num(b.absoluteChange);
+    return typeof b.commonRank === 'number' ? b.commonRank : null;
+  };
+  const asc = dir === 'asc';
+  return copy.sort((x, y) => {
+    const vx = val(x);
+    const vy = val(y);
+    if (vx === null && vy === null) return byIso3(x, y);
+    if (vx === null) return 1;
+    if (vy === null) return -1;
+    return (asc ? vx - vy : vy - vx) || byIso3(x, y);
+  });
+}
+
+function GrowthPeerLines({ iv }) {
+  const peerLine = (avgDisplay, count, scope) => (
+    <div>
+      <dt>
+        {scope} peer average (excluding India)
+      </dt>
+      <dd className="num">
+        {avgDisplay != null ? (
+          <>
+            {avgDisplay} ({count} {count === 1 ? 'peer' : 'peers'})
+          </>
+        ) : (
+          'n/a (no other economies with calculable growth)'
+        )}
+      </dd>
+    </div>
+  );
+  const diffLine = (diffDisplay, scope) => (
+    <div>
+      <dt>{scope} difference</dt>
+      <dd className="num">{diffDisplay != null ? diffDisplay : 'n/a'}</dd>
+    </div>
+  );
+  return (
+    <>
+      <h4 className="facts-group-title">Observed</h4>
+      <dl className="facts">
+        {peerLine(iv.peerAvgObservedDisplay, iv.peerCountObserved, 'Observed')}
+        {diffLine(iv.vsPeerObservedDisplay, 'Observed')}
+      </dl>
+      <h4 className="facts-group-title">Like-for-like</h4>
+      <dl className="facts">
+        {peerLine(iv.peerAvgCommonDisplay, iv.peerCountCommon, 'Like-for-like')}
+        {diffLine(iv.vsPeerCommonDisplay, 'Like-for-like')}
+      </dl>
+      <p className="footnote">
+        Peer average (excluding India) is an unweighted mean of peer growth values. Differences are
+        percentage-point subtractions and never affect ranking.
+      </p>
+    </>
+  );
+}
+
+function GrowthIntervalCard({ iv, metric }) {
+  if (!iv || !iv.available) {
+    return (
+      <div className="card">
+        <h3>
+          Growth {iv ? growthIntervalLabel(iv) : '—'} <span className="card-unit">unavailable</span>
+        </h3>
+        <p className="card-rank">n/a</p>
+        <p className="card-unit">{iv?.reasonText ?? iv?.reason ?? 'Decomposition unavailable.'}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="card">
+      <h3>
+        Growth {growthIntervalLabel(iv)} <span className="card-unit">YoY % growth</span>
+      </h3>
+      <p className="card-rank" aria-label={`India growth ${iv.indiaGrowthDisplay} in ${growthIntervalLabel(iv)}`}>
+        {iv.indiaGrowthDisplay ?? 'n/a'}
+      </p>
+      <p className="card-unit">
+        Per-capita: {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}
+      </p>
+      <p className="card-unit">Absolute change: {iv.absoluteDisplay ?? 'n/a'}</p>
+      <p className="card-unit">
+        Growth rank: {iv.fullGrowthRank != null ? `#${iv.fullGrowthRank} / ${iv.denominatorObserved}` : 'n/a'}{' '}
+        (observed)
+      </p>
+      <p className="card-unit">
+        Like-for-like: {iv.commonGrowthRank != null ? `#${iv.commonGrowthRank} / ${iv.denominatorCommon}` : 'n/a'}
+      </p>
+      <p className="card-code mono">
+        {metric.indicatorCode} · {metric.unit}
+      </p>
+    </div>
+  );
+}
+
+function GrowthStory({ data, intervals }) {
+  const growth = data.focusMovement?.growth ?? {};
+  const parts = (intervals ?? [])
+    .map(({ key }) => growth[key])
+    .filter((iv) => iv && iv.available)
+    .map((iv) => `${growthIntervalLabel(iv)} ${iv.indiaGrowthDisplay} (growth rank #${iv.fullGrowthRank}/${iv.denominatorObserved})`);
+  if (parts.length === 0) return null;
+  return (
+    <div>
+      <p>
+        India&apos;s per-capita growth by interval: {parts.join(' · ')}. Ranks order economies by growth
+        percentage alone; absolute per-capita change never affects rank.
+      </p>
+      <p>
+        Like-for-like growth ranks use one shared universe of {data.universe.common} economies with calculable
+        growth in every interval shown.
+      </p>
+    </div>
+  );
+}
+
+function GrowthResults({ data }) {
+  const u = data.universe;
+  const y = data.years;
+  const metric = data.metric;
+  const growth = data.focusMovement?.growth ?? {};
+  const intervals = growthIntervalsOf(data);
+  const [tab, setTab] = useState('all');
+  const [query, setQuery] = useState('');
+  const [relationFilter, setRelationFilter] = useState('all');
+  const [commonOpen, setCommonOpen] = useState(false);
+  const [commonQuery, setCommonQuery] = useState('');
+  const [commonRelation, setCommonRelation] = useState('all');
+  const [commonSort, setCommonSort] = useState(
+    intervals.length > 0 ? `growth:${intervals[intervals.length - 1].key}:desc` : 'growth:AB:desc',
+  );
+  const [commonPage, setCommonPage] = useState(1);
+  const [listPage, setListPage] = useState(1);
+  const [listsOpen, setListsOpen] = useState(false);
+
+  const rows = data.economies?.rows ?? [];
+  const commonRows = rows.filter((r) => r.status === 'common');
+  const allOutside = rows.filter((r) => r.status !== 'common');
+  // Outside tabs: All plus one tab per growth interval. Tab counts come from
+  // the backend decomposition before any presentation-only search/filter.
+  const outsideTabs = [
+    { id: 'all', label: 'All', count: allOutside.length, rows: allOutside, interval: null },
+    ...intervals.map(({ key, label }) => ({
+      id: `out:${key}`,
+      label: `Outside ${label}`,
+      count: u[key]?.outside ?? 0,
+      rows: allOutside.filter((r) => r.intervals?.[key]?.valid === true),
+      interval: { key, label },
+    })),
+  ];
+  const activeTab = outsideTabs.find((t) => t.id === tab) ?? outsideTabs[0];
+
+  const filteredList = (() => {
+    const q = query.trim().toLowerCase();
+    const matchesQuery = (r) =>
+      !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
+    // Relation and effect follow growth-ranking position in the tab interval
+    // (or the backend overall fields on the All tab) — never level values.
+    const matchesRelation = (r) => {
+      if (relationFilter === 'all') return true;
+      if (activeTab.interval) {
+        const b = r.intervals?.[activeTab.interval.key];
+        if (relationFilter === 'above') return b?.relObs === 'above';
+        if (relationFilter === 'below') return b?.relObs === 'below';
+        if (relationFilter === 'affects') return b?.affectsObs === true;
+        return true;
+      }
+      if (relationFilter === 'above') return r.relationToFocus === 'above';
+      if (relationFilter === 'below') return r.relationToFocus === 'below';
+      if (relationFilter === 'affects') return r.affectsFocusPosition === true;
+      return true;
+    };
+    const filtered = activeTab.rows.filter((r) => matchesQuery(r) && matchesRelation(r));
+    const pageSize = 25;
+    const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    const page = Math.min(Math.max(1, listPage), pages);
+    return { filtered, page, pages, pageSize, slice: filtered.slice((page - 1) * pageSize, page * pageSize) };
+  })();
+
+  const filteredCommon = (() => {
+    const q = commonQuery.trim().toLowerCase();
+    const searched = commonRows.filter(
+      (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
+    );
+    // Relation filter uses backend like-for-like growth relations per
+    // interval, so an economy above India in one interval and below in
+    // another stays explicit.
+    const related = searched.filter((r) => matchesGrowthRelation(r, commonRelation, intervals, 'common'));
+    const sorted = sortGrowthRows(related, commonSort);
+    const pageSize = 25;
+    const pages = Math.max(1, Math.ceil(sorted.length / pageSize));
+    const page = Math.min(Math.max(1, commonPage), pages);
+    return { base: sorted, page, pages, pageSize, slice: sorted.slice((page - 1) * pageSize, page * pageSize) };
+  })();
+
+  return (
+    <>
+      <h3 className="subhead">What happened to India&apos;s growth?</h3>
+      <div className="cards" role="region" aria-label="India growth by interval">
+        {intervals.map(({ key }) => (
+          <GrowthIntervalCard key={key} iv={growth[key]} metric={metric} />
+        ))}
+      </div>
+      {intervals.map(({ key }) => {
+        const iv = growth[key];
+        if (!iv || !iv.available) return null;
+        return (
+          <div key={key} className="explanation" role="note" aria-label={`Result in words for ${growthIntervalLabel(iv)}`}>
+            <GrowthPeerLines iv={iv} />
+            <p className="mono footnote">Backend verification: {iv.identityText}</p>
+          </div>
+        );
+      })}
+      <div className="explanation" role="note" aria-label="Growth story">
+        <GrowthStory data={data} intervals={intervals} />
+      </div>
+      <p className="footnote">
+        Growth ranks order economies by growth percentage alone (rank 1 is the highest growth). Denominators
+        count {u.membershipRule}.
+      </p>
+
+      <h3 className="subhead">Like-for-like comparison</h3>
+      <p className="section-sub">
+        {u.common} economies have calculable growth in every interval shown. Each interval&apos;s like-for-like
+        growth ranking uses this same universe.
+      </p>
+      {u.intervals?.length === 1 ? (
+        <p>
+          With a single interval the observed and like-for-like growth populations coincide; both growth ranks
+          describe the same population and are therefore equal.
+        </p>
+      ) : null}
+      <p className="footnote">
+        <strong>Derived comparison position — not a World Bank rank.</strong> Like-for-like growth positions
+        rank India only among the economies with calculable growth in every interval, ordered by growth
+        percentage. They are neither official ranks nor observed-year ranks.
+      </p>
+      <p className="footnote">The other economies shown below are outside this like-for-like growth universe.</p>
+
+      <h3 className="subhead">Economies outside the like-for-like growth universe</h3>
+      <p>
+        The tables below list only economies outside the like-for-like growth universe: economies with
+        calculable growth in at least one interval but missing it in another, or without calculable growth
+        where shown. They are a different population from the {u.common} like-for-like economies.
+      </p>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={() => setListsOpen((v) => !v)}
+        aria-expanded={listsOpen}
+      >
+        {listsOpen
+          ? 'Hide outside economy details'
+          : `Show outside economy details (outside ${allOutside.length})`}
+      </button>
+      {listsOpen ? (
+        <>
+          <div role="tablist" aria-label="Outside the like-for-like growth universe">
+            {outsideTabs.flatMap((t, index) => [
+              ...(index > 0 ? [' '] : []),
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                aria-label={`${t.label} the like-for-like growth universe, ${t.count} economies`}
+                className={`btn ${tab === t.id ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => {
+                  setTab(t.id);
+                  setListPage(1);
+                }}
+              >
+                {t.label} ({t.count})
+              </button>,
+            ])}
+          </div>
+          <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Outside growth filters">
+            <Field label="Search name or ISO3" htmlFor="mv-gq">
+              <input
+                id="mv-gq"
+                type="search"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setListPage(1);
+                }}
+                placeholder="e.g. India, IND"
+              />
+            </Field>
+            <Field label="Relation filter" htmlFor="mv-grel">
+              <select
+                id="mv-grel"
+                value={relationFilter}
+                onChange={(e) => {
+                  setRelationFilter(e.target.value);
+                  setListPage(1);
+                }}
+              >
+                <option value="all">All</option>
+                <option value="above">Above India</option>
+                <option value="below">Below India</option>
+                <option value="affects">Affects India&apos;s position</option>
+              </select>
+            </Field>
+          </form>
+          <p className="footnote">Filtering is presentation-only. The decomposition always uses the full universe.</p>
+          <GrowthEconomyTable
+            rows={filteredList.slice}
+            intervals={intervals}
+            activeInterval={activeTab.interval}
+            serialBase={(filteredList.page - 1) * filteredList.pageSize}
+            caption={`Economies outside the like-for-like growth universe, ${activeTab.label}`}
+          />
+          <p className="footnote" aria-live="polite">
+            Showing {filteredList.slice.length} of {activeTab.count} ({activeTab.label}) · page{' '}
+            {filteredList.page} of {filteredList.pages}
+          </p>
+          <div className="pagination" role="navigation" aria-label="Outside growth pages">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={filteredList.page <= 1}
+              onClick={() => setListPage((p) => Math.max(1, p - 1))}
+            >
+              ← Prev
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={filteredList.page >= filteredList.pages}
+              onClick={() => setListPage((p) => p + 1)}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      <h3 className="subhead">
+        {u.common} economies in the like-for-like growth universe
+      </h3>
+      <p>
+        Every economy in this table has calculable growth in every interval shown. Ranking is by growth
+        percentage alone; absolute per-capita change is shown for context and never affects rank.
+      </p>
+      <p className="footnote">
+        The summary above is already complete. Open this only to inspect the like-for-like economies.
+      </p>
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={() => setCommonOpen((v) => !v)}
+        aria-expanded={commonOpen}
+      >
+        {commonOpen ? 'Hide common economies' : `Show common economies (${u.common})`}
+      </button>
+      {commonOpen ? (
+        <>
+          <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Common growth filters">
+            <Field label="Search common" htmlFor="mv-gcq">
+              <input
+                id="mv-gcq"
+                type="search"
+                value={commonQuery}
+                onChange={(e) => {
+                  setCommonQuery(e.target.value);
+                  setCommonPage(1);
+                }}
+                placeholder="e.g. United, USA"
+              />
+            </Field>
+            <Field label="Relation to India" htmlFor="mv-gcrel">
+              <select
+                id="mv-gcrel"
+                value={commonRelation}
+                onChange={(e) => {
+                  setCommonRelation(e.target.value);
+                  setCommonPage(1);
+                }}
+              >
+                {growthRelationOptions(intervals).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Sort by" htmlFor="mv-gcsort">
+              <select id="mv-gcsort" value={commonSort} onChange={(e) => setCommonSort(e.target.value)}>
+                {growthSortOptions(intervals).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </form>
+          <p className="footnote">
+            Sorting uses backend growth values and growth ranks. Absolute change is labeled explicitly and never
+            masquerades as growth ranking. Sorting never changes the comparison summary above.
+          </p>
+          <GrowthCommonTable
+            rows={filteredCommon.slice}
+            intervals={intervals}
+            yearA={y.a}
+            yearB={y.b}
+            yearMid={y.mid ?? null}
+            serialBase={(filteredCommon.page - 1) * filteredCommon.pageSize}
+            caption="Like-for-like growth economies"
+          />
+          <p className="footnote" aria-live="polite">
+            Showing {filteredCommon.slice.length} of {u.common} · page {filteredCommon.page} of{' '}
+            {filteredCommon.pages}
+          </p>
+          <div className="pagination" role="navigation" aria-label="Common growth pages">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={filteredCommon.page <= 1}
+              onClick={() => setCommonPage((p) => Math.max(1, p - 1))}
+            >
+              ← Prev
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={filteredCommon.page >= filteredCommon.pages}
+              onClick={() => setCommonPage((p) => p + 1)}
+            >
+              Next →
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      <h3 className="subhead">Evidence &amp; provenance</h3>
+      <details className="details">
+        <summary>Evidence &amp; provenance (vintage, runs, counters, limits)</summary>
+        <dl className="facts">
+          <div>
+            <dt>World Bank vintage</dt>
+            <dd className="mono">{data.evidence.vintage.wbLastUpdated ?? 'mixed/unknown'}</dd>
+          </div>
+          <div>
+            <dt>Mixed vintage</dt>
+            <dd>{data.evidence.vintage.mixedVintage ? 'Yes — interpret with caution' : 'No'}</dd>
+          </div>
+          <div>
+            <dt>Producing runs</dt>
+            <dd className="mono">
+              A: {data.evidence.retrieval.runIdA ?? '—'}
+              {y.mid != null ? ` · MID: ${data.evidence.retrieval.runIdMid ?? '—'}` : ''} · B:{' '}
+              {data.evidence.retrieval.runIdB ?? '—'}
+            </dd>
+          </div>
+          <div>
+            <dt>Freshness</dt>
+            <dd>
+              {data.evidence.freshness.fresh ? 'Fresh' : 'Stale/due'} · last success{' '}
+              {data.evidence.freshness.lastRunStatus ?? data.evidence.retrieval.lastSuccessAt ?? 'unknown'}
+            </dd>
+          </div>
+          <div>
+            <dt>Fingerprint</dt>
+            <dd className="mono">
+              run {data.evidence.fingerprint.runId ?? '—'} · {data.evidence.fingerprint.observationCount}{' '}
+              observations
+            </dd>
+          </div>
+          <div>
+            <dt>Growth denominators</dt>
+            <dd>
+              Observed and like-for-like denominators count economies with calculable growth for each interval
+              — not World Bank ranks and not level-ranking populations.
+            </dd>
+          </div>
+        </dl>
+        <h4 className="subhead">Methodology</h4>
+        <dl className="facts">
+          {Object.entries(data.comparisonMethodology ?? {}).map(([term, text]) => (
+            <div key={term}>
+              <dt>{term}</dt>
+              <dd>{String(text)}</dd>
+            </div>
+          ))}
+        </dl>
+        <h4 className="subhead">Limits (what is not established)</h4>
+        <ul>
+          {(data.evidence.limits ?? []).map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        <p className="footnote">
+          Metric: {data.metric?.title ?? ''} ({data.metric?.indicatorCode}) · {data.metric?.unit}. Growth values,
+          ranks, peer averages and percentage-point differences are calculated by this application from World
+          Bank observations.
+        </p>
+      </details>
+    </>
+  );
+}
+
+export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis = 'level', onYearA, onYearB, onYearMid = null, onMetric, onBasis }) {
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
@@ -1221,8 +2064,9 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   const [listsOpen, setListsOpen] = useState(false);
 
   const breakerActive = yearMid != null && yearA != null && yearB != null && yearMid > Math.min(yearA, yearB) && yearMid < Math.max(yearA, yearB);
+  const growthActive = basis === RANKING_BASIS.GROWTH;
   const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null;
-  const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}`;
+  const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${growthActive ? 'growth' : 'level'}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
       api.comparisonLevel(
@@ -1233,6 +2077,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
           ...(breakerActive ? { yearMid } : {}),
           country: 'IND',
           detail: 'full',
+          ...(growthActive ? { mode: 'yoy' } : {}),
         },
         { signal },
       ),
@@ -1240,9 +2085,20 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
     { enabled },
   );
   const isThreeYear = breakerActive && data?.years?.mid != null;
+  // Backend-driven mode: the response declares its own ranking basis, so the
+  // UI can never render growth numbers with level logic or vice versa.
+  const isGrowth = data?.comparison?.mode === 'yoy';
 
   const sameYear = yearA != null && yearB != null && yearA === yearB;
-  const empty = !loading && !error && !sameYear && data && !data.comparison?.available && !data.focusMovement?.fullRankA && !data.focusMovement?.fullRankB;
+  const empty =
+    !loading &&
+    !error &&
+    !sameYear &&
+    data &&
+    !data.comparison?.available &&
+    (isGrowth
+      ? !data.focusMovement?.growth?.AB?.available
+      : !data.focusMovement?.fullRankA && !data.focusMovement?.fullRankB);
 
   const enteredExited = useMemo(() => {
     const rows = data?.economies?.rows ?? [];
@@ -1342,6 +2198,13 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
           setTab('all');
           onMetric(v);
         }}
+        basis={growthActive ? RANKING_BASIS.GROWTH : RANKING_BASIS.LEVEL}
+        onBasis={(v) => {
+          setTab('all');
+          setListPage(1);
+          setCommonPage(1);
+          if (onBasis) onBasis(v);
+        }}
         onSwap={() => {
           setTab('all');
           swap();
@@ -1355,7 +2218,9 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="rank movement" />
       {!loading && !error && !sameYear && data ? (
         data.comparison?.available ? (
-          isThreeYear ? (
+          isGrowth ? (
+            <GrowthResults data={data} />
+          ) : isThreeYear ? (
             <ThreeYearResults data={data} />
           ) : (
           <>

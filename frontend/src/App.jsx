@@ -25,7 +25,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -157,7 +157,9 @@ export default function App() {
         if (rawMid > lo && rawMid < hi) yearMid = rawMid;
       }
     }
-    return { startYear, endYear, year, metric, neighbors, fromYear, view, yearA, yearB, yearMid };
+    // Rank-movement ranking basis: per-capita level (default) or YoY % growth.
+    const basis = filters.basis === 'growth' ? 'growth' : 'level';
+    return { startYear, endYear, year, metric, neighbors, fromYear, view, yearA, yearB, yearMid, basis };
   }, [filters, availableYears, maxYear, minYear, defaultStart]);
 
   // Mirror effective state to the URL (UI state only, never business logic).
@@ -172,6 +174,7 @@ export default function App() {
     if (effective.yearA != null) query.set('yearA', effective.yearA);
     if (effective.yearB != null) query.set('yearB', effective.yearB);
     if (effective.yearMid != null) query.set('yearMid', effective.yearMid);
+    if (effective.basis !== 'level') query.set('basis', effective.basis);
     query.set('view', effective.view);
     const next = `?${query.toString()}`;
     if (window.location.search !== next) window.history.replaceState(null, '', next);
@@ -306,10 +309,12 @@ export default function App() {
               yearB={effective.yearB}
               yearMid={effective.yearMid}
               metricKey={effective.metric}
+              basis={effective.basis}
               onYearA={(v) => setFilter('yearA', v)}
               onYearB={(v) => setFilter('yearB', v)}
               onYearMid={(v) => setFilter('yearMid', v ?? '')}
               onMetric={(v) => setFilter('metric', v)}
+              onBasis={(v) => setFilter('basis', v)}
             />
           ) : null}
           {filtersReady && view === 'yoy' ? (

@@ -31,7 +31,8 @@ import {
   listIndicators,
 } from './db/repository.js';
 import { describeUniverseRule } from './domain/universe.js';
-import { buildLevelComparisonResponse } from './services/comparisonService.js';
+import { buildLevelComparisonResponse, COMPARISON_ERROR_CODES } from './services/comparisonService.js';
+import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
 import { buildFullRanking } from './services/fullRanking.js';
 import { buildIndiaYearlyRows } from './services/indiaYearly.js';
@@ -278,14 +279,34 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       yearMid = parseYear(rawMid, 'yearMid');
     }
     const detail = String(req.query.detail ?? 'full').toLowerCase() === 'summary' ? 'summary' : 'full';
-    const result = buildLevelComparisonResponse(handle(), {
-      metricKey,
-      yearA,
-      yearB,
-      ...(yearMid !== undefined ? { yearMid } : {}),
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
-      detail,
-    });
+    // Ranking basis: per-capita level (default, backward-compatible) or
+    // YoY % growth. Unknown values fail cleanly under INVALID_MODE.
+    const mode = String(req.query.mode ?? 'level').toLowerCase();
+    if (mode !== 'level' && mode !== 'yoy') {
+      throw httpError(
+        400,
+        `Unknown comparison mode "${req.query.mode}". Valid modes: level, yoy.`,
+        COMPARISON_ERROR_CODES.INVALID_MODE,
+      );
+    }
+    const result =
+      mode === 'yoy'
+        ? buildGrowthComparisonResponse(handle(), {
+            metricKey,
+            yearA,
+            yearB,
+            ...(yearMid !== undefined ? { yearMid } : {}),
+            focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+            detail,
+          })
+        : buildLevelComparisonResponse(handle(), {
+            metricKey,
+            yearA,
+            yearB,
+            ...(yearMid !== undefined ? { yearMid } : {}),
+            focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+            detail,
+          });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 

@@ -48,6 +48,21 @@ export function formatPercent(value, options = {}) {
   return `${sign}${formatNumber(n, { decimals })}%`;
 }
 
+/**
+ * Percentage-point display for a difference of two percentages (e.g. India
+ * growth minus peer-average growth). Presentation only: the value must
+ * already have been computed as a plain subtraction, never as a percentage
+ * of a percentage. Never used as a calculation input.
+ */
+export function formatPercentagePoints(value, options = {}) {
+  const { decimals = 2 } = options;
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${formatNumber(n, { decimals })} pp`;
+}
+
 /** Public metric description used by the API and the UI (unit labels included). */
 export function describeMetric(metric) {
   return {
@@ -64,4 +79,4 @@ export function describeMetric(metric) {
   };
 }
 
-export default { formatNumber, formatValue, formatPercent, describeMetric };
+export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, describeMetric };
