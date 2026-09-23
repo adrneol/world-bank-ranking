@@ -12,6 +12,15 @@ import { useApi } from '../hooks/useApi.js';
 import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock, Pagination, Field } from '../components/ui.jsx';
 
+// Must stay identical to backend parseRankQuery (domain/ranking.js).
+// Message-only use: the backend performs the actual rank lookup.
+function parseRankQuery(input) {
+  const m = /^#?(\d+)$/.exec(String(input ?? '').trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
+
 export default function YoyRanking({ year, metricKey }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -62,14 +71,14 @@ export default function YoyRanking({ year, metricKey }) {
       ) : null}
 
       <form className="toolbar" onSubmit={submitSearch} role="search" aria-label="Search YoY ranking">
-        <Field label="Search country or ISO3" htmlFor="yoyrank-search">
+        <Field label="Search country, ISO3, or YoY rank" htmlFor="yoyrank-search">
           <span className="search-row">
             <input
               id="yoyrank-search"
               type="search"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="e.g. India or IND"
+              placeholder="e.g. India, IND, or 134"
               autoComplete="off"
             />
             <button type="submit" className="btn btn-secondary">
@@ -93,6 +102,12 @@ export default function YoyRanking({ year, metricKey }) {
       </form>
 
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="YoY ranking" />
+
+      {!loading && !error && data && search && data.search.matches.length === 0 && parseRankQuery(search) !== null ? (
+        <p className="status" role="status">
+          No economy with YoY rank #{parseRankQuery(search)} in this result set.
+        </p>
+      ) : null}
 
       {!loading && !error && data && (search ? data.search.matches.length > 0 : data.rows.length > 0) ? (
         <>

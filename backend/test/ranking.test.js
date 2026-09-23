@@ -156,6 +156,31 @@ test('country search matches ISO3 and name, case-insensitively', () => {
   assert.deepEqual(searchRanked(ranked, ''), []);
 });
 
+test('numeric search means exact analytical rank, never a substring', () => {
+  const { ranked } = rankByValue(rows);
+  const rankOf = (iso3) => ranked.find((row) => row.iso3 === iso3).rank;
+  // Exact rank, optional "#" prefix, surrounding whitespace ignored.
+  assert.deepEqual(searchRanked(ranked, String(rankOf('IND'))).map((row) => row.iso3), ['IND']);
+  assert.deepEqual(searchRanked(ranked, `#${rankOf('IND')}`).map((row) => row.iso3), ['IND']);
+  assert.deepEqual(searchRanked(ranked, `  ${rankOf('IND')} `).map((row) => row.iso3), ['IND']);
+  // "1" matches rank #1 only — never ranks 10..19, 100.., and never renumbers.
+  const ones = searchRanked(ranked, '1');
+  assert.equal(ones.length, 1);
+  assert.equal(ones[0].rank, 1);
+  // Multi-digit ranks: exact match only, at scale.
+  const many = rankByValue(
+    Array.from({ length: 12 }, (_, i) => ({ iso3: `C${String(i).padStart(2, '0')}`, name: `Country ${i}`, value: 1200 - i * 100 })),
+  ).ranked;
+  assert.deepEqual(searchRanked(many, '10').map((row) => row.rank), [10]);
+  assert.deepEqual(searchRanked(many, '#12').map((row) => row.rank), [12]);
+  assert.deepEqual(searchRanked(many, '1').map((row) => row.rank), [1]);
+  // Absent rank yields an explicit empty set (no nearest, no fallback).
+  assert.deepEqual(searchRanked(ranked, '999'), []);
+  assert.deepEqual(searchRanked(ranked, '#999'), []);
+  // Text search behavior is unchanged by the numeric path.
+  assert.deepEqual(searchRanked(ranked, 'ind').map((row) => row.iso3), ['IND']);
+});
+
 test('rank change is reported numerically only, never with economic interpretation', () => {
   const change = describeRankChange(100, 95);
   assert.equal(change.delta, -5);

@@ -112,14 +112,35 @@ export function paginate(ranked, { page = 1, pageSize = 50 } = {}) {
 }
 
 /**
- * Search a ranked list by country name or ISO3 (case-insensitive substring).
+ * Parse an exact-rank search ("100", "#100", " 100 ") to a rank number.
+ * Anything else (names, ISO3 codes, mixed text) yields null so the caller
+ * keeps the existing substring behavior. Pure-numeric input is ALWAYS a rank
+ * lookup, never a substring — "10" must not match ranks 100, 101 or 210.
+ *
+ * @param {string} query
+ * @returns {number|null} exact 1-based rank, or null when not a rank query
+ */
+export function parseRankQuery(query) {
+  const m = /^#?(\d+)$/.exec(String(query ?? '').trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
+
+/**
+ * Search a ranked list by country name, ISO3 (case-insensitive substring),
+ * or exact analytical rank ("100" / "#100" match rank #100 only).
+ * Filtering never renumbers: matched rows keep their backend rank.
  *
  * @param {object[]} ranked
  * @param {string} query
  */
 export function searchRanked(ranked, query) {
-  const q = String(query ?? '').trim().toLowerCase();
-  if (!q) return [];
+  const raw = String(query ?? '').trim();
+  if (!raw) return [];
+  const wanted = parseRankQuery(raw);
+  if (wanted !== null) return ranked.filter((r) => r.rank === wanted);
+  const q = raw.toLowerCase();
   return ranked.filter(
     (r) =>
       String(r.iso3 ?? '').toLowerCase().includes(q) ||
@@ -147,4 +168,4 @@ export function describeRankChange(previousRank, currentRank) {
   };
 }
 
-export default { rankByValue, rankAndLocate, neighborWindow, paginate, searchRanked };
+export default { rankByValue, rankAndLocate, neighborWindow, paginate, parseRankQuery, searchRanked };

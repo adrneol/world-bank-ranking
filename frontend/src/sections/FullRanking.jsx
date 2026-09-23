@@ -10,6 +10,15 @@ import { metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { Section, StatusBlock, Pagination, Field } from '../components/ui.jsx';
 
+// Must stay identical to backend parseRankQuery (domain/ranking.js).
+// Message-only use: the backend performs the actual rank lookup.
+function parseRankQuery(input) {
+  const m = /^#?(\d+)$/.exec(String(input ?? '').trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
+
 const PAGE_SIZE_DEFAULT = 50;
 
 export default function FullRanking({ year, metricKey }) {
@@ -51,14 +60,14 @@ export default function FullRanking({ year, metricKey }) {
       subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by the backend: raw value descending, ISO3 ascending.`}
     >
       <form className="toolbar" onSubmit={submitSearch} role="search" aria-label="Search ranking">
-        <Field label="Search country or ISO3" htmlFor="fullrank-search">
+        <Field label="Search country, ISO3, or rank" htmlFor="fullrank-search">
           <span className="search-row">
             <input
               id="fullrank-search"
               type="search"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="e.g. India or IND"
+              placeholder="e.g. India, IND, or 12"
               autoComplete="off"
             />
             <button type="submit" className="btn btn-secondary">
@@ -87,6 +96,12 @@ export default function FullRanking({ year, metricKey }) {
         <p className="status" role="status">
           {data.search.matchCount} match{data.search.matchCount === 1 ? '' : 'es'} for “{data.search.query}” — ranks shown
           are the authoritative rank numbers.
+        </p>
+      ) : null}
+
+      {!loading && !error && data && search && data.search.matches.length === 0 && parseRankQuery(search) !== null ? (
+        <p className="status" role="status">
+          No economy with analytical rank #{parseRankQuery(search)} in this result set.
         </p>
       ) : null}
 

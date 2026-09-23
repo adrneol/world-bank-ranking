@@ -349,25 +349,93 @@ function useIsMobile() {
 }
 
 /**
+ * Render a backend analytical rank for the "#" column. A missing rank stays
+ * an explicit em-dash — filtering can hide rows but never renumbers ranks.
+ */
+function rankCell(rank) {
+  return rank === null || rank === undefined ? '—' : `#${rank}`;
+}
+
+/**
+ * Parse an exact-rank search ("100", "#100", " 100 "). Must stay identical
+ * to backend parseRankQuery (domain/ranking.js): pure-numeric input is ALWAYS
+ * an exact rank lookup, never a substring — "10" must not match #100/#101.
+ */
+function parseRankQuery(input) {
+  const m = /^#?(\d+)$/.exec(String(input ?? '').trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n >= 1 ? n : null;
+}
+
+/**
+ * Backend analytical rank an outside level row displays in "#", shared by the
+ * table component and its search filter so numeric search matches display.
+ * rankKey is set only on three-year year tabs (rank in that year); the All
+ * tab uses the end-year rank; two-year views use exited ? rankA : rankB.
+ */
+function outsideLevelRankOf(r, { yearMid, rankKey }) {
+  if (rankKey) return r[rankKey];
+  if (yearMid != null) return r.rankB;
+  return r.status === 'exited' ? r.rankA : r.rankB;
+}
+
+/**
+ * Backend analytical rank a growth-outside row displays in "#": the observed
+ * growth rank of the tab interval, or of the overall AB interval on the All
+ * tab. Null when that interval is not calculable for the row.
+ */
+function growthOutsideRankOf(r, intervalKey) {
+  return r.intervals?.[intervalKey ?? 'AB']?.obsRank;
+}
+
+/**
+ * Text-or-rank row matcher for movement tables. rank is the row's displayed
+ * backend analytical rank (the same value as its "#" cell); a null rank never
+ * matches a numeric query. Non-numeric input keeps substring name/ISO3 match.
+ */
+function matchesTextOrRank(rawQuery, rank, row) {
+  const q = String(rawQuery ?? '').trim().toLowerCase();
+  if (!q) return true;
+  const wanted = parseRankQuery(rawQuery);
+  if (wanted !== null) return rank === wanted;
+  return String(row.name ?? '').toLowerCase().includes(q) || String(row.iso3 ?? '').toLowerCase().includes(q);
+}
+
+/**
+ * Explicit empty state for numeric rank search with no visible rows. Text
+ * searches keep their existing empty rendering; only a requested rank that
+ * does not exist in the current result set gets this message.
+ */
+function RankEmptyNotice({ query, hasRows }) {
+  const wanted = parseRankQuery(query);
+  if (wanted === null || hasRows) return null;
+  return <span> No economy with analytical rank #{wanted} in this result set.</span>;
+}
+
+/**
  * Mobile shell for economy result lists. Same backend rows, same Details
- * content components and same serial numbers as the desktop table; only the
- * layout differs. The card is width-constrained to its container
+ * content components and same backend analytical ranks as the desktop table;
+ * only the layout differs. The card is width-constrained to its container
  * (width/max-width 100%, min-width 0) and never inherits table geometry, so
  * Details content reflows vertically instead of stretching across a wide
  * scrolled table. One economy expanded at a time, like the desktop tables.
+ *
+ * rankOf maps a row to its backend analytical rank (never a render position),
+ * so search/filter/sort/pagination cannot renumber what is displayed.
  */
-function MobileCardList({ rows, serialBase = 0, caption, renderSummary, renderDetails }) {
+function MobileCardList({ rows, rankOf, caption, renderSummary, renderDetails }) {
   const listId = useId();
   const [openIso, setOpenIso] = useState(null);
   return (
     <div className="economy-cards" role="list" aria-label={caption ?? 'Economies'}>
-      {rows.map((r, i) => {
+      {rows.map((r) => {
         const open = openIso === r.iso3;
         const detailId = `${listId}-${r.iso3}-details`;
         return (
           <div className="card economy-card" role="listitem" key={r.iso3}>
             <div className="economy-card-head">
-              <span>#{serialBase + i + 1}</span>
+              <span>{rankCell(rankOf(r))}</span>
               <span className="economy-card-name">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
@@ -471,7 +539,7 @@ export function EconomyDetails({ r, yearA, yearB, yearMid = null }) {
  * shows the full outside dataset with combined per-year rank/value cells and
  * the backend overall relation/effect fields.
  */
-export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption, serialBase = 0 }) {
+export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -491,13 +559,17 @@ export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = n
       .join(' · ') || '—';
   const combined = (r, prefix) =>
     [r[`${prefix}A`] ?? '—', r[`${prefix}Mid`] ?? '—', r[`${prefix}B`] ?? '—'].join(' / ');
+  // The "#" column shows the row's backend analytical rank (the same value as
+  // the Rank column for single-rank views, the end-year rank for the combined
+  // All tab) — never the row's position in the filtered/sorted page.
+  const rankOf = (r) => outsideLevelRankOf(r, { yearMid, rankKey: isYearTab ? keys.rank : null });
   // Mobile shell: same rows, same Details content, card layout constrained
   // to the viewport instead of the wide table geometry.
   if (isMobile) {
     return (
       <MobileCardList
         rows={rows}
-        serialBase={serialBase}
+        rankOf={rankOf}
         caption={caption}
         renderSummary={(r) => (
           <>
@@ -557,13 +629,13 @@ export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = n
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
+          {rows.map((r) => {
             const open = openIso === r.iso3;
             const detailId = `${tableId}-${r.iso3}-details`;
             return (
               <Fragment key={r.iso3}>
                 <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-                  <td className="num">{serialBase + i + 1}</td>
+                  <td className="num">{rankCell(rankOf(r))}</td>
                   <th scope="row">
                     {r.name ?? r.iso3}
                     {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
@@ -648,7 +720,7 @@ function yearColumnKeys(years, year) {
  * the original two-year table; [yearA, yearMid, yearB] extends it with the
  * middle-year rank, value and vs-India columns.
  */
-export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+export function CommonTable({ rows, yearA, yearB, yearMid = null, caption }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -659,11 +731,14 @@ export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, seria
   // # + Economy + ISO3 + 3 columns (rank, value, vs India) per year.
   const colCount = 3 + 3 * years.length;
   const cols = years.map((y) => yearColumnKeys(years, y));
+  // The "#" column shows the end-year backend observed rank (the table's
+  // default sort order), stable under search/filter/sort/pagination.
+  const rankOf = (r) => r.rankB;
   if (isMobile) {
     return (
       <MobileCardList
         rows={rows}
-        serialBase={serialBase}
+        rankOf={rankOf}
         caption={caption}
         renderSummary={(r) => (
           <>
@@ -713,13 +788,13 @@ export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, seria
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
+          {rows.map((r) => {
             const open = openIso === r.iso3;
             const detailId = `${tableId}-${r.iso3}-details`;
             return (
               <Fragment key={r.iso3}>
                 <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-                  <td className="num">{serialBase + i + 1}</td>
+                  <td className="num">{rankCell(rankOf(r))}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
@@ -966,9 +1041,11 @@ function ThreeYearResults({ data }) {
   const tabSuffix = activeTab.id === 'outA' ? 'A' : activeTab.id === 'outMid' ? 'Mid' : activeTab.id === 'outB' ? 'B' : null;
 
   const filteredList = (() => {
-    const q = query.trim().toLowerCase();
+    // Numeric queries match the "#" rank this table displays (year-tab rank,
+    // end-year rank on All); text keeps substring name/ISO3 match.
+    const rankKey = tabSuffix ? `rank${tabSuffix}` : null;
     const matchesQuery = (r) =>
-      !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
+      matchesTextOrRank(query, outsideLevelRankOf(r, { yearMid: y.mid, rankKey }), r);
     // Relation and effect are decided by ranking position, never by raw-value
     // comparison: the tab year's backend per-year fields, or the backend
     // overall fields on the All tab.
@@ -993,10 +1070,8 @@ function ThreeYearResults({ data }) {
   })();
 
   const filteredCommon = (() => {
-    const q = commonQuery.trim().toLowerCase();
-    const searched = commonRows.filter(
-      (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
-    );
+    // Numeric queries match the "#" rank (end-year rank); text keeps substring.
+    const searched = commonRows.filter((r) => matchesTextOrRank(commonQuery, r.rankB, r));
     // Relation filter uses the backend-provided yearly relations, so an
     // economy above India in one year and below in another stays explicit.
     const related = searched.filter((r) => matchesCommonRelation(r, commonRelation));
@@ -1227,7 +1302,7 @@ function ThreeYearResults({ data }) {
             ])}
           </div>
           <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Outside filters">
-            <Field label="Search name or ISO3" htmlFor="mv3-q">
+            <Field label="Search name, ISO3, or rank" htmlFor="mv3-q">
               <input
                 id="mv3-q"
                 type="search"
@@ -1236,7 +1311,7 @@ function ThreeYearResults({ data }) {
                   setQuery(e.target.value);
                   setOutsidePage(1);
                 }}
-                placeholder="e.g. India, IND"
+                placeholder="e.g. India, IND, or #12"
               />
             </Field>
             <Field label="Relation filter" htmlFor="mv3-rel">
@@ -1262,7 +1337,6 @@ function ThreeYearResults({ data }) {
             yearB={y.b}
             yearMid={y.mid}
             focusYear={activeTab.year}
-            serialBase={(filteredList.page - 1) * filteredList.pageSize}
             caption={
               activeTab.id === 'all'
                 ? `All economies outside the common comparison set for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`
@@ -1272,6 +1346,7 @@ function ThreeYearResults({ data }) {
           <p className="footnote" aria-live="polite">
             Showing {filteredList.slice.length} of {activeTab.count} ({activeTab.label}) · page{' '}
             {filteredList.page} of {filteredList.pages}
+            <RankEmptyNotice query={query} hasRows={filteredList.slice.length > 0} />
           </p>
           <div className="pagination" role="navigation" aria-label="Outside pages">
             <button
@@ -1316,7 +1391,7 @@ function ThreeYearResults({ data }) {
       {commonOpen ? (
         <>
           <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Common filters">
-            <Field label="Search common" htmlFor="mv3-cq">
+            <Field label="Search common by name, ISO3, or rank" htmlFor="mv3-cq">
               <input
                 id="mv3-cq"
                 type="search"
@@ -1325,7 +1400,7 @@ function ThreeYearResults({ data }) {
                   setCommonQuery(e.target.value);
                   setCommonPage(1);
                 }}
-                placeholder="e.g. United, USA"
+                placeholder="e.g. United, USA, or #12"
               />
             </Field>
             <Field label="Relation to India" htmlFor="mv3-crel">
@@ -1362,12 +1437,12 @@ function ThreeYearResults({ data }) {
             yearA={y.a}
             yearB={y.b}
             yearMid={y.mid}
-            serialBase={(filteredCommon.page - 1) * filteredCommon.pageSize}
             caption={`Common comparison-set economies for ${data.metric.indicatorCode}, ${y.a} to ${y.mid} to ${y.b}`}
           />
           <p className="footnote" aria-live="polite">
             Showing {filteredCommon.slice.length} of {u.common} · page {filteredCommon.page} of{' '}
             {filteredCommon.pages}
+            <RankEmptyNotice query={commonQuery} hasRows={filteredCommon.slice.length > 0} />
           </p>
           <div className="pagination" role="navigation" aria-label="Common pages">
             <button
@@ -1568,7 +1643,7 @@ export function GrowthDetails({ r, intervals, yearA, yearB, yearMid = null }) {
  * growth %, absolute change, observed growth rank, relation and effect.
  * Level values live in Details; ranks come only from growthPercent.
  */
-export function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, serialBase = 0, yearA, yearB, yearMid = null }) {
+export function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, yearA, yearB, yearMid = null }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -1576,11 +1651,16 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
     return <p className="muted">None.</p>;
   }
   const shown = activeInterval ? [activeInterval] : intervals;
+  // The "#" column shows the backend observed growth rank: the active
+  // interval's rank on interval tabs, the overall AB interval's rank on the
+  // All tab. Sorting by growth/abs only reorders rows, never renumbers them.
+  const rankOf = (r) =>
+    activeInterval ? r.intervals?.[activeInterval.key]?.obsRank : r.intervals?.AB?.obsRank;
   if (isMobile) {
     return (
       <MobileCardList
         rows={rows}
-        serialBase={serialBase}
+        rankOf={rankOf}
         caption={caption}
         renderSummary={(r) => {
           const rel = activeInterval
@@ -1660,7 +1740,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
+          {rows.map((r) => {
             const rel = activeInterval
               ? (r.intervals?.[activeInterval.key]?.relObs ?? r.relationToFocus)
               : r.relationToFocus;
@@ -1669,7 +1749,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
             return (
               <Fragment key={r.iso3}>
                 <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-                  <td className="num">{serialBase + i + 1}</td>
+                  <td className="num">{rankCell(rankOf(r))}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
@@ -1722,7 +1802,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
  * growth %, absolute change, start/middle/end level values and the
  * like-for-like relation per interval. No Effect column (fixed population).
  */
-export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption, serialBase = 0 }) {
+export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -1730,6 +1810,10 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
     return <p className="muted">None.</p>;
   }
   const levelYears = yearMid != null ? [yearA, yearMid, yearB] : [yearA, yearB];
+  // The "#" column shows the backend observed growth rank of the overall AB
+  // interval — the rank of the growth values displayed in this table, stable
+  // under search/filter/sort/pagination.
+  const rankOf = (r) => r.intervals?.AB?.obsRank;
   if (isMobile) {
     const levelOf = (r, y) => {
       if (y === yearA) return r.displayA;
@@ -1739,7 +1823,7 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
     return (
       <MobileCardList
         rows={rows}
-        serialBase={serialBase}
+        rankOf={rankOf}
         caption={caption}
         renderSummary={(r) => (
           <>
@@ -1808,13 +1892,13 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
+          {rows.map((r) => {
             const open = openIso === r.iso3;
             const detailId = `${tableId}-${r.iso3}-details`;
             return (
               <Fragment key={r.iso3}>
                 <tr className={r.iso3 === 'IND' ? 'row-focus' : undefined}>
-                  <td className="num">{serialBase + i + 1}</td>
+                  <td className="num">{rankCell(rankOf(r))}</td>
               <th scope="row">
                 {r.name ?? r.iso3}
                 {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}{' '}
@@ -2238,9 +2322,10 @@ function GrowthResults({ data }) {
   const activeTab = outsideTabs.find((t) => t.id === tab) ?? outsideTabs[0];
 
   const filteredList = (() => {
-    const q = query.trim().toLowerCase();
+    // Numeric queries match the "#" growth rank of the tab interval (overall
+    // AB interval on All); text keeps substring name/ISO3 match.
     const matchesQuery = (r) =>
-      !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
+      matchesTextOrRank(query, growthOutsideRankOf(r, activeTab.interval?.key), r);
     // Relation and effect follow growth-ranking position in the tab interval
     // (or the backend overall fields on the All tab) — never level values.
     const matchesRelation = (r) => {
@@ -2265,10 +2350,8 @@ function GrowthResults({ data }) {
   })();
 
   const filteredCommon = (() => {
-    const q = commonQuery.trim().toLowerCase();
-    const searched = commonRows.filter(
-      (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
-    );
+    // Numeric queries match the "#" rank (overall AB observed growth rank).
+    const searched = commonRows.filter((r) => matchesTextOrRank(commonQuery, r.intervals?.AB?.obsRank, r));
     // Relation filter uses backend like-for-like growth relations per
     // interval, so an economy above India in one interval and below in
     // another stays explicit.
@@ -2351,7 +2434,7 @@ function GrowthResults({ data }) {
             ])}
           </div>
           <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Outside growth filters">
-            <Field label="Search name or ISO3" htmlFor="mv-gq">
+            <Field label="Search name, ISO3, or rank" htmlFor="mv-gq">
               <input
                 id="mv-gq"
                 type="search"
@@ -2360,7 +2443,7 @@ function GrowthResults({ data }) {
                   setQuery(e.target.value);
                   setListPage(1);
                 }}
-                placeholder="e.g. India, IND"
+                placeholder="e.g. India, IND, or #12"
               />
             </Field>
             <Field label="Relation filter" htmlFor="mv-grel">
@@ -2384,7 +2467,6 @@ function GrowthResults({ data }) {
             rows={filteredList.slice}
             intervals={intervals}
             activeInterval={activeTab.interval}
-            serialBase={(filteredList.page - 1) * filteredList.pageSize}
             yearA={y.a}
             yearB={y.b}
             yearMid={y.mid ?? null}
@@ -2393,6 +2475,7 @@ function GrowthResults({ data }) {
           <p className="footnote" aria-live="polite">
             Showing {filteredList.slice.length} of {activeTab.count} ({activeTab.label}) · page{' '}
             {filteredList.page} of {filteredList.pages}
+            <RankEmptyNotice query={query} hasRows={filteredList.slice.length > 0} />
           </p>
           <div className="pagination" role="navigation" aria-label="Outside growth pages">
             <button
@@ -2436,7 +2519,7 @@ function GrowthResults({ data }) {
       {commonOpen ? (
         <>
           <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Common growth filters">
-            <Field label="Search common" htmlFor="mv-gcq">
+            <Field label="Search common by name, ISO3, or rank" htmlFor="mv-gcq">
               <input
                 id="mv-gcq"
                 type="search"
@@ -2445,7 +2528,7 @@ function GrowthResults({ data }) {
                   setCommonQuery(e.target.value);
                   setCommonPage(1);
                 }}
-                placeholder="e.g. United, USA"
+                placeholder="e.g. United, USA, or #12"
               />
             </Field>
             <Field label="Relation to India" htmlFor="mv-gcrel">
@@ -2484,12 +2567,12 @@ function GrowthResults({ data }) {
             yearA={y.a}
             yearB={y.b}
             yearMid={y.mid ?? null}
-            serialBase={(filteredCommon.page - 1) * filteredCommon.pageSize}
             caption="Like-for-like growth economies"
           />
           <p className="footnote" aria-live="polite">
             Showing {filteredCommon.slice.length} of {u.common} · page {filteredCommon.page} of{' '}
             {filteredCommon.pages}
+            <RankEmptyNotice query={commonQuery} hasRows={filteredCommon.slice.length > 0} />
           </p>
           <div className="pagination" role="navigation" aria-label="Common growth pages">
             <button
@@ -2654,9 +2737,10 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
 
   const filteredList = useMemo(() => {
     const base = activeTab.rows;
-    const q = query.trim().toLowerCase();
+    // Numeric queries match the "#" rank (exited ? rankA : rankB); text keeps
+    // substring name/ISO3 match.
     const matchesQuery = (r) =>
-      !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q);
+      matchesTextOrRank(query, outsideLevelRankOf(r, { yearMid: null, rankKey: null }), r);
     const matchesRelation = (r) => {
       if (relationFilter === 'all') return true;
       if (relationFilter === 'above') return r.relationToFocus === 'above';
@@ -2672,10 +2756,8 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   }, [activeTab, query, relationFilter, listPage]);
 
   const filteredCommon = useMemo(() => {
-    const q = commonQuery.trim().toLowerCase();
-    const searched = enteredExited.common.filter(
-      (r) => !q || String(r.name ?? '').toLowerCase().includes(q) || String(r.iso3 ?? '').toLowerCase().includes(q),
-    );
+    // Numeric queries match the "#" rank (end-year rank); text keeps substring.
+    const searched = enteredExited.common.filter((r) => matchesTextOrRank(commonQuery, r.rankB, r));
     // Relation filter uses the two backend-provided yearly relations, so an
     // economy above India in one year and below in the other stays explicit.
     const related = searched.filter((r) => matchesCommonRelation(r, commonRelation));
@@ -3009,7 +3091,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               </button>
             </div>
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Entered exited filters">
-              <Field label="Search name or ISO3" htmlFor="mv-q">
+              <Field label="Search name, ISO3, or rank" htmlFor="mv-q">
                 <input
                   id="mv-q"
                   type="search"
@@ -3018,7 +3100,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                     setQuery(e.target.value);
                     setListPage(1);
                   }}
-                  placeholder="e.g. India, IND"
+                  placeholder="e.g. India, IND, or #12"
                 />
               </Field>
               <Field label="Relation filter" htmlFor="mv-rel">
@@ -3040,12 +3122,12 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               rows={filteredList.slice}
               yearA={data.years.a}
               yearB={data.years.b}
-              serialBase={(filteredList.page - 1) * filteredList.pageSize}
               caption={`${tab === 'all' ? 'All economies outside the common comparison set' : tab === 'entered' ? 'Economies that entered the observed ranking' : 'Economies that exited the observed ranking'} for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
             />
             <p className="footnote" aria-live="polite">
               Showing {filteredList.slice.length} of {activeTab.count} ({tab}) · page{' '}
               {filteredList.page} of {filteredList.pages}
+              <RankEmptyNotice query={query} hasRows={filteredList.slice.length > 0} />
             </p>
             <div className="pagination" role="navigation" aria-label="Entered exited pages">
               <button
@@ -3090,7 +3172,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
             {commonOpen ? (
               <>
                 <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Common filters">
-                  <Field label="Search common" htmlFor="mv-cq">
+                  <Field label="Search common by name, ISO3, or rank" htmlFor="mv-cq">
                     <input
                       id="mv-cq"
                       type="search"
@@ -3099,7 +3181,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                         setCommonQuery(e.target.value);
                         setCommonPage(1);
                       }}
-                      placeholder="e.g. United, USA"
+                      placeholder="e.g. United, USA, or #12"
                     />
                   </Field>
                   <Field label="Relation to India" htmlFor="mv-crel">
@@ -3139,12 +3221,12 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                   rows={filteredCommon.slice}
                   yearA={data.years.a}
                   yearB={data.years.b}
-                  serialBase={(filteredCommon.page - 1) * filteredCommon.pageSize}
                   caption={`Common comparison-set economies for ${data.metric.indicatorCode}, ${data.years.a} to ${data.years.b}`}
                 />
                 <p className="footnote" aria-live="polite">
                   Showing {filteredCommon.slice.length} of {data.universe.common} · page {filteredCommon.page}{' '}
                   of {filteredCommon.pages}
+                  <RankEmptyNotice query={commonQuery} hasRows={filteredCommon.slice.length > 0} />
                 </p>
                 <div className="pagination" role="navigation" aria-label="Common pages">
                   <button
