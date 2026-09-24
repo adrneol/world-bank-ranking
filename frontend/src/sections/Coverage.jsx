@@ -9,13 +9,13 @@ import { metricLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function Coverage({ year, metricKey, fromYear, toYear, subject = 'gdp_per_capita' }) {
+export default function Coverage({ year, metricKey, fromYear, toYear, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
   // The backend requires fromYear AND toYear together for an explanation;
   // omit both when no comparison year is selected.
   const compare = fromYear != null && toYear != null ? { fromYear, toYear } : {};
-  const depsKey = `coverage:${year ?? ''}:${metricKey}:${fromYear ?? ''}:${toYear ?? ''}:${subject}`;
+  const depsKey = `coverage:${year ?? ''}:${metricKey}:${fromYear ?? ''}:${toYear ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.coverage({ year, ...compare, indicator: metricKey, country: 'IND', subject }, { signal }),
+    (signal) => api.coverage({ year, ...compare, indicator: metricKey, country, subject }, { signal }),
     depsKey,
     { enabled: year != null },
   );
@@ -50,7 +50,7 @@ export default function Coverage({ year, metricKey, fromYear, toYear, subject = 
                     Missing
                   </th>
                   <th scope="col" className="num">
-                    India rank
+                    {focusName} rank
                   </th>
                 </tr>
               </thead>
@@ -86,7 +86,7 @@ export default function Coverage({ year, metricKey, fromYear, toYear, subject = 
                   <th scope="col" className="num">
                     Valid YoY pairs
                   </th>
-                  <th scope="col">India YoY calculable</th>
+                  <th scope="col">{focusName} YoY calculable</th>
                 </tr>
               </thead>
               <tbody>

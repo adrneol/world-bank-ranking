@@ -156,7 +156,7 @@ export function buildIndiaYearlyRows(db, options = {}) {
   const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
 
   return {
-    focus: { iso3: focusIso3, name: focusCountry?.name ?? FOCUS_COUNTRY.name },
+    focus: { iso3: focusIso3, name: focusCountry?.name ?? FOCUS_COUNTRY.name, kind: 'country' },
     subject: subjectKey,
     subjectLabel: getSubject(subjectKey).label,
     eligibleUniverse,

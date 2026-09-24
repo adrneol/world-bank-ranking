@@ -70,6 +70,7 @@ import {
 const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/years',
   '/api/india/gdp-ranking',
+  '/api/focus/yearly',
   '/api/ranking',
   '/api/ranking/verify',
   '/api/yoy-ranking',
@@ -149,6 +150,32 @@ function parseCountry(value, fallback = FOCUS_COUNTRY.iso3) {
   const iso3 = raw.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(iso3)) {
     throw httpError(400, `Invalid country "${value}". Expected a 3-letter ISO3 code (e.g. IND).`, 'INVALID_COUNTRY');
+  }
+  return iso3;
+}
+
+/**
+ * Phase-1 focus-country resolution (generic focus abstraction).
+ *
+ *   - omitted/blank country parameter -> default focus (IND), no lookup
+ *   - explicit valid ISO3 of an eligible country -> that ISO3
+ *   - explicit invalid ISO3 (bad format, unknown code, or aggregate entity)
+ *     -> 400 INVALID_COUNTRY, NEVER a silent fallback to IND
+ *
+ * Only an OMITTED parameter defaults to IND.
+ */
+function parseFocusCountry(db, value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return FOCUS_COUNTRY.iso3;
+  }
+  const iso3 = parseCountry(value);
+  const meta = getCountry(db, iso3);
+  if (!meta || meta.is_aggregate === 1) {
+    throw httpError(
+      400,
+      `Unknown country "${value}". Expected the ISO3 code of an eligible country/economy (e.g. IND).`,
+      'INVALID_COUNTRY',
+    );
   }
   return iso3;
 }
@@ -283,8 +310,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     });
   }));
 
-  // ---------- india yearly ----------
-  app.get('/api/india/gdp-ranking', ah(async (req, res) => {
+  // ---------- yearly (canonical + legacy alias) ----------
+  // GET /api/focus/yearly is the canonical generic focus-yearly route.
+  // GET /api/india/gdp-ranking is a PERMANENT compatibility alias: same
+  // handler, same implementation, same analytical fields. Omitted country
+  // defaults to IND on both; explicit countries are validated identically.
+  const handleYearly = ah(async (req, res) => {
     const h = handle();
     const startYear = parseYear(req.query.startYear, 'startYear');
     const endYear = parseYear(req.query.endYear, 'endYear');
@@ -296,10 +327,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       ...(startYear !== undefined ? { startYear } : {}),
       ...(endYear !== undefined ? { endYear } : {}),
       ...(subject ? { subject } : {}),
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(h, req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
-  }));
+  });
+  app.get('/api/india/gdp-ranking', handleYearly);
+  app.get('/api/focus/yearly', handleYearly);
 
   // ---------- full level ranking ----------
   app.get('/api/ranking', ah(async (req, res) => {
@@ -311,7 +344,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       page: parsePositiveInt(req.query.page, 'page', { fallback: 1 }),
       pageSize: parsePositiveInt(req.query.pageSize, 'pageSize', { fallback: 50 }),
       search: req.query.search ?? '',
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(handle(), req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -323,7 +356,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const result = buildRankVerification(handle(), {
       metricKey,
       ...(year !== undefined ? { year } : {}),
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(handle(), req.query.country),
       neighbors: normalizeNeighborCount(req.query.neighbors),
     });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -339,7 +372,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       page: parsePositiveInt(req.query.page, 'page', { fallback: 1 }),
       pageSize: parsePositiveInt(req.query.pageSize, 'pageSize', { fallback: 50 }),
       search: req.query.search ?? '',
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(handle(), req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -351,7 +384,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const result = buildYoyVerification(handle(), {
       metricKey,
       ...(year !== undefined ? { year } : {}),
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(handle(), req.query.country),
       neighbors: normalizeNeighborCount(req.query.neighbors),
     });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -392,7 +425,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
             yearA,
             yearB,
             ...(yearMid !== undefined ? { yearMid } : {}),
-            focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+            focusIso3: parseFocusCountry(handle(), req.query.country),
             detail,
           })
         : buildLevelComparisonResponse(handle(), {
@@ -400,7 +433,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
             yearA,
             yearB,
             ...(yearMid !== undefined ? { yearMid } : {}),
-            focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+            focusIso3: parseFocusCountry(handle(), req.query.country),
             detail,
           });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -414,12 +447,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const panel = buildCoveragePanel(h, {
       ...(year !== undefined ? { year } : {}),
       ...(subject ? { subject } : {}),
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(handle(), req.query.country),
     });
     const yoyPanel = buildYoyCoveragePanel(h, {
       ...(year !== undefined ? { year } : {}),
       ...(subject ? { subject } : {}),
-      focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+      focusIso3: parseFocusCountry(handle(), req.query.country),
     });
 
     let explanation = null;
@@ -434,7 +467,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         metricKey,
         fromYear,
         toYear,
-        focusIso3: parseCountry(req.query.country, FOCUS_COUNTRY.iso3),
+        focusIso3: parseFocusCountry(handle(), req.query.country),
       });
     }
 
@@ -463,7 +496,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
     const country = req.query.country;
     if (country !== undefined && country !== null && country !== '') {
-      const iso3 = parseCountry(country);
+      const iso3 = parseFocusCountry(h, country);
       const row = getObservation(h, iso3, indicator.id, year);
       const meta = getCountry(h, iso3);
       return res.json({

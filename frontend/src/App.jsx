@@ -19,6 +19,7 @@ import {
   subjectOf,
 } from './config/metrics.js';
 import { Field } from './components/ui.jsx';
+import FocusPicker from './components/FocusPicker.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
 import Overview from './sections/Overview.jsx';
 import YearlyTable from './sections/YearlyTable.jsx';
@@ -32,7 +33,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -73,16 +74,6 @@ function isViewId(value) {
   return VIEWS.some((v) => v.id === value);
 }
 
-const RANK_SUBS = Object.freeze([
-  { id: 'verify', label: 'Verify India' },
-  { id: 'table', label: 'Full table' },
-]);
-
-const YOY_SUBS = Object.freeze([
-  { id: 'ranking', label: 'Ranking' },
-  { id: 'verify', label: 'Verify India' },
-]);
-
 export default function App() {
   const [yearsData, setYearsData] = useState(null);
   const [yearsError, setYearsError] = useState(null);
@@ -98,6 +89,7 @@ export default function App() {
     neighbors: 5,
     fromYear: '',
     view: 'overview',
+    country: 'IND',
     ...readUrlState(),
   }));
   const [rankSub, setRankSub] = useState('verify');
@@ -125,6 +117,28 @@ export default function App() {
     };
   }, [dataVersion]);
 
+  // Eligible countries for the focus picker (backend metadata is the
+  // authority for names; the picker lists countries only — no aggregates,
+  // regions or custom groups until Phase 4).
+  const [countriesData, setCountriesData] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .countries({ includeAggregates: false })
+      .then((result) => {
+        if (cancelled) return;
+        setCountriesData(result);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCountriesData({ countries: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataVersion]);
+
+  const eligibleCountries = useMemo(() => countriesData?.countries ?? [], [countriesData]);
   const availableYears = useMemo(() => yearsData?.years ?? [], [yearsData]);
   const minYear = yearsData?.minYear ?? null;
   const maxYear = yearsData?.maxYear ?? null;
@@ -166,11 +180,33 @@ export default function App() {
     }
     // Rank-movement ranking basis: level value (default) or YoY % growth.
     const basis = filters.basis === 'growth' ? 'growth' : 'level';
+    // Focus country (Phase 1: generic focus abstraction, IND default).
+    // Omitted/invalid URL values resolve to IND; only a valid explicit ISO3
+    // selects another country. The display name comes from backend metadata.
+    const rawCountry = String(filters.country ?? 'IND').trim().toUpperCase();
+    const country = /^[A-Z]{3}$/.test(rawCountry) ? rawCountry : 'IND';
+    const focusName =
+      eligibleCountries.find((c) => c.iso3 === country)?.name ?? (country === 'IND' ? 'India' : country);
     // The analysis subject is derived from the metric key (single source of
     // truth): nominal_* metrics imply GDP per capita, total_* imply Total GDP.
     const subject = subjectOf(metric);
-    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis };
-  }, [filters, availableYears, maxYear, minYear, defaultStart]);
+    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName };
+  }, [filters, availableYears, maxYear, minYear, defaultStart, eligibleCountries]);
+
+  const rankSubs = useMemo(
+    () => [
+      { id: 'verify', label: `Verify ${effective.focusName}` },
+      { id: 'table', label: 'Full table' },
+    ],
+    [effective.focusName],
+  );
+  const yoySubs = useMemo(
+    () => [
+      { id: 'ranking', label: 'Ranking' },
+      { id: 'verify', label: `Verify ${effective.focusName}` },
+    ],
+    [effective.focusName],
+  );
 
   // Mirror effective state to the URL (UI state only, never business logic).
   useEffect(() => {
@@ -185,6 +221,9 @@ export default function App() {
     if (effective.yearB != null) query.set('yearB', effective.yearB);
     if (effective.yearMid != null) query.set('yearMid', effective.yearMid);
     if (effective.basis !== 'level') query.set('basis', effective.basis);
+    // Country is addressable but omitted for the IND default, so existing
+    // India links keep working unchanged and stay clean.
+    if (effective.country !== 'IND') query.set('country', effective.country);
     query.set('view', effective.view);
     const next = `?${query.toString()}`;
     if (window.location.search !== next) window.history.replaceState(null, '', next);
@@ -229,9 +268,9 @@ export default function App() {
               height="56"
             />
             <div>
-              <p className="eyebrow">World Bank WDI · India {subjectLabel(effective.subject)}</p>
+              <p className="eyebrow">World Bank WDI · {effective.focusName} {subjectLabel(effective.subject)}</p>
               <h1>
-                India ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
+                {effective.focusName} ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
               </h1>
             </div>
           </div>
@@ -283,6 +322,11 @@ export default function App() {
                   <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
                 </>
               ) : null}
+              <FocusPicker
+                countries={eligibleCountries}
+                value={effective.country}
+                onChange={(v) => setFilter('country', v)}
+              />
               <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
               <Field label="Analysis" htmlFor="f-subject">
                 <select
@@ -345,23 +389,23 @@ export default function App() {
           </p>
         ) : null}
 
-        <main id="main" key={`${dataVersion}:${view}`}>
+        <main id="main" key={`${dataVersion}:${view}:${effective.country}`}>
           {filtersReady && view === 'overview' ? (
             <>
-              <Overview year={effective.year} subject={effective.subject} />
-              <YearComparison year={effective.year} subject={effective.subject} />
+              <Overview year={effective.year} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
+              <YearComparison year={effective.year} subject={effective.subject} country={effective.country} />
             </>
           ) : null}
           {filtersReady && view === 'data' ? (
-            <YearlyTable startYear={effective.startYear} endYear={effective.endYear} subject={effective.subject} />
+            <YearlyTable startYear={effective.startYear} endYear={effective.endYear} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
           {filtersReady && view === 'rank' ? (
             <div role="tabpanel" id="panel-rank" aria-labelledby="tab-rank">
-              <SubTabs options={RANK_SUBS} active={rankSub} onChange={setRankSub} label="Rank workspace views" />
+              <SubTabs options={rankSubs} active={rankSub} onChange={setRankSub} label="Rank workspace views" />
               {rankSub === 'verify' ? (
-                <LevelVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} />
+                <LevelVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} country={effective.country} focusName={effective.focusName} />
               ) : (
-                <FullRanking year={effective.year} metricKey={effective.metric} />
+                <FullRanking year={effective.year} metricKey={effective.metric} country={effective.country} />
               )}
             </div>
           ) : null}
@@ -373,11 +417,15 @@ export default function App() {
               yearMid={effective.yearMid}
               metricKey={effective.metric}
               basis={effective.basis}
+              country={effective.country}
+              countries={eligibleCountries}
+              focusName={effective.focusName}
               onYearA={(v) => setFilter('yearA', v)}
               onYearB={(v) => setFilter('yearB', v)}
               onYearMid={(v) => setFilter('yearMid', v ?? '')}
               onMetric={(v) => setFilter('metric', v)}
               onBasis={(v) => setFilter('basis', v)}
+              onCountry={(v) => setFilter('country', v)}
             />
           ) : null}
           {filtersReady && view === 'yoy' ? (
@@ -385,19 +433,19 @@ export default function App() {
               <p className="denominators">
                 YoY ranking orders countries by <strong>percentage change</strong>, not {subjectLabel(effective.subject)} level.
               </p>
-              <SubTabs options={YOY_SUBS} active={yoySub} onChange={setYoySub} label="YoY workspace views" />
+              <SubTabs options={yoySubs} active={yoySub} onChange={setYoySub} label="YoY workspace views" />
               {yoySub === 'ranking' ? (
-                <YoyRanking year={effective.year} metricKey={effective.metric} />
+                <YoyRanking year={effective.year} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} />
               ) : (
-                <YoyVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} />
+                <YoyVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} country={effective.country} focusName={effective.focusName} />
               )}
             </div>
           ) : null}
           {filtersReady && view === 'coverage' ? (
-            <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} subject={effective.subject} />
+            <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
           {filtersReady && view === 'audit' ? (
-            <AuditSource year={effective.year} metricKey={effective.metric} />
+            <AuditSource year={effective.year} metricKey={effective.metric} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
           {filtersReady && view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
         </main>

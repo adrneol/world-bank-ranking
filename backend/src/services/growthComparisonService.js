@@ -34,6 +34,7 @@ import {
 } from '../domain/growthComparison.js';
 import { describeMetric, formatPercentagePoints, formatPercent, formatValue } from '../domain/format.js';
 import { sourceAttribution } from './attribution.js';
+import { focusDisplayName } from './focusCountry.js';
 import { buildMetadataChange } from './coverageService.js';
 import { buildComparisonVintage } from './vintage.js';
 
@@ -207,7 +208,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
         ...(hasMid ? { pointBreaker: { active: true, yearMid } } : {}),
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: FOCUS_COUNTRY.name },
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, ...(hasMid ? { mid: yearMid } : {}), order },
       universe: emptyUniverse(intervals),
       focusMovement: null,
@@ -230,7 +231,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
         ...(hasMid ? { pointBreaker: { active: true, yearMid } } : {}),
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: FOCUS_COUNTRY.name },
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, ...(hasMid ? { mid: yearMid } : {}), order },
       universe: emptyUniverse(intervals),
       focusMovement: null,
@@ -507,7 +508,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
       ...(hasMid ? { pointBreaker: { active: true, yearMid } } : {}),
     },
     metric: describeMetric(metric),
-    focus: { iso3: focusIso3, name: allRows.find((r) => r.iso3 === focusIso3)?.name ?? FOCUS_COUNTRY.name },
+    focus: { iso3: focusIso3, name: allRows.find((r) => r.iso3 === focusIso3)?.name ?? focusDisplayName(db, focusIso3) },
     years: { a: yearA, b: yearB, ...(hasMid ? { mid: yearMid } : {}), order },
     universe: {
       intervals,

@@ -1,7 +1,7 @@
 /**
- * Level rank verification: India plus N neighbors above/below from the SAME
- * backend ranking. Neighbor rows come from the backend response verbatim —
- * nothing is synthesized at rank boundaries.
+ * Level rank verification: focus country plus N neighbors above/below from
+ * the SAME backend ranking. Neighbor rows come from the backend response
+ * verbatim — nothing is synthesized at rank boundaries.
  */
 
 import { api } from '../api/client.js';
@@ -20,7 +20,7 @@ function VerifyTable({ focus, above, below }) {
   return (
     <div className="table-scroll" role="region" aria-label="Rank verification table" tabIndex={0}>
       <table className="table">
-        <caption className="sr-only">Neighboring countries around India in the ranking</caption>
+        <caption className="sr-only">Neighboring countries around the focus country in the ranking</caption>
         <thead>
           <tr>
             <th scope="col" className="num">
@@ -41,7 +41,7 @@ function VerifyTable({ focus, above, below }) {
             <tr key={`${r.rank}-${r.iso3}`} className={r.focusRow ? 'row-focus' : undefined}>
               <th scope="row" className="num">
                 {r.rank}
-                {r.focusRow ? <span className="focus-tag">India</span> : null}
+                {r.focusRow ? <span className="focus-tag">{r.country}</span> : null}
               </th>
               <td>{r.country}</td>
               <td className="mono">{r.iso3}</td>
@@ -55,26 +55,27 @@ function VerifyTable({ focus, above, below }) {
   );
 }
 
-export default function LevelVerification({ year, metricKey, neighbors }) {
-  const depsKey = `verify:${metricKey}:${year ?? ''}:${neighbors}`;
+export default function LevelVerification({ year, metricKey, neighbors, country = 'IND', focusName = 'India' }) {
+  const depsKey = `verify:${metricKey}:${year ?? ''}:${neighbors}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.rankVerify({ indicator: metricKey, year, country: 'IND', neighbors }, { signal }),
+    (signal) => api.rankVerify({ indicator: metricKey, year, country, neighbors }, { signal }),
     depsKey,
     { enabled: year != null && metricKey != null },
   );
 
   const empty = !loading && !error && data && !data.available;
+  const displayName = data?.focus?.country ?? focusName;
 
   return (
     <Section
       id="verify"
-      title="Verify India's rank"
+      title={`Verify ${displayName}'s rank`}
       subtitle={`Level ranking for ${year ?? '—'} · ${metricTitle(metricKey)} · ${neighbors} above / below.`}
     >
       <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="rank verification" />
       {!loading && !error && data && !data.available ? (
         <p className="status status-empty">
-          India has no valid observation for this metric and year
+          {displayName} has no valid observation for this metric and year
           {data.reason ? ` (${data.reason.replace(/_/g, ' ')})` : ''}. Denominator: {data.total} valid observations.
         </p>
       ) : null}
@@ -82,7 +83,7 @@ export default function LevelVerification({ year, metricKey, neighbors }) {
         <>
           <dl className="facts">
             <div>
-              <dt>India rank</dt>
+              <dt>{displayName} rank</dt>
               <dd>{formatRank(data.focus.rank, data.focus.total)}</dd>
             </div>
             <div>
@@ -104,7 +105,7 @@ export default function LevelVerification({ year, metricKey, neighbors }) {
           </dl>
           <VerifyTable focus={data.focus} above={data.above} below={data.below} />
           <p className="footnote">
-            Exactly {data.focus.rowsAbove} valid rows precede India. Neighbors come from the same {metricTitle(metricKey)}{' '}
+            Exactly {data.focus.rowsAbove} valid rows precede {displayName}. Neighbors come from the same {metricTitle(metricKey)}{' '}
             ranking — never another metric.
           </p>
         </>

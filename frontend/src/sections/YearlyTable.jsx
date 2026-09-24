@@ -1,7 +1,7 @@
 /**
- * India's yearly table: ONE ROW PER YEAR with all four metric groups.
+ * Focus-country yearly table: ONE ROW PER YEAR with all four metric groups.
  * Every value, YoY, rank and total is backend-calculated; this component only
- * renders what GET /api/india/gdp-ranking returns.
+ * renders what GET /api/focus/yearly returns.
  */
 
 import { Fragment } from 'react';
@@ -37,30 +37,31 @@ function MetricCell({ cell }) {
   );
 }
 
-export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_capita' }) {
+export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
   const keys = metricKeysForSubject(subject);
-  const depsKey = `yearly:${startYear ?? ''}:${endYear ?? ''}:${subject}`;
+  const depsKey = `yearly:${startYear ?? ''}:${endYear ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.indiaRanking({ startYear, endYear, subject }, { signal }),
+    (signal) => api.focusYearly({ startYear, endYear, subject, country }, { signal }),
     depsKey,
     { enabled: startYear != null && endYear != null },
   );
 
   const rows = data?.rows ?? [];
   const empty = !loading && !error && rows.length === 0;
+  const displayName = data?.focus?.name ?? focusName;
 
   return (
     <Section
       id="yearly"
-      title="India yearly data"
+      title={`${displayName} yearly data`}
       subtitle="One row per year. Values, YoY changes, ranks and totals are calculated by the backend from World Bank observations."
     >
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="yearly data" />
       {!loading && !error && rows.length > 0 ? (
-        <div className="table-scroll" role="region" aria-label="India yearly data table" tabIndex={0}>
+        <div className="table-scroll" role="region" aria-label={`${displayName} yearly data table`} tabIndex={0}>
           <table className="table table-yearly">
             <caption className="sr-only">
-              India {subjectLabel(subject)} by year for all four World Bank indicators
+              {displayName} {subjectLabel(subject)} by year for all four World Bank indicators
             </caption>
             <thead>
               <tr>

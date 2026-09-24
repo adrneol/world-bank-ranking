@@ -21,7 +21,7 @@ function parseRankQuery(input) {
 
 const PAGE_SIZE_DEFAULT = 50;
 
-export default function FullRanking({ year, metricKey }) {
+export default function FullRanking({ year, metricKey, country = 'IND' }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const [searchInput, setSearchInput] = useState('');
@@ -31,11 +31,11 @@ export default function FullRanking({ year, metricKey }) {
   // out-of-range pages anyway, but resetting avoids showing a stale page).
   useEffect(() => {
     setPage(1);
-  }, [year, metricKey]);
+  }, [year, metricKey, country]);
 
-  const depsKey = `fullrank:${metricKey}:${year ?? ''}:${page}:${pageSize}:${search}`;
+  const depsKey = `fullrank:${metricKey}:${year ?? ''}:${page}:${pageSize}:${search}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.ranking({ indicator: metricKey, year, page, pageSize, search, country: 'IND' }, { signal }),
+    (signal) => api.ranking({ indicator: metricKey, year, page, pageSize, search, country }, { signal }),
     depsKey,
     { enabled: year != null && metricKey != null },
   );
@@ -132,7 +132,7 @@ export default function FullRanking({ year, metricKey }) {
                   <tr key={`${r.rank}-${r.iso3}`} className={r.isFocus ? 'row-focus' : undefined}>
                     <th scope="row" className="num">
                       {r.rank}
-                      {r.isFocus ? <span className="focus-tag">India</span> : null}
+                      {r.isFocus ? <span className="focus-tag">{r.country}</span> : null}
                     </th>
                     <td>{r.country}</td>
                     <td className="mono">{r.iso3}</td>

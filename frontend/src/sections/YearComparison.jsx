@@ -10,11 +10,11 @@ import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function YearComparison({ year, subject = 'gdp_per_capita' }) {
+export default function YearComparison({ year, subject = 'gdp_per_capita', country = 'IND' }) {
   const keys = metricKeysForSubject(subject);
-  const depsKey = `compare:${year ?? ''}:${subject}`;
+  const depsKey = `compare:${year ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.indiaRanking({ startYear: year, endYear: year, subject }, { signal }),
+    (signal) => api.focusYearly({ startYear: year, endYear: year, subject, country }, { signal }),
     depsKey,
     { enabled: year != null },
   );

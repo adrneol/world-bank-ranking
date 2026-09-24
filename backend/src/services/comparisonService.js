@@ -29,6 +29,7 @@ import {
 import { describeMetric, formatValue } from '../domain/format.js';
 import { rankByValue } from '../domain/ranking.js';
 import { sourceAttribution } from './attribution.js';
+import { focusDisplayName } from './focusCountry.js';
 import { buildMetadataChange, explainTotalChange } from './coverageService.js';
 import { buildComparisonVintage } from './vintage.js';
 
@@ -199,7 +200,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
     return {
       comparison: { available: false, reason: 'metric_not_ingested', mode: 'level' },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: FOCUS_COUNTRY.name },
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, order },
       universe: {
         setA: 0,
@@ -227,7 +228,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
         mode: 'level',
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: FOCUS_COUNTRY.name },
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, order },
       universe: {
         setA: 0,
@@ -454,7 +455,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
       mode: 'level',
     },
     metric: describeMetric(metric),
-    focus: { iso3: focusIso3, name: f.name ?? FOCUS_COUNTRY.name },
+    focus: { iso3: focusIso3, name: f.name ?? focusDisplayName(db, focusIso3) },
     years: { a: yearA, b: yearB, order },
     universe: {
       setA: comparison.totals.a,
@@ -541,7 +542,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     return {
       comparison: { available: false, reason: 'metric_not_ingested', mode: 'level', pointBreaker: { active: true, yearMid } },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: FOCUS_COUNTRY.name },
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, mid: yearMid, b: yearB, order },
       universe: emptyUniverse,
       focusMovement: null,
@@ -563,7 +564,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
         pointBreaker: { active: true, yearMid },
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: FOCUS_COUNTRY.name },
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, mid: yearMid, b: yearB, order },
       universe: emptyUniverse,
       focusMovement: null,
@@ -839,7 +840,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
       pointBreaker: { active: true, yearMid },
     },
     metric: describeMetric(metric),
-    focus: { iso3: focusIso3, name: f.name ?? FOCUS_COUNTRY.name },
+    focus: { iso3: focusIso3, name: f.name ?? focusDisplayName(db, focusIso3) },
     years: { a: yearA, mid: yearMid, b: yearB, order },
     universe: {
       setA: comparison.totals.a,

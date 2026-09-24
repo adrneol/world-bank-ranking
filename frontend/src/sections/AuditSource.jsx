@@ -10,15 +10,15 @@ import { useApi } from '../hooks/useApi.js';
 import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function AuditSource({ year, metricKey }) {
-  const depsKey = `audit:${metricKey}:${year ?? ''}`;
+export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
+  const depsKey = `audit:${metricKey}:${year ?? ''}:${country}`;
   const { data, loading, error, retry } = useApi(
     async (signal) => {
       const options = { signal };
       const [metadata, observation, yearly] = await Promise.all([
         api.metadata(options),
-        api.observations({ indicator: metricKey, year, country: 'IND' }, options),
-        api.indiaRanking({ startYear: year, endYear: year }, options),
+        api.observations({ indicator: metricKey, year, country }, options),
+        api.focusYearly({ startYear: year, endYear: year, subject, country }, options),
       ]);
       return { metadata, observation, yearly };
     },
@@ -31,6 +31,7 @@ export default function AuditSource({ year, metricKey }) {
   const obs = data?.observation?.observation ?? null;
   const cell = data?.yearly?.rows?.[0]?.[metricKey] ?? null;
   const methodology = data?.metadata?.methodology ?? data?.observation?.methodology ?? null;
+  const displayName = data?.yearly?.focus?.name ?? data?.observation?.country?.name ?? focusName;
 
   return (
     <Section
@@ -74,11 +75,11 @@ export default function AuditSource({ year, metricKey }) {
             <dd>{data.metadata?.universe?.eligible ?? '—'} eligible of {data.metadata?.universe?.total ?? '—'} total</dd>
           </div>
           <div>
-            <dt>India raw value</dt>
+            <dt>{displayName} raw value</dt>
             <dd className="mono">{obs?.valueRaw ?? (cell?.indiaValueRaw ?? '—')}</dd>
           </div>
           <div>
-            <dt>India displayed value</dt>
+            <dt>{displayName} displayed value</dt>
             <dd>{cell?.indiaValueDisplay?.formatted ?? '—'}</dd>
           </div>
           <div>

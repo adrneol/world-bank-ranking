@@ -1,6 +1,6 @@
 /**
- * YoY rank verification: India plus N neighbors from the SAME YoY-ranked
- * dataset, with previous/current raw values and the coverage block.
+ * YoY rank verification: focus country plus N neighbors from the SAME
+ * YoY-ranked dataset, with previous/current raw values and the coverage block.
  */
 
 import { api } from '../api/client.js';
@@ -26,7 +26,7 @@ function YoyTable({ focus, above, below }) {
   return (
     <div className="table-scroll" role="region" aria-label="YoY verification table" tabIndex={0}>
       <table className="table">
-        <caption className="sr-only">Neighboring countries around India in the YoY ranking</caption>
+        <caption className="sr-only">Neighboring countries around the focus country in the YoY ranking</caption>
         <thead>
           <tr>
             <th scope="col" className="num">
@@ -50,7 +50,7 @@ function YoyTable({ focus, above, below }) {
             <tr key={`${r.rank}-${r.iso3}`} className={r.focusRow ? 'row-focus' : undefined}>
               <th scope="row" className="num">
                 {r.rank}
-                {r.focusRow ? <span className="focus-tag">India</span> : null}
+                {r.focusRow ? <span className="focus-tag">{r.country}</span> : null}
               </th>
               <td>{r.country}</td>
               <td className="mono">{r.iso3}</td>
@@ -69,24 +69,26 @@ function YoyTable({ focus, above, below }) {
   );
 }
 
-export default function YoyVerification({ year, metricKey, neighbors }) {
-  const depsKey = `yoyverify:${metricKey}:${year ?? ''}:${neighbors}`;
+export default function YoyVerification({ year, metricKey, neighbors, country = 'IND', focusName = 'India' }) {
+  const depsKey = `yoyverify:${metricKey}:${year ?? ''}:${neighbors}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.yoyVerify({ indicator: metricKey, year, country: 'IND', neighbors }, { signal }),
+    (signal) => api.yoyVerify({ indicator: metricKey, year, country, neighbors }, { signal }),
     depsKey,
     { enabled: year != null && metricKey != null },
   );
 
+  const displayName = data?.focus?.country ?? focusName;
+
   return (
     <Section
       id="yoy-verify"
-      title="Verify India's YoY rank"
+      title={`Verify ${displayName}'s YoY rank`}
       subtitle={`YoY ranking for ${year ?? '—'} · ${metricTitle(metricKey)} · ${neighbors} above / below.`}
     >
       <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="YoY verification" />
       {!loading && !error && data && !data.available ? (
         <p className="status status-empty">
-          India has no calculable YoY for this metric and year
+          {displayName} has no calculable YoY for this metric and year
           {data.reason ? ` (${data.reason.replace(/_/g, ' ')})` : ''}.
         </p>
       ) : null}
@@ -94,7 +96,7 @@ export default function YoyVerification({ year, metricKey, neighbors }) {
         <>
           <dl className="facts">
             <div>
-              <dt>India YoY rank</dt>
+              <dt>{displayName} YoY rank</dt>
               <dd>
                 {data.focus.rank} / {data.denominator}
               </dd>

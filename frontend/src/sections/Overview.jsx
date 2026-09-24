@@ -1,9 +1,9 @@
 /**
  * Overview: the default first screen.
  *
- * Answers "What is India's position for the selected year?" with four compact
- * cards — one per World Bank indicator. All numbers come from a single
- * GET /api/india/gdp-ranking call for the selected year; cards never combine
+ * Answers "What is the focus country's position for the selected year?" with
+ * four compact cards — one per World Bank indicator. All numbers come from a
+ * single GET /api/focus/yearly call for the selected year; cards never combine
  * the four independent series.
  */
 
@@ -13,17 +13,18 @@ import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { StatusBlock } from '../components/ui.jsx';
 
-export default function Overview({ year, subject = 'gdp_per_capita' }) {
+export default function Overview({ year, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
   const keys = metricKeysForSubject(subject);
-  const depsKey = `overview:${year ?? ''}:${subject}`;
+  const depsKey = `overview:${year ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.indiaRanking({ startYear: year, endYear: year, subject }, { signal }),
+    (signal) => api.focusYearly({ startYear: year, endYear: year, subject, country }, { signal }),
     depsKey,
     { enabled: year != null },
   );
 
   const row = data?.rows?.[0] ?? null;
   const empty = !loading && !error && !row;
+  const displayName = data?.focus?.name ?? focusName;
 
   return (
     <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
@@ -31,7 +32,7 @@ export default function Overview({ year, subject = 'gdp_per_capita' }) {
       {!loading && !error && row ? (
         <>
           <h2 className="overview-year">
-            India — {row.year}
+            {displayName} — {row.year}
             <span className="overview-context">
               {data.eligibleUniverse} eligible economies in universe · ranks among valid observations only
             </span>

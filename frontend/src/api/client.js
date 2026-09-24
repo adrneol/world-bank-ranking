@@ -73,6 +73,10 @@ export const api = {
   years: (options) => get('/api/years', {}, options),
   indiaRanking: ({ startYear, endYear, country, subject } = {}, options) =>
     get('/api/india/gdp-ranking', { startYear, endYear, country, subject }, options),
+  // Canonical generic focus-yearly route (Phase 1). Same handler and same
+  // analytical fields as /api/india/gdp-ranking, which remains as an alias.
+  focusYearly: ({ startYear, endYear, country, subject } = {}, options) =>
+    get('/api/focus/yearly', { startYear, endYear, country, subject }, options),
   ranking: ({ indicator, year, page, pageSize, search, country } = {}, options) =>
     get('/api/ranking', { indicator, year, page, pageSize, search, country }, options),
   rankVerify: ({ indicator, year, country, neighbors } = {}, options) =>

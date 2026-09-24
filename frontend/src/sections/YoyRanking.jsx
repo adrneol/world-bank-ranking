@@ -21,7 +21,7 @@ function parseRankQuery(input) {
   return Number.isSafeInteger(n) && n >= 1 ? n : null;
 }
 
-export default function YoyRanking({ year, metricKey }) {
+export default function YoyRanking({ year, metricKey, country = 'IND', focusName = 'India' }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState('');
@@ -29,16 +29,17 @@ export default function YoyRanking({ year, metricKey }) {
 
   useEffect(() => {
     setPage(1);
-  }, [year, metricKey]);
+  }, [year, metricKey, country]);
 
-  const depsKey = `yoyrank:${metricKey}:${year ?? ''}:${page}:${pageSize}:${search}`;
+  const depsKey = `yoyrank:${metricKey}:${year ?? ''}:${page}:${pageSize}:${search}:${country}`;
   const { data, loading, error, retry } = useApi(
-    (signal) => api.yoyRanking({ indicator: metricKey, year, page, pageSize, search, country: 'IND' }, { signal }),
+    (signal) => api.yoyRanking({ indicator: metricKey, year, page, pageSize, search, country }, { signal }),
     depsKey,
     { enabled: year != null && metricKey != null },
   );
 
   const empty = !loading && !error && data && (data.rows ?? []).length === 0 && !search;
+  const displayName = data?.focus?.country ?? focusName;
 
   function handlePage(next, nextSize) {
     if (nextSize && nextSize !== pageSize) setPageSize(nextSize);
@@ -62,10 +63,10 @@ export default function YoyRanking({ year, metricKey }) {
           YoY denominator: <strong>{data.total}</strong> valid pairs
           {data.focus ? (
             <>
-              {' '}· India YoY rank: <strong>{data.focus.rank}</strong>
+              {' '}· {displayName} YoY rank: <strong>{data.focus.rank}</strong>
             </>
           ) : (
-            ' · India has no calculable YoY for this year'
+            ` · ${displayName} has no calculable YoY for this year`
           )}
         </p>
       ) : null}
@@ -139,7 +140,7 @@ export default function YoyRanking({ year, metricKey }) {
                   <tr key={`${r.rank}-${r.iso3}`} className={r.isFocus ? 'row-focus' : undefined}>
                     <th scope="row" className="num">
                       {r.rank}
-                      {r.isFocus ? <span className="focus-tag">India</span> : null}
+                      {r.isFocus ? <span className="focus-tag">{r.country}</span> : null}
                     </th>
                     <td>{r.country}</td>
                     <td className="mono">{r.iso3}</td>

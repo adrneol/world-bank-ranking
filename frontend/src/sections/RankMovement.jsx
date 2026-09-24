@@ -12,6 +12,7 @@ import { api } from '../api/client.js';
 import { METRICS, SUBJECTS, metricKeysForSubject, metricLabel, subjectOf } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { Field, Section, StatusBlock } from '../components/ui.jsx';
+import FocusPicker from '../components/FocusPicker.jsx';
 
 function formatSigned(n) {
   if (n === null || n === undefined) return '—';
@@ -35,13 +36,14 @@ function signMeaning(n) {
 
 const RANKING_BASIS = Object.freeze({ LEVEL: 'level', GROWTH: 'growth' });
 
-function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, basis = 'level', onYearA, onYearB, onYearMid, onMetric, onBasis, onSwap }) {
+function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, basis = 'level', country = 'IND', countries = [], onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry, onSwap }) {
   const validMidYears = (availableYears ?? []).filter(
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
   const subject = subjectOf(metricKey);
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
+      <FocusPicker countries={countries} value={country} onChange={(v) => onCountry?.(v)} id="mv-country" />
       <Field label="Analysis" htmlFor="mv-subject">
         <select
           id="mv-subject"
@@ -2674,7 +2676,7 @@ function GrowthResults({ data }) {
   );
 }
 
-export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis = 'level', onYearA, onYearB, onYearMid = null, onMetric, onBasis }) {
+export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis = 'level', country = 'IND', countries = [], focusName = 'India', onYearA, onYearB, onYearMid = null, onMetric, onBasis, onCountry }) {
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
@@ -2689,7 +2691,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   const breakerActive = yearMid != null && yearA != null && yearB != null && yearMid > Math.min(yearA, yearB) && yearMid < Math.max(yearA, yearB);
   const growthActive = basis === RANKING_BASIS.GROWTH;
   const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null;
-  const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${growthActive ? 'growth' : 'level'}`;
+  const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${growthActive ? 'growth' : 'level'}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
       api.comparisonLevel(
@@ -2698,7 +2700,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
           yearA,
           yearB,
           ...(breakerActive ? { yearMid } : {}),
-          country: 'IND',
+          country,
           detail: 'full',
           ...(growthActive ? { mode: 'yoy' } : {}),
         },
@@ -2787,17 +2789,25 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   const meta = data?.metric ?? METRICS[metricKey];
 
   return (
-    <Section
-      id="rank-movement"
-      title="Rank movement comparison"
-      subtitle="Did India's position number change because India moved among the same economies, or because the observed ranking population changed? This separate analysis answers that with a like-for-like universe."
-    >
+      <Section
+        id="rank-movement"
+        title="Rank movement comparison"
+        subtitle={`Did ${focusName}'s position number change because ${focusName} moved among the same economies, or because the observed ranking population changed? This separate analysis answers that with a like-for-like universe.`}
+      >
       <MovementControls
         availableYears={availableYears}
         yearA={yearA}
         yearB={yearB}
         yearMid={breakerActive ? yearMid : null}
         metricKey={metricKey}
+        country={country}
+        countries={countries}
+        onCountry={(v) => {
+          setTab('all');
+          setListPage(1);
+          setCommonPage(1);
+          if (onCountry) onCountry(v);
+        }}
         onYearA={(v) => {
           setTab('all');
           setListPage(1);
