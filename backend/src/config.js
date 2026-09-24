@@ -139,7 +139,20 @@ export function indicatorCodeFor(metricKey) {
  * Declaring ASC or PP here enables nothing until those phases implement it.
  */
 export const OBSERVATION_TYPES = Object.freeze(['LEVEL', 'FLOW', 'RATE', 'RATIO', 'INDEX', 'QUOTED_RATE']);
-export const CHANGE_TYPES = Object.freeze(['ABSOLUTE', 'PERCENT', 'PP', 'INDEX_POINT', 'YOY', 'CAGR']);
+export const CHANGE_TYPES = Object.freeze([
+  'ABSOLUTE',
+  'PERCENT',
+  'PP',
+  'INDEX_POINT',
+  'YOY',
+  'CAGR',
+  // Group/cross primitives (Phase 3): declared in validChangeTypes only if a
+  // future measure needs point-level gating; group orchestration gates on
+  // aggregation/quotation metadata instead (see canTransform).
+  'GROUP_SUM',
+  'GROUP_RATIO_FROM_SUMS',
+  'CROSS_RATE',
+]);
 export const RANKING_DIRECTIONS = Object.freeze(['DESC', 'ASC', 'NEUTRAL']);
 export const MEASURE_INTERPRETATIONS = Object.freeze([
   'MORE_IS_MORE',

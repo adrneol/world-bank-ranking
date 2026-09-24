@@ -91,6 +91,21 @@ export function formatPercentagePoints(value, options = {}) {
   return `${sign}${formatNumber(n, { decimals })} pp`;
 }
 
+/**
+ * Index-point display for a difference of two index values (e.g. CPI index
+ * 105 -> 110 is +5 index points). Presentation only, mirroring
+ * formatPercentagePoints: the value must already have been computed as a
+ * plain subtraction. Never "percentage points", never a calculation input.
+ */
+export function formatIndexPoints(value, options = {}) {
+  const { decimals = 2 } = options;
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const sign = n > 0 ? '+' : '';
+  return `${sign}${formatNumber(n, { decimals })} index pts`;
+}
+
 /** Public metric description used by the API and the UI (unit labels included). */
 export function describeMetric(metric) {
   return {
@@ -155,4 +170,4 @@ export function describeMeasure(metric) {
   };
 }
 
-export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, describeMetric, describeMeasure, displayScaleFor };
+export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, formatIndexPoints, describeMetric, describeMeasure, displayScaleFor };
