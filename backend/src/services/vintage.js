@@ -13,7 +13,7 @@ import {
   countObservations,
   getDatasetFingerprint,
   getLatestFetchRun,
-  getLatestIngestYearStat,
+  getLatestSuccessfulIngestYearStat,
   getLastSuccessfulFetchTime,
   getVintageForIndicatorYears,
 } from '../db/repository.js';
@@ -31,10 +31,13 @@ import { getCacheStatus } from '../wb/ingest.js';
  * @param {{metricKey:string, indicatorId:number, yearA:number, yearB:number, yearMid?:number|null}} options
  */
 export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, yearB, yearMid = null }) {
-  const statA = getLatestIngestYearStat(db, metricKey, yearA);
-  const statB = getLatestIngestYearStat(db, metricKey, yearB);
+  // Authoritative coverage evidence: only successfully PUBLISHED runs count.
+  // Failed/partial attempts stay in the audit trail but never describe the
+  // current dataset.
+  const statA = getLatestSuccessfulIngestYearStat(db, metricKey, yearA);
+  const statB = getLatestSuccessfulIngestYearStat(db, metricKey, yearB);
   const hasMid = Number.isInteger(yearMid);
-  const statMid = hasMid ? getLatestIngestYearStat(db, metricKey, yearMid) : null;
+  const statMid = hasMid ? getLatestSuccessfulIngestYearStat(db, metricKey, yearMid) : null;
   const vintageYears = hasMid ? [yearA, yearMid, yearB] : [yearA, yearB];
   const vintageRows = getVintageForIndicatorYears(db, indicatorId, vintageYears);
   const cache = getCacheStatus(db);

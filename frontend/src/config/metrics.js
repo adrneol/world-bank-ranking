@@ -17,7 +17,7 @@ export const METRICS = Object.freeze({
   }),
   nominal_constant: Object.freeze({
     key: 'nominal_constant',
-    title: 'Nominal GDP per capita — constant 2015 US$',
+    title: 'Real GDP per capita — constant 2015 US$',
     shortTitle: 'Real — Constant 2015 US$',
     indicatorCode: 'NY.GDP.PCAP.KD',
     unit: 'constant 2015 US$',

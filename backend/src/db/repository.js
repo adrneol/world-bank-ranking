@@ -96,12 +96,15 @@ export function upsertCountry(db, row) {
   );
 }
 
+/** Bulk upsert metadata without opening a transaction (for use inside a publish transaction). */
+export function upsertCountriesInner(db, rows) {
+  for (const row of rows) upsertCountry(db, row);
+  return rows.length;
+}
+
 /** Bulk upsert metadata inside a single transaction. */
 export function upsertCountries(db, rows) {
-  return transaction(db, () => {
-    for (const row of rows) upsertCountry(db, row);
-    return rows.length;
-  });
+  return transaction(db, () => upsertCountriesInner(db, rows));
 }
 
 export function getCountry(db, iso3) {
@@ -210,16 +213,36 @@ export function upsertObservation(db, { countryId, indicatorId, year, value, val
   `).run(countryId, indicatorId, year, value, nz(raw), nz(wbLastUpdated), nowIso());
 }
 
+/** Bulk upsert observations without opening a transaction (for use inside a publish transaction). Returns rows written. */
+export function upsertObservationsInner(db, rows) {
+  let n = 0;
+  for (const row of rows) {
+    upsertObservation(db, row);
+    n += 1;
+  }
+  return n;
+}
+
 /** Bulk upsert observations in one transaction. Returns rows written. */
 export function upsertObservations(db, rows) {
-  return transaction(db, () => {
-    let n = 0;
-    for (const row of rows) {
-      upsertObservation(db, row);
-      n += 1;
-    }
-    return n;
-  });
+  return transaction(db, () => upsertObservationsInner(db, rows));
+}
+
+/**
+ * Delete stored observations for one indicator inside an inclusive year range.
+ *
+ * Used ONLY by the atomic refresh publication to reconcile a refreshed
+ * metric/year range against the new staged World Bank payload: a value the
+ * World Bank no longer supplies must disappear instead of lingering as stale
+ * data. Never deletes other metrics or years outside the refreshed range.
+ * Callers must run this inside the publish transaction.
+ *
+ * @returns {number} deleted row count
+ */
+export function deleteObservationsForIndicatorYears(db, indicatorId, startYear, endYear) {
+  return db.prepare(
+    'DELETE FROM observations WHERE indicator_id = ? AND year BETWEEN ? AND ?',
+  ).run(indicatorId, startYear, endYear).changes;
 }
 
 export function getObservation(db, countryId, indicatorId, year) {
@@ -572,12 +595,13 @@ export function finishFetchRun(db, id, patch) {
 /**
  * Persist the per-year ingest counters for a run (replacing any earlier attempt
  * for the same run/metric/year so a retried run cannot double count).
+ * Transaction-free variant for use inside the atomic publish transaction.
  *
  * @param {object} db
  * @param {number} runId
  * @param {object[]} rows one entry per metric and year
  */
-export function upsertIngestYearStats(db, runId, rows) {
+export function upsertIngestYearStatsInner(db, runId, rows) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
   const statement = db.prepare(`
     INSERT INTO ingest_year_stats (
@@ -598,29 +622,39 @@ export function upsertIngestYearStats(db, runId, rows) {
       rows_aggregate_excluded = excluded.rows_aggregate_excluded,
       rows_unknown_country    = excluded.rows_unknown_country
   `);
-  return transaction(db, () => {
-    let n = 0;
-    for (const row of rows) {
-      if (row?.year === null || row?.year === undefined) continue;
-      statement.run(
-        runId,
-        row.metricKey,
-        nz(row.indicatorCode),
-        row.year,
-        row.rowsReceived ?? 0,
-        row.rowsWithValue ?? 0,
-        row.rowsWritten ?? 0,
-        row.rowsNullSkipped ?? 0,
-        row.rowsNonFiniteSkipped ?? 0,
-        row.rowsInvalidYear ?? 0,
-        row.rowsBlankIso3Skipped ?? 0,
-        row.rowsAggregateExcluded ?? 0,
-        row.rowsUnknownCountry ?? 0,
-      );
-      n += 1;
-    }
-    return n;
-  });
+  let n = 0;
+  for (const row of rows) {
+    if (row?.year === null || row?.year === undefined) continue;
+    statement.run(
+      runId,
+      row.metricKey,
+      nz(row.indicatorCode),
+      row.year,
+      row.rowsReceived ?? 0,
+      row.rowsWithValue ?? 0,
+      row.rowsWritten ?? 0,
+      row.rowsNullSkipped ?? 0,
+      row.rowsNonFiniteSkipped ?? 0,
+      row.rowsInvalidYear ?? 0,
+      row.rowsBlankIso3Skipped ?? 0,
+      row.rowsAggregateExcluded ?? 0,
+      row.rowsUnknownCountry ?? 0,
+    );
+    n += 1;
+  }
+  return n;
+}
+
+/**
+ * Persist the per-year ingest counters for a run (replacing any earlier attempt
+ * for the same run/metric/year so a retried run cannot double count).
+ *
+ * @param {object} db
+ * @param {number} runId
+ * @param {object[]} rows one entry per metric and year
+ */
+export function upsertIngestYearStats(db, runId, rows) {
+  return transaction(db, () => upsertIngestYearStatsInner(db, runId, rows));
 }
 
 /**
@@ -651,10 +685,35 @@ export function getIngestYearStats(db, metricKey, options = {}) {
 /**
  * Latest recorded ingest counters for one metric and year (latest fetch run).
  * Returns null when the year was never ingested for that metric.
+ *
+ * NOTE: this returns counters from ANY run status, including failed/partial
+ * attempts. It is suitable for audit history, but MUST NOT be used as current
+ * authoritative coverage evidence — use getLatestSuccessfulIngestYearStat.
  */
 export function getLatestIngestYearStat(db, metricKey, year) {
   if (year === null || year === undefined) return null;
   return getIngestYearStats(db, metricKey, { year })[0] ?? null;
+}
+
+/**
+ * Latest ingest counters for one metric and year from the latest SUCCESSFULLY
+ * PUBLISHED run only. Failed/partial runs remain visible in the audit trail
+ * (getIngestYearStats / listFetchRuns) but can never masquerade as current
+ * authoritative coverage evidence.
+ * Returns null when no successful run ingested that metric/year.
+ */
+export function getLatestSuccessfulIngestYearStat(db, metricKey, year) {
+  if (year === null || year === undefined) return null;
+  return (
+    db
+      .prepare(
+        `SELECT s.* FROM ingest_year_stats s
+         JOIN fetch_runs r ON r.id = s.fetch_run_id
+         WHERE s.metric_key = ? AND s.year = ? AND r.status = 'success'
+         ORDER BY s.fetch_run_id DESC LIMIT 1`,
+      )
+      .get(metricKey, year) ?? null
+  );
 }
 
 /**
@@ -747,9 +806,18 @@ export function acquireRefreshLock(db, { runId = null, holder = null } = {}) {
   return info.changes === 1;
 }
 
-/** Release the lock unconditionally (idempotent). */
+/** Release the lock unconditionally (idempotent). Also clears the run association. */
 export function releaseRefreshLock(db) {
   db.prepare("UPDATE refresh_locks SET locked = 0, run_id = NULL, holder = NULL, updated_at = ? WHERE id = 1").run(nowIso());
+}
+
+/**
+ * Associate the held refresh lock with a fetch run id.
+ * Called immediately after startFetchRun so the lock row always identifies
+ * the active run. Must only be called while this caller holds the lock.
+ */
+export function setRefreshLockRunId(db, runId) {
+  db.prepare('UPDATE refresh_locks SET run_id = ?, updated_at = ? WHERE id = 1').run(nz(runId), nowIso());
 }
 
 /**

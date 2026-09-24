@@ -16,7 +16,7 @@ import {
   countEligibleObservations,
   getEligibleObservations,
   getIndicatorByMetricKey,
-  getLatestIngestYearStat,
+  getLatestSuccessfulIngestYearStat,
   getUniverseSnapshotByRun,
   getYearRange,
   listAvailableYears,
@@ -256,10 +256,11 @@ export function explainTotalChange(db, options = {}) {
     };
   }
 
-  // Latest recorded ingest counters for each year and metric (latest run wins,
-  // deterministically via getLatestIngestYearStat).
-  const fromStats = getLatestIngestYearStat(db, metricKey, fromYear);
-  const toStats = getLatestIngestYearStat(db, metricKey, toYear);
+  // Latest ingest counters for each year and metric from the latest
+  // SUCCESSFULLY PUBLISHED run (failed/partial attempts never describe the
+  // current dataset; they remain visible in the run history).
+  const fromStats = getLatestSuccessfulIngestYearStat(db, metricKey, fromYear);
+  const toStats = getLatestSuccessfulIngestYearStat(db, metricKey, toYear);
 
   // Historical universe rule (spec section 6): each year's coverage must be
   // explained against the universe snapshot recorded on the fetch run that

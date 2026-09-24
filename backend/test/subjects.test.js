@@ -86,22 +86,31 @@ test('the Total GDP subject has exactly the four verified raw World Bank series'
   }
 });
 
-test('terminology: constant-price GDP is never labelled nominal, and never "real at current prices"', () => {
-  // "Real GDP" IS constant-price GDP in WDI terminology; there is no current-price
+test('terminology: exact economist labels — nominal is current-price, real is constant-price', () => {
+  // Pinned display labels. "Nominal" may ONLY describe a current-price series;
+  // "real" may ONLY describe a constant-price series. There is no current-price
   // "real GDP" series, so no label may claim one.
-  assert.match(METRICS.total_constant.label, /constant 2015 US\$/);
-  assert.match(METRICS.total_constant.label, /real GDP/i);
-  assert.match(METRICS.total_ppp_constant.label, /constant 2021 international \$/);
-  for (const key of TOTAL_GDP_METRIC_KEYS) {
-    assert.ok(!/nominal/i.test(METRICS[key].label), `${key} label must not say "nominal"`);
+  assert.equal(METRICS.nominal_current.label, 'Nominal — Current US$');
+  assert.equal(METRICS.nominal_constant.label, 'Real — Constant 2015 US$');
+  assert.equal(METRICS.ppp_current.label, 'PPP — Current international $');
+  assert.equal(METRICS.ppp_constant.label, 'PPP — Constant 2021 international $');
+  assert.equal(METRICS.total_current.label, 'Total GDP — Nominal — Current US$');
+  assert.equal(METRICS.total_constant.label, 'Total GDP — Real — Constant 2015 US$');
+  assert.equal(METRICS.total_ppp_current.label, 'Total GDP — PPP — Current international $');
+  assert.equal(METRICS.total_ppp_constant.label, 'Total GDP — PPP — Constant 2021 international $');
+  for (const key of ALL_METRIC_KEYS) {
+    const label = METRICS[key].label;
+    const constant = METRICS[key].priceBasis === 'constant';
+    if (constant) {
+      assert.ok(!/nominal/i.test(label), `${key} (constant-price) label must not say "nominal"`);
+    } else {
+      assert.ok(!/real/i.test(label), `${key} (current-price) label must not say "real"`);
+    }
     assert.ok(
-      !/real.*current|current.*real/i.test(METRICS[key].label),
+      !/real.*current|current.*real/i.test(label),
       `${key} label must not invent "real GDP at current prices"`,
     );
   }
-  // Current-price GDP must never be described as real.
-  assert.ok(!/real/i.test(METRICS.total_current.label));
-  assert.ok(!/real/i.test(METRICS.total_ppp_current.label));
 });
 
 test('only curated, usable World Bank codes are registered', () => {

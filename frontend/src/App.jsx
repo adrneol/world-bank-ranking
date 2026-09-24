@@ -199,8 +199,12 @@ export default function App() {
     // data remount. Re-derive years (a newer vintage may extend the range)
     // and remount all data sections so every table re-reads the backend.
     if (summary) {
+      // A partial refresh publishes nothing: report staged counts only on
+      // success, and say explicitly that the previous dataset remains active.
       setRefreshNotice(
-        `Refresh #${summary.runId} succeeded — ${summary.rowsUpserted} observations upserted (World Bank vintage ${summary.wbLastUpdated ?? 'unknown'}).`,
+        summary.status === 'partial'
+          ? `Refresh #${summary.runId} partially completed — some indicators failed, so nothing was published. The previous dataset remains active.`
+          : `Refresh #${summary.runId} succeeded — ${summary.rowsUpserted} observations upserted (World Bank vintage ${summary.wbLastUpdated ?? 'unknown'}).`,
       );
     }
     setDataVersion((v) => v + 1);

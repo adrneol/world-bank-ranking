@@ -13,7 +13,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { ALL_METRIC_KEYS, FOCUS_COUNTRY, METRICS, METRIC_KEYS, SOURCE_INFO, config, getMetric } from '../src/config.js';
+import { ALL_METRIC_KEYS, CANONICAL_INDICATOR_CODES, FOCUS_COUNTRY, METRICS, METRIC_KEYS, SOURCE_INFO, config, getMetric, indicatorCodeFor } from '../src/config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.resolve(here, '..');
@@ -124,6 +124,10 @@ test('.env.example documents the indicator variables and the defaults', () => {
     'DEFAULT_END_YEAR',
     'INGEST_START_YEAR',
     'INGEST_END_YEAR',
+    'REFRESH_ADMIN_TOKEN',
+    'CORS_ORIGINS',
+    'REFRESH_RATE_LIMIT_MAX',
+    'REFRESH_RATE_LIMIT_WINDOW_MS',
     'CACHE_TTL_HOURS',
     'RANK_NEIGHBORS_DEFAULT',
   ]) {
@@ -135,6 +139,23 @@ test('ingestion range reaches historical World Bank data while UI defaults stay 
   // The default ANALYSIS view still opens at 2000; only ingestion reaches back.
   assert.equal(config.ingestStartYear, 1960);
   assert.equal(config.ingestEndYear, new Date().getFullYear());
+});
+
+test('canonical indicator codes are frozen and every metric resolves to its own', () => {
+  assert.deepEqual(CANONICAL_INDICATOR_CODES, {
+    nominal_current: 'NY.GDP.PCAP.CD',
+    nominal_constant: 'NY.GDP.PCAP.KD',
+    ppp_current: 'NY.GDP.PCAP.PP.CD',
+    ppp_constant: 'NY.GDP.PCAP.PP.KD',
+    total_current: 'NY.GDP.MKTP.CD',
+    total_constant: 'NY.GDP.MKTP.KD',
+    total_ppp_current: 'NY.GDP.MKTP.PP.CD',
+    total_ppp_constant: 'NY.GDP.MKTP.PP.KD',
+  });
+  for (const key of ALL_METRIC_KEYS) {
+    assert.equal(indicatorCodeFor(key), CANONICAL_INDICATOR_CODES[key]);
+    assert.equal(METRICS[key].indicatorCode, CANONICAL_INDICATOR_CODES[key]);
+  }
 });
 
 test('defaults match the specification and the focus country is India', () => {

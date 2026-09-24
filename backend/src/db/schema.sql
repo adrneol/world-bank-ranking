@@ -85,7 +85,10 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at              TEXT NOT NULL,
   completed_at            TEXT,
-  status                  TEXT NOT NULL,   -- running | success | failed
+  status                  TEXT NOT NULL,   -- running | success | partial | failed
+                                   -- 'partial' is an ATTEMPT status (some indicators
+                                   -- failed): it publishes nothing and never describes
+                                   -- the active dataset. Only 'success' runs publish.
   trigger                 TEXT,            -- boot | manual | ttl | script
   endpoint                TEXT,            -- API base URL used
   requested_start_year    INTEGER,

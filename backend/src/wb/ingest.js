@@ -1,9 +1,17 @@
 /**
- * INGESTION PIPELINE.
+ * INGESTION PIPELINE — FETCH → VALIDATE → ATOMIC PUBLISH.
  *
  * Flow:
- *   World Bank API  ->  country metadata  ->  eligible universe (aggregates removed)
- *                   ->  indicator series  ->  observation filter  ->  SQLite
+ *   World Bank API  ->  STAGED country metadata (memory only)
+ *                   ->  eligible universe, validated in memory
+ *                   ->  STAGED indicator series (memory only, all requested)
+ *                   ->  all-or-nothing validation
+ *                   ->  ONE SQLite transaction publishes the complete snapshot
+ *
+ * The live countries/indicators/observations tables are NEVER written until
+ * every requested indicator has been fetched and validated. A partial or
+ * failed refresh publishes nothing: the previous dataset stays exactly as it
+ * was, and only audit rows (fetch_runs, ingest_year_stats) record the attempt.
  *
  * Key behaviours:
  *   - fetches `startYear - 1` through `endYear`, so the FIRST selected year can
@@ -39,18 +47,22 @@ import {
   acquireRefreshLock,
   canonicalDecimalString,
   countObservations,
+  deleteObservationsForIndicatorYears,
   finishFetchRun,
   forceReleaseRefreshLock,
+  getIndicatorByMetricKey,
   getLastSuccessfulFetchTime,
   getLatestFetchRun,
   refreshLockStatus,
   releaseRefreshLock,
+  setRefreshLockRunId,
   startFetchRun,
   transaction,
-  upsertCountries,
+  upsertCountriesInner,
   upsertIndicator,
   upsertIngestYearStats,
-  upsertObservations,
+  upsertIngestYearStatsInner,
+  upsertObservationsInner,
 } from '../db/repository.js';
 import {
   buildUniverse,
@@ -98,11 +110,15 @@ export function deriveFetchRange(startYear, endYear) {
 }
 
 /**
- * Fetch and store country metadata.
+ * Fetch country metadata into a STAGED payload (no database writes).
  *
- * @returns {{ universe: object, rowsUpserted: number, lastUpdated: string|null, requests: number }}
+ * Staging rule: everything fetched from the World Bank lives in memory until
+ * the atomic publish step. A failed refresh therefore cannot leave a
+ * half-written mix behind — the previous dataset is never touched first.
+ *
+ * @returns {{ universe: object, countries: object[], lastUpdated: string|null, requests: number }}
  */
-export async function ingestCountryMetadata(db, options = {}) {
+export async function fetchCountryMetadataPayload(options = {}) {
   const result = await fetchCountryMetadata({
     onProgress: options.onProgress,
   });
@@ -115,11 +131,9 @@ export async function ingestCountryMetadata(db, options = {}) {
     );
   }
 
-  const rowsUpserted = upsertCountries(db, universe.countries);
-
   return {
     universe,
-    rowsUpserted,
+    countries: universe.countries,
     lastUpdated: result.lastUpdated,
     requests: result.requests,
     declaredTotal: result.declaredTotal,
@@ -128,9 +142,13 @@ export async function ingestCountryMetadata(db, options = {}) {
 }
 
 /**
- * Fetch and store one indicator series.
+ * Fetch one indicator series into a STAGED payload (no database writes).
  *
- * @param {object} db
+ * Same classification, counters, and raw-value handling as the historical
+ * ingest path; the only difference is destination: staged rows carry the
+ * metric key and are resolved to indicator ids inside the publish
+ * transaction, after every requested indicator has been validated.
+ *
  * @param {string} metricKey
  * @param {number} fetchedStartYear inclusive
  * @param {number} fetchedEndYear inclusive
@@ -138,8 +156,7 @@ export async function ingestCountryMetadata(db, options = {}) {
  *        indexes built by domain/universe.js createUniverseIndex()
  * @param {{onProgress?: Function, onWarn?: Function}} [options]
  */
-export async function ingestIndicator(
-  db,
+export async function fetchIndicatorPayload(
   metricKey,
   fetchedStartYear,
   fetchedEndYear,
@@ -162,14 +179,6 @@ export async function ingestIndicator(
     });
   }
 
-  upsertIndicator(db, {
-    ...metric,
-    name: indicatorMeta?.name ?? metric.label,
-    unit: indicatorMeta?.unit || metric.unit,
-    source: indicatorMeta?.source?.value ?? 'World Development Indicators',
-    sourceNote: indicatorMeta?.sourceNote ?? null,
-  });
-
   const series = await fetchIndicatorSeries(
     metric.indicatorCode,
     fetchedStartYear,
@@ -177,12 +186,7 @@ export async function ingestIndicator(
     { onProgress: options.onProgress },
   );
 
-  const indicatorRow = db
-    .prepare('SELECT id FROM indicators WHERE metric_key = ?')
-    .get(metricKey);
-  const indicatorId = indicatorRow.id;
-
-  const toWrite = [];
+  const stagedRows = [];
 
   // One counter per meaning; the map below is the ONLY place that translates a
   // rejection code from domain/universe.js into an audit counter.
@@ -261,9 +265,9 @@ export async function ingestIndicator(
     // When the API sent a string decimal that round-trips, keep its lexical
     // form; otherwise store the shortest round-trip of the parsed double.
     const lexical = typeof raw?.value === 'string' ? canonicalDecimalString(raw.value) : null;
-    toWrite.push({
+    stagedRows.push({
+      metricKey,
       countryId: verdict.iso3,
-      indicatorId,
       year,
       value: verdict.value,
       valueRaw: lexical ?? String(verdict.value),
@@ -271,11 +275,19 @@ export async function ingestIndicator(
     });
   }
 
-  counters.rowsUpserted = upsertObservations(db, toWrite);
+  // Staged, not yet written: rowsUpserted here counts rows validated for
+  // publication. They reach the observations table only inside the atomic
+  // publish transaction, after every requested indicator has succeeded.
+  counters.rowsUpserted = stagedRows.length;
 
   return {
     metricKey,
     indicatorCode: metric.indicatorCode,
+    indicatorName: indicatorMeta?.name ?? metric.label,
+    indicatorUnit: indicatorMeta?.unit || metric.unit,
+    indicatorSource: indicatorMeta?.source?.value ?? 'World Development Indicators',
+    indicatorSourceNote: indicatorMeta?.sourceNote ?? null,
+    stagedRows,
     ...counters,
     yearStats: [...yearStats.values()].sort((a, b) => (a.year ?? -1) - (b.year ?? -1)),
     lastUpdated: series.lastUpdated,
@@ -312,55 +324,62 @@ export function recoverRefreshLock(db, reason = 'boot recovery') {
 }
 
 /**
- * Tables covered by the pre-refresh safety stash (data tables only — never
- * fetch_runs / ingest_year_stats / refresh_locks, whose audit trail must
- * survive even a failed refresh).
+ * Publish ONE fully staged and validated refresh in a single transaction.
+ *
+ * This is the ONLY place that mutates the published dataset during a
+ * refresh. Everything it writes was already fetched and validated in memory,
+ * so a crash during fetching can never leave a half-written mix behind, and
+ * a crash during publication is contained by the SQLite transaction.
+ *
+ * Within the transaction, in order:
+ *   1. upsert country metadata (global; same universe the payload used)
+ *   2. per refreshed metric: upsert indicator metadata, reconcile that
+ *      metric's fetched year range (DELETE old rows, INSERT staged rows so a
+ *      newly absent World Bank value removes stale data instead of lingering),
+ *      then persist that metric's per-year counters
+ *   3. mark the fetch run "success" with the universe snapshot + counters
+ *
+ * Metrics and year ranges NOT part of this refresh are never touched.
+ * fetch_runs rows for failed/partial attempts are audit history and are
+ * written outside this transaction (they must survive failures).
  */
-const STASH_TABLES = Object.freeze(['countries', 'indicators', 'observations']);
-
-/**
- * Copy the current production dataset into TEMP stash tables.
- * Returns true when a non-empty dataset was stashed, false when there was
- * nothing worth preserving (empty database) or stashing failed.
- * TEMP tables live on this connection only and never leak into backups.
- */
-function stashDataset(db) {
-  try {
-    const count = db.prepare('SELECT COUNT(*) AS n FROM observations').get().n;
-    if (count === 0) return false;
-    for (const table of STASH_TABLES) {
-      db.exec(`DROP TABLE IF EXISTS stashed_${table};`);
-      db.exec(`CREATE TEMP TABLE stashed_${table} AS SELECT * FROM ${table};`);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Restore stashed tables over the live tables (total-failure recovery).
- * Atomic: either the whole previous dataset comes back or an error is thrown
- * and the caller reports restore failure instead of serving a half-restored mix.
- */
-function restoreDataset(db) {
+function publishStagedRefresh(db, {
+  runId,
+  stagedCountries,
+  stagedMetrics,
+  yearStats,
+  totals,
+  universeSnapshot,
+  wbLastUpdated,
+  fetchedStartYear,
+  fetchedEndYear,
+}) {
   transaction(db, () => {
-    for (const table of STASH_TABLES) {
-      db.exec(`DELETE FROM ${table};`);
-      db.exec(`INSERT INTO ${table} SELECT * FROM stashed_${table};`);
+    upsertCountriesInner(db, stagedCountries);
+    for (const staged of stagedMetrics) {
+      const metric = METRICS[staged.metricKey];
+      upsertIndicator(db, {
+        ...metric,
+        name: staged.indicatorName,
+        unit: staged.indicatorUnit,
+        source: staged.indicatorSource,
+        sourceNote: staged.indicatorSourceNote,
+      });
+      const indicator = getIndicatorByMetricKey(db, staged.metricKey);
+      deleteObservationsForIndicatorYears(db, indicator.id, fetchedStartYear, fetchedEndYear);
+      upsertObservationsInner(
+        db,
+        staged.stagedRows.map((row) => ({ ...row, indicatorId: indicator.id })),
+      );
     }
+    upsertIngestYearStatsInner(db, runId, yearStats);
+    finishFetchRun(db, runId, {
+      status: 'success',
+      wbLastUpdated,
+      universeSnapshot,
+      ...totals,
+    });
   });
-}
-
-/** Drop TEMP stash tables (success path and post-restore cleanup). */
-function dropStash(db) {
-  try {
-    for (const table of STASH_TABLES) {
-      db.exec(`DROP TABLE IF EXISTS stashed_${table};`);
-    }
-  } catch {
-    // Best effort; TEMP tables vanish with the connection anyway.
-  }
 }
 
 export async function refreshData(options = {}) {
@@ -420,19 +439,23 @@ export async function refreshData(options = {}) {
   let wbLastUpdated = null;
   let runId = null;
   let universeSnapshot = null;
-  let stashed = false;
+  let eligibleUniverseSize = 0;
+  let aggregateUniverseSize = 0;
+  let countriesRows = 0;
 
   // EVERYTHING that can fail - including creating the fetch_runs row - happens
   // inside this try, so the `finally` below always releases the refresh lock.
   // Regression: the lock used to be acquired before the try and could stay stuck
   // forever when startFetchRun() threw.
+  //
+  // STAGING INVARIANT: until publishStagedRefresh runs, this function performs
+  // ZERO writes to countries/indicators/observations. fetch_runs rows and
+  // ingest_year_stats for the attempt are audit history (written outside the
+  // publish transaction) and must survive failures. A failed or partial
+  // refresh therefore cannot publish a mixed dataset: the previous dataset
+  // stays exactly as it was.
   try {
     refreshInProgress = true;
-    // Safety stash BEFORE any write: on total failure the previous dataset is
-    // restored verbatim below, so a failed refresh can never destroy valid
-    // data or leave a half-written mix behind. fetch_runs / ingest_year_stats
-    // are intentionally NOT stashed: the failed run itself must stay recorded.
-    stashed = stashDataset(db);
     lastProgress = {
       stage: 'starting',
       startedAt: new Date().toISOString(),
@@ -452,15 +475,21 @@ export async function refreshData(options = {}) {
       fetchedEndYear,
       indicators: metricKeys.map((k) => METRICS[k].indicatorCode),
     });
+    // Associate the held SQLite lock with the real run id (P7). A failure
+    // here flows through the generic catch below: the run is marked failed
+    // and the lock is released; nothing staged has been published.
+    setRefreshLockRunId(db, runId);
+
     lastProgress = { ...lastProgress, stage: 'country-metadata', runId };
-    const meta = await ingestCountryMetadata(db, {
-      onProgress: (p) =>
-        options.onProgress?.({ stage: 'country-metadata', ...p }),
+    const meta = await fetchCountryMetadataPayload({
+      onProgress: (p) => options.onProgress?.({ stage: 'country-metadata', ...p }),
     });
-    totals.countriesRows = meta.rowsUpserted;
+    countriesRows = meta.countries.length;
     wbLastUpdated = meta.lastUpdated;
 
     const { eligibleIso3Set, aggregateIso3Set } = createUniverseIndex(meta.universe);
+    eligibleUniverseSize = eligibleIso3Set.size;
+    aggregateUniverseSize = aggregateIso3Set.size;
 
     // Snapshot the universe this run ranked against. It is stored on the run so a
     // later run can show the ACTUAL added/removed entities (spec CASE B) instead
@@ -481,14 +510,15 @@ export async function refreshData(options = {}) {
       aggregateUniverse: meta.universe.aggregateCount,
     };
 
+    const stagedMetrics = [];
     for (const metricKey of metricKeys) {
       lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
 
       // A single indicator failing must not discard the others; the failure is
-      // recorded on the run and re-thrown only if every indicator failed.
+      // recorded and publication is refused unless EVERY requested indicator
+      // succeeded (all-or-nothing publish).
       try {
-        const result = await ingestIndicator(
-          db,
+        const result = await fetchIndicatorPayload(
           metricKey,
           fetchedStartYear,
           fetchedEndYear,
@@ -499,6 +529,7 @@ export async function refreshData(options = {}) {
           },
         );
 
+        stagedMetrics.push(result);
         perIndicator.push(result);
         totals.rowsRetrieved += result.rowsRetrieved;
         totals.rowsWithValue += result.rowsWithValue;
@@ -531,8 +562,8 @@ export async function refreshData(options = {}) {
       }
     }
 
-    const succeeded = perIndicator.filter((r) => !r.error);
-    if (succeeded.length === 0) {
+    const failedMetrics = perIndicator.filter((r) => r.error);
+    if (stagedMetrics.length === 0) {
       throw new Error(
         `Every indicator failed during ingestion: ${perIndicator
           .map((r) => `${r.metricKey}: ${r.error}`)
@@ -540,13 +571,57 @@ export async function refreshData(options = {}) {
       );
     }
 
-    lastProgress = { ...lastProgress, stage: 'finalising' };
-    upsertIngestYearStats(db, runId, yearStats);
-    finishFetchRun(db, runId, {
-      status: 'success',
-      wbLastUpdated,
+    if (failedMetrics.length > 0) {
+      // PARTIAL refresh: publish NOTHING. The previous dataset stays exactly
+      // as it was; the attempt is recorded with its per-indicator failures so
+      // the audit trail shows what happened. Last-success freshness does not
+      // advance (only 'success' runs move it). Per-year counters below describe
+      // this attempt only; authoritative coverage reads use successful runs.
+      lastProgress = { ...lastProgress, stage: 'partial' };
+      const failureSummary =
+        `Partial refresh: ${stagedMetrics.length} of ${perIndicator.length} indicators staged; ` +
+        `failures: ${failedMetrics.map((r) => `${r.metricKey}: ${r.error}`).join(' | ')}`;
+      upsertIngestYearStats(db, runId, yearStats);
+      finishFetchRun(db, runId, {
+        status: 'partial',
+        wbLastUpdated,
+        universeSnapshot,
+        errorMessage: failureSummary,
+        ...totals,
+      });
+      const summary = {
+        status: 'partial',
+        runId,
+        trigger,
+        requestedStartYear,
+        requestedEndYear,
+        fetchedStartYear,
+        fetchedEndYear,
+        wbLastUpdated,
+        eligibleUniverse: eligibleUniverseSize,
+        aggregateUniverse: aggregateUniverseSize,
+        universeSnapshot,
+        yearStats,
+        errorMessage: failureSummary,
+        ...totals,
+        perIndicator,
+      };
+      lastProgress = { ...lastProgress, stage: 'complete', summary };
+      return summary;
+    }
+
+    lastProgress = { ...lastProgress, stage: 'publishing' };
+    totals.countriesRows = countriesRows;
+    publishStagedRefresh(db, {
+      runId,
+      stagedCountries: meta.countries,
+      stagedMetrics,
+      yearStats,
+      totals,
       universeSnapshot,
-      ...totals,
+      wbLastUpdated,
+      fetchedStartYear,
+      fetchedEndYear,
     });
 
     const summary = {
@@ -558,8 +633,8 @@ export async function refreshData(options = {}) {
       fetchedStartYear,
       fetchedEndYear,
       wbLastUpdated,
-      eligibleUniverse: eligibleIso3Set.size,
-      aggregateUniverse: aggregateIso3Set.size,
+      eligibleUniverse: eligibleUniverseSize,
+      aggregateUniverse: aggregateUniverseSize,
       universeSnapshot,
       yearStats,
       ...totals,
@@ -570,20 +645,20 @@ export async function refreshData(options = {}) {
   } catch (error) {
     lastProgress = { ...lastProgress, stage: 'failed', error: error.message };
 
-    // Total failure (zero indicators succeeded, or metadata/bootstrapping
-    // failed): restore the previous dataset verbatim when one was stashed.
-    // Partial success (at least one indicator) keeps its rows by design —
-    // every written row is a valid World Bank observation — and is recorded
-    // as success with per-indicator errors, never as a silent mix.
-    if (stashed) {
-      try {
-        restoreDataset(db);
-        error.datasetRestored = true;
-      } catch (restoreError) {
-        error.datasetRestored = false;
-        options.onWarn?.({ message: `Dataset restore failed: ${restoreError.message}` });
-      }
-    }
+    // Total failure (zero indicators staged, or metadata/bootstrapping
+    // failed, or the publish transaction itself failed): NOTHING from this
+    // refresh was ever published to the live tables — staging keeps all
+    // writes behind the single publish transaction, which rolls back on
+    // error. The previous dataset is therefore intact by construction.
+    //
+    // error.datasetPreserved states that accurately: no restore of a
+    // destroyed dataset took place because the live dataset was never
+    // mutated. error.datasetRestored is ALSO set to preserve its historical
+    // contract ("previous dataset intact", asserted by ttlRefresh.test.js);
+    // under the staged architecture both flags mean the same observable
+    // fact, but only datasetPreserved describes the mechanism truthfully.
+    error.datasetPreserved = true;
+    error.datasetRestored = true;
 
     if (runId !== null) {
       // Recording the failure must never mask the original error.
@@ -611,9 +686,8 @@ export async function refreshData(options = {}) {
     // throws, and including when the caller aborts. Both the in-memory flag
     // and the SQLite mutex are cleared; release failures are swallowed so a
     // lock-release problem can never mask the original ingest error.
-    // TEMP stash tables (if any) are dropped here on every path.
+    // releaseRefreshLock also clears the run_id association (P7).
     refreshInProgress = false;
-    dropStash(db);
     if (dbLockHeld) {
       try {
         releaseRefreshLock(db);
@@ -649,11 +723,12 @@ export async function ensureDataPresent(db, options = {}) {
  * fast and keep serving the current valid dataset while the refresh runs.
  *
  * Safety properties:
- *  - fresh cache → never triggers (no refresh on every request);
- *  - running/locked refresh → never starts a second one;
- *  - a failed run stays recorded in fetch_runs, the previous dataset is
- *    restored (see refreshData), and automatic retries back off for
- *    AUTO_REFRESH_FAIL_COOLDOWN_MS so a down API cannot loop refreshes.
+ *   - fresh cache → never triggers (no refresh on every request);
+ *   - running/locked refresh → never starts a second one;
+ *   - a failed run stays recorded in fetch_runs, the previous dataset is
+ *     untouched (staged fetch publishes nothing on failure — see
+ *     refreshData), and automatic retries back off for
+ *     AUTO_REFRESH_FAIL_COOLDOWN_MS so a down API cannot loop refreshes.
  *    Manual refreshes are unaffected by the cooldown.
  *
  * @param {object} [db]

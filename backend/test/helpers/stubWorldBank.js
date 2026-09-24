@@ -49,6 +49,7 @@ export async function startStubWorldBank(options = {}) {
   const state = {
     requests: [],
     failure: null,
+    failMatching: null,
     metaTotalOffset: options.metaTotalOffset ?? 0,
     seriesRowsFor: options.seriesRowsFor ?? null,
     invalidJson: false,
@@ -79,14 +80,28 @@ export async function startStubWorldBank(options = {}) {
     const params = Object.fromEntries(url.searchParams.entries());
     state.requests.push({ path: url.pathname, params });
 
+    const failWith = (spec) => {
+      const headers = { 'Content-Type': 'text/plain' };
+      if (spec.retryAfter !== undefined) {
+        headers['Retry-After'] = String(spec.retryAfter);
+      }
+      res.writeHead(spec.status, headers);
+      res.end(spec.body ?? 'stub failure');
+    };
+    // Targeted failure first: only requests whose path contains the substring
+    // fail (lets one indicator's series fail while the rest succeed).
+    if (
+      state.failMatching &&
+      state.failMatching.times > 0 &&
+      url.pathname.includes(state.failMatching.substring)
+    ) {
+      state.failMatching.times -= 1;
+      failWith(state.failMatching);
+      return;
+    }
     if (state.failure && state.failure.times > 0) {
       state.failure.times -= 1;
-      const headers = { 'Content-Type': 'text/plain' };
-      if (state.failure.retryAfter !== undefined) {
-        headers['Retry-After'] = String(state.failure.retryAfter);
-      }
-      res.writeHead(state.failure.status, headers);
-      res.end(state.failure.body ?? 'stub failure');
+      failWith(state.failure);
       return;
     }
 
@@ -165,12 +180,21 @@ export async function startStubWorldBank(options = {}) {
     reset() {
       state.requests.length = 0;
       state.failure = null;
+      state.failMatching = null;
       state.metaTotalOffset = 0;
       state.invalidJson = false;
     },
     /** Fail the next `times` requests with the given status (and Retry-After). */
     failNext({ status = 500, times = 1, retryAfter, body } = {}) {
       state.failure = { status, times, retryAfter, body };
+    },
+    /**
+     * Fail the next `times` requests whose URL path contains `substring`
+     * (e.g. one indicator's series path). All other requests succeed, so a
+     * partial refresh (some indicators up, some down) can be staged.
+     */
+    failNextMatching({ status = 500, times = 1, substring, retryAfter, body } = {}) {
+      state.failMatching = { status, times, substring, retryAfter, body };
     },
     /** Serve rows with a meta.total larger than the rows actually returned. */
     setMetaTotalOffset(offset) {

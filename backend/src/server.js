@@ -12,6 +12,7 @@
  */
 
 import cors from 'cors';
+import crypto from 'node:crypto';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -166,6 +167,69 @@ const ah = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };
 
+/**
+ * Manual-refresh admin authentication.
+ *
+ * When REFRESH_ADMIN_TOKEN is configured, POST /api/data/refresh requires
+ * `Authorization: Bearer <token>` and anything else fails closed with 401.
+ * When unconfigured (local development, tests) the endpoint stays open, but
+ * production boot refuses to start without the token (see boot()).
+ * Comparison is constant-time; the token is never logged or returned.
+ */
+function requireRefreshAuth(req) {
+  const token = config.refreshAdminToken;
+  if (!token) return;
+  const header = req.headers.authorization ?? '';
+  const presented = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  const a = Buffer.from(presented);
+  const b = Buffer.from(token);
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) return;
+  throw httpError(401, 'Manual refresh requires a valid admin token (Authorization: Bearer <token>).', 'REFRESH_UNAUTHORIZED');
+}
+
+/**
+ * Minimal refresh-specific abuse protection (manual POST /api/data/refresh
+ * only — ranking/data GET endpoints are never limited). In-memory sliding
+ * window per client IP; intentionally dependency-free. Returns the
+ * Retry-After seconds when the caller is over budget, else null.
+ */
+const refreshAttemptLog = new Map();
+export function resetRefreshRateLimiter() {
+  refreshAttemptLog.clear();
+}
+function refreshRateLimitCheck(req) {
+  const max = config.refreshRateLimitMax;
+  const windowMs = config.refreshRateLimitWindowMs;
+  if (!(max > 0) || !(windowMs > 0)) return null;
+  const now = Date.now();
+  const key = req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  const log = (refreshAttemptLog.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (log.length >= max) {
+    return Math.max(1, Math.ceil((log[0] + windowMs - now) / 1000));
+  }
+  log.push(now);
+  refreshAttemptLog.set(key, log);
+  return null;
+}
+
+/**
+ * CORS policy: exact-match allowlist from CORS_ORIGINS when configured;
+ * permissive development default otherwise. Requests without an Origin
+ * header (curl, tests, server-to-server) are always allowed. Production boot
+ * refuses to start without an explicit list (see boot()).
+ */
+function corsOptions() {
+  const origins = config.corsOrigins;
+  if (!origins || origins.length === 0) return {};
+  return {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (origins.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+  };
+}
+
 export function createApp({ db = null, autoRefresh = null } = {}) {
   const app = express();
   const handle = () => db ?? getDb();
@@ -174,7 +238,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   const autoRefreshEnabled = autoRefresh ?? config.autoRefreshOnStale;
 
   app.disable('x-powered-by');
-  app.use(cors());
+  app.use(cors(corsOptions()));
   app.use(express.json({ limit: '64kb' }));
 
   // ---------- automatic TTL refresh ----------
@@ -199,11 +263,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   }
 
   // ---------- health ----------
+  // Never exposes the server filesystem path, environment values, or secrets.
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
       time: new Date().toISOString(),
-      databaseFile: config.databaseFile,
+      database: 'ok',
       methodology: methodologyBlock(),
     });
   });
@@ -525,6 +590,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- manual refresh ----------
   app.post('/api/data/refresh', ah(async (req, res) => {
+    const retryAfter = refreshRateLimitCheck(req);
+    if (retryAfter !== null) {
+      res.setHeader('Retry-After', String(retryAfter));
+      throw httpError(429, 'Too many manual refresh requests. Please wait before retrying.', 'REFRESH_RATE_LIMITED');
+    }
+    requireRefreshAuth(req);
     const body = req.body ?? {};
     const startYear = body.startYear !== undefined ? parseYear(body.startYear, 'startYear') : undefined;
     const endYear = body.endYear !== undefined ? parseYear(body.endYear, 'endYear') : undefined;
@@ -575,6 +646,19 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 }
 
 async function boot() {
+  // Production fail-closed: an unrestricted refresh endpoint or a blanket
+  // CORS policy must never silently serve production traffic.
+  if (process.env.NODE_ENV === 'production') {
+    if (!config.refreshAdminToken) {
+      console.error('Refusing to start: production requires REFRESH_ADMIN_TOKEN to be configured.');
+      process.exit(1);
+    }
+    if (!config.corsOrigins || config.corsOrigins.length === 0) {
+      console.error('Refusing to start: production requires CORS_ORIGINS to be configured.');
+      process.exit(1);
+    }
+  }
+
   const db = getDb();
 
   // Crash recovery first: a stale SQLite lock must never wedge the server.

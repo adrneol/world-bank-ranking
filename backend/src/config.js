@@ -5,8 +5,9 @@
  * the environment here and nowhere else. No indicator code is hardcoded deeper
  * in the codebase.
  *
- * The World Bank Indicators API is OPEN: it requires NO API KEY. There is
- * deliberately no key/token handling in this application.
+ * The World Bank Indicators API is OPEN: it requires NO API KEY. The only
+ * secret this application knows is the optional manual-refresh admin token
+ * (REFRESH_ADMIN_TOKEN), which is never logged and never sent to clients.
  */
 
 import path from 'node:path';
@@ -62,6 +63,72 @@ function bool(name, fallback) {
 }
 
 /**
+ * CANONICAL WORLD BANK INDICATOR CODES — IMMUTABLE IN PRODUCTION.
+ *
+ * This map is the single source of truth for which World Bank series each
+ * metric key means. Production ALWAYS uses these exact codes: environment
+ * variables can NEVER substitute a different series in production (see
+ * indicatorCodeFor below). Test-only overrides exist solely so tests can
+ * prove the fail-closed behavior, gated behind NODE_ENV=test AND an explicit
+ * opt-in flag.
+ */
+export const CANONICAL_INDICATOR_CODES = Object.freeze({
+  nominal_current: 'NY.GDP.PCAP.CD',
+  nominal_constant: 'NY.GDP.PCAP.KD',
+  ppp_current: 'NY.GDP.PCAP.PP.CD',
+  ppp_constant: 'NY.GDP.PCAP.PP.KD',
+  total_current: 'NY.GDP.MKTP.CD',
+  total_constant: 'NY.GDP.MKTP.KD',
+  total_ppp_current: 'NY.GDP.MKTP.PP.CD',
+  total_ppp_constant: 'NY.GDP.MKTP.PP.KD',
+});
+
+/** Historical environment variable name per metric (test-override channel only). */
+const INDICATOR_ENV_VARS = Object.freeze({
+  nominal_current: 'WORLD_BANK_NOMINAL_CURRENT_INDICATOR',
+  nominal_constant: 'WORLD_BANK_NOMINAL_CONSTANT_INDICATOR',
+  ppp_current: 'WORLD_BANK_PPP_CURRENT_INDICATOR',
+  ppp_constant: 'WORLD_BANK_PPP_CONSTANT_INDICATOR',
+  total_current: 'WORLD_BANK_TOTAL_CURRENT_INDICATOR',
+  total_constant: 'WORLD_BANK_TOTAL_CONSTANT_INDICATOR',
+  total_ppp_current: 'WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR',
+  total_ppp_constant: 'WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR',
+});
+
+/**
+ * Whether test-only indicator-code overrides are permitted. BOTH conditions
+ * are required: running under NODE_ENV=test AND the explicit opt-in flag.
+ * Production (and any non-test process) always takes the canonical branch.
+ */
+export function testIndicatorOverridesEnabled() {
+  return process.env.NODE_ENV === 'test' && process.env.WB_ALLOW_TEST_INDICATOR_OVERRIDES === '1';
+}
+
+/**
+ * Resolve the World Bank indicator code for a metric key.
+ *
+ * Production path: ALWAYS the canonical code. If the corresponding
+ * environment variable is set to anything else, throw loudly instead of
+ * silently pointing the registry at the wrong World Bank series.
+ */
+export function indicatorCodeFor(metricKey) {
+  const canonical = CANONICAL_INDICATOR_CODES[metricKey];
+  if (!canonical) throw new Error(`No canonical World Bank indicator for metric "${metricKey}".`);
+  if (!testIndicatorOverridesEnabled()) {
+    const attempted = process.env[INDICATOR_ENV_VARS[metricKey]];
+    if (attempted !== undefined && attempted !== null && String(attempted).trim() !== '' && String(attempted).trim() !== canonical) {
+      throw new Error(
+        `Refusing to substitute the World Bank indicator for "${metricKey}": ` +
+        `production registry is canonical (${canonical}); ` +
+        `overrides require NODE_ENV=test and WB_ALLOW_TEST_INDICATOR_OVERRIDES=1.`,
+      );
+    }
+    return canonical;
+  }
+  return str(INDICATOR_ENV_VARS[metricKey], canonical);
+}
+
+/**
  * SUBJECT-AWARE METRIC REGISTRY (one authoritative source for the backend).
  *
  * `key` is the API/UI identifier. `indicatorCode` is the exact World Bank WDI
@@ -76,8 +143,8 @@ function bool(name, fallback) {
 const GDP_PER_CAPITA_METRICS = Object.freeze({
   nominal_current: Object.freeze({
     key: 'nominal_current',
-    indicatorCode: str('WORLD_BANK_NOMINAL_CURRENT_INDICATOR', 'NY.GDP.PCAP.CD'),
-    label: 'Nominal GDP per capita - current US$',
+    indicatorCode: indicatorCodeFor('nominal_current'),
+    label: 'Nominal — Current US$',
     shortLabel: 'Nominal Current',
     unit: 'current US$',
     unitLong: 'current US$',
@@ -91,8 +158,8 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
   }),
   nominal_constant: Object.freeze({
     key: 'nominal_constant',
-    indicatorCode: str('WORLD_BANK_NOMINAL_CONSTANT_INDICATOR', 'NY.GDP.PCAP.KD'),
-    label: 'Nominal GDP per capita - constant 2015 US$',
+    indicatorCode: indicatorCodeFor('nominal_constant'),
+    label: 'Real — Constant 2015 US$',
     shortLabel: 'Nominal Constant 2015',
     unit: 'constant 2015 US$',
     unitLong: 'constant 2015 US$',
@@ -106,8 +173,8 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
   }),
   ppp_current: Object.freeze({
     key: 'ppp_current',
-    indicatorCode: str('WORLD_BANK_PPP_CURRENT_INDICATOR', 'NY.GDP.PCAP.PP.CD'),
-    label: 'GDP per capita PPP - current international $',
+    indicatorCode: indicatorCodeFor('ppp_current'),
+    label: 'PPP — Current international $',
     shortLabel: 'PPP Current',
     unit: 'current international $',
     unitLong: 'current international $',
@@ -121,8 +188,8 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
   }),
   ppp_constant: Object.freeze({
     key: 'ppp_constant',
-    indicatorCode: str('WORLD_BANK_PPP_CONSTANT_INDICATOR', 'NY.GDP.PCAP.PP.KD'),
-    label: 'GDP per capita PPP - constant 2021 international $',
+    indicatorCode: indicatorCodeFor('ppp_constant'),
+    label: 'PPP — Constant 2021 international $',
     shortLabel: 'PPP Constant 2021',
     unit: 'constant 2021 international $',
     unitLong: 'constant 2021 international $',
@@ -153,8 +220,8 @@ const TOTAL_GDP_METRICS = Object.freeze({
   total_current: Object.freeze({
     key: 'total_current',
     subject: 'gdp_total',
-    indicatorCode: str('WORLD_BANK_TOTAL_CURRENT_INDICATOR', 'NY.GDP.MKTP.CD'),
-    label: 'Total GDP - current US$',
+    indicatorCode: indicatorCodeFor('total_current'),
+    label: 'Total GDP — Nominal — Current US$',
     shortLabel: 'Current US$',
     unit: 'current US$',
     unitLong: 'current US$',
@@ -169,8 +236,8 @@ const TOTAL_GDP_METRICS = Object.freeze({
   total_constant: Object.freeze({
     key: 'total_constant',
     subject: 'gdp_total',
-    indicatorCode: str('WORLD_BANK_TOTAL_CONSTANT_INDICATOR', 'NY.GDP.MKTP.KD'),
-    label: 'Total GDP - constant 2015 US$ (real GDP)',
+    indicatorCode: indicatorCodeFor('total_constant'),
+    label: 'Total GDP — Real — Constant 2015 US$',
     shortLabel: 'Constant 2015 US$',
     unit: 'constant 2015 US$',
     unitLong: 'constant 2015 US$',
@@ -185,8 +252,8 @@ const TOTAL_GDP_METRICS = Object.freeze({
   total_ppp_current: Object.freeze({
     key: 'total_ppp_current',
     subject: 'gdp_total',
-    indicatorCode: str('WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR', 'NY.GDP.MKTP.PP.CD'),
-    label: 'Total GDP, PPP - current international $',
+    indicatorCode: indicatorCodeFor('total_ppp_current'),
+    label: 'Total GDP — PPP — Current international $',
     shortLabel: 'PPP Current',
     unit: 'current international $',
     unitLong: 'current international $',
@@ -201,8 +268,8 @@ const TOTAL_GDP_METRICS = Object.freeze({
   total_ppp_constant: Object.freeze({
     key: 'total_ppp_constant',
     subject: 'gdp_total',
-    indicatorCode: str('WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR', 'NY.GDP.MKTP.PP.KD'),
-    label: 'Total GDP, PPP - constant 2021 international $',
+    indicatorCode: indicatorCodeFor('total_ppp_constant'),
+    label: 'Total GDP — PPP — Constant 2021 international $',
     shortLabel: 'PPP Constant 2021',
     unit: 'constant 2021 international $',
     unitLong: 'constant 2021 international $',
@@ -321,6 +388,8 @@ export function describeSubjects() {
  *   2. metric keys are unique (object keys are; asserted explicitly)
  *   3. World Bank indicator codes are unique — two metrics can never share a
  *      series, which would make two "different" analyses silently identical
+ *   3b. every metric's code equals the CANONICAL code for its key — a
+ *      substituted series fails loudly instead of becoming "registry-valid"
  *   4. every metric declares a subject that exists
  *   5. every subject references only registered metrics whose subject matches
  *   6. every metric is reachable from exactly one subject
@@ -340,6 +409,12 @@ export function assertRegistryIntegrity() {
       );
     }
     seenCodes.set(code, key);
+    if (!testIndicatorOverridesEnabled() && metric.indicatorCode !== CANONICAL_INDICATOR_CODES[key]) {
+      throw new Error(
+        `Metric "${key}" does not use its canonical World Bank indicator ` +
+        `("${CANONICAL_INDICATOR_CODES[key]}"). Refusing a substituted series.`,
+      );
+    }
     if (!metric.subject || !SUBJECTS[metric.subject]) {
       throw new Error(`Metric "${key}" declares unknown subject "${metric.subject}".`);
     }
@@ -412,6 +487,27 @@ export const config = Object.freeze({
 
   cacheTtlHours: num('CACHE_TTL_HOURS', 24),
   neighborsDefault: int('RANK_NEIGHBORS_DEFAULT', 5),
+
+  // Manual-refresh admin token. Empty (default) means the refresh endpoint is
+  // open, for local development and tests. NEVER logged or returned in API
+  // responses. Production boot refuses to start without it (see server.js).
+  refreshAdminToken: str('REFRESH_ADMIN_TOKEN', ''),
+
+  // Allowed CORS origins (comma-separated, exact match). Null/empty means the
+  // permissive development default; production boot refuses to start without
+  // an explicit list (see server.js).
+  corsOrigins: (() => {
+    const raw = process.env.CORS_ORIGINS;
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+    return Object.freeze(String(raw).split(',').map((s) => s.trim()).filter((s) => s !== ''));
+  })(),
+
+  // Refresh-specific abuse protection (manual POST /api/data/refresh only;
+  // ranking/data GET endpoints are never rate-limited). In-memory sliding
+  // window per client IP: at most refreshRateLimitMax attempts per
+  // refreshRateLimitWindowMs. Non-positive values disable the limiter.
+  refreshRateLimitMax: int('REFRESH_RATE_LIMIT_MAX', 10),
+  refreshRateLimitWindowMs: int('REFRESH_RATE_LIMIT_WINDOW_MS', 60000),
 
   autoIngestOnEmpty: bool('WB_AUTO_INGEST_ON_EMPTY', true),
 
