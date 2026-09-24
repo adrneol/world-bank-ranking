@@ -40,6 +40,7 @@ import {
   getCountry,
   getIndicatorByMetricKey,
   getObservation,
+  getObservedCountryIds,
   listAvailableYears,
   listCountries,
   listFetchRuns,
@@ -48,6 +49,7 @@ import {
 import { describeUniverseRule } from './domain/universe.js';
 import { describeMeasure, describeMetric } from './domain/format.js';
 import { buildLevelComparisonResponse, COMPARISON_ERROR_CODES } from './services/comparisonService.js';
+import { buildCompareResponse, buildGroupEvaluation } from './services/entityCompare.js';
 import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
 import { buildFullRanking } from './services/fullRanking.js';
@@ -85,6 +87,9 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/countries',
   '/api/metadata',
   '/api/indicators',
+  '/api/entities',
+  '/api/compare',
+  '/api/groups/evaluate',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -441,6 +446,110 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
             focusIso3: parseFocusCountry(handle(), req.query.country),
             detail,
           });
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
+  // ---------- generic entity comparison (Phase 4) ----------
+  // Entities are validated specs ("country:IND", "aggregate:WLD",
+  // "group:IND,CHN"); capability (entity types + metric semantics +
+  // operation) is enforced in the service with explicit reason codes.
+  // No silent indicator default: the comparison must name its series.
+  app.get('/api/compare', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator);
+    const yearA = parseYear(req.query.yearA, 'yearA');
+    if (yearA === undefined) {
+      throw httpError(400, 'yearA is required for a comparison.', 'MISSING_YEAR');
+    }
+    const rawB = req.query.yearB;
+    const yearB = rawB === undefined || rawB === null || String(rawB).trim() === '' ? undefined : parseYear(rawB, 'yearB');
+    const result = buildCompareResponse(handle(), {
+      entityA: req.query.entityA,
+      entityB: req.query.entityB,
+      ...(req.query.labelA !== undefined ? { labelA: req.query.labelA } : {}),
+      ...(req.query.labelB !== undefined ? { labelB: req.query.labelB } : {}),
+      metricKey,
+      yearA,
+      ...(yearB !== undefined ? { yearB } : {}),
+      ...(req.query.operation !== undefined ? { operation: String(req.query.operation) } : {}),
+      ...(req.query.groupMode !== undefined ? { groupMode: String(req.query.groupMode) } : {}),
+    });
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
+  // ---------- entity discovery (Phase 4, read-only) ----------
+  // Countries and official aggregates come from stored World Bank metadata —
+  // never hard-coded lists. Optional indicator (+year) annotates each entity
+  // with stored-data presence for capability-driven pickers.
+  app.get('/api/entities', ah(async (req, res) => {
+    const h = handle();
+    const type = String(req.query.type ?? 'country').toLowerCase();
+    if (type !== 'country' && type !== 'aggregate' && type !== 'all') {
+      throw httpError(400, `Unknown entity type "${req.query.type}". Expected "country", "aggregate" or "all".`, 'INVALID_ENTITY');
+    }
+    const search = String(req.query.search ?? '').trim().toLowerCase();
+    const page = parsePositiveInt(req.query.page, 'page', { fallback: 1 });
+    const pageSize = parsePositiveInt(req.query.pageSize, 'pageSize', { fallback: 50, max: 500 });
+    let observed = null;
+    if (req.query.indicator !== undefined && req.query.indicator !== null && String(req.query.indicator).trim() !== '') {
+      const metricKey = parseMetric(req.query.indicator);
+      const indicator = getIndicatorByMetricKey(h, metricKey);
+      if (indicator) {
+        const rawYear = req.query.year;
+        const year = rawYear === undefined || rawYear === null || String(rawYear).trim() === '' ? null : parseYear(rawYear, 'year');
+        observed = getObservedCountryIds(h, indicator.id, year);
+      } else {
+        observed = new Set();
+      }
+    }
+    const includeAggregates = type !== 'country';
+    const onlyAggregates = type === 'aggregate';
+    const rows = listCountries(h, { includeAggregates })
+      .filter((c) => !onlyAggregates || c.is_aggregate === 1)
+      .filter(
+        (c) =>
+          search === '' ||
+          String(c.name ?? '').toLowerCase().includes(search) ||
+          String(c.iso3 ?? '').toLowerCase().includes(search) ||
+          String(c.id ?? '').toLowerCase().includes(search),
+      )
+      .map((c) => ({
+        iso3: c.iso3 ?? c.id,
+        name: c.name,
+        kind: c.is_aggregate === 1 ? 'wb_aggregate' : 'country',
+        region: c.region ?? null,
+        ...(observed !== null ? { hasData: observed.has(String(c.iso3 ?? c.id).toUpperCase()) } : {}),
+      }));
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    const current = Math.max(1, Math.min(pages, page));
+    const start = (current - 1) * pageSize;
+    res.json({
+      type,
+      search: String(req.query.search ?? ''),
+      count: rows.length,
+      page: current,
+      pageSize,
+      pages,
+      entities: rows.slice(start, start + pageSize),
+      methodology: methodologyBlock(),
+    });
+  }));
+
+  // ---------- custom group evaluation preview (Phase 4, read-only) ----------
+  // Validates a request-defined member set and reports capability + coverage
+  // without performing a comparison. Groups are never persisted.
+  app.get('/api/groups/evaluate', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator);
+    const rawA = req.query.yearA;
+    const rawB = req.query.yearB;
+    const yearA = rawA === undefined || rawA === null || String(rawA).trim() === '' ? undefined : parseYear(rawA, 'yearA');
+    const yearB = rawB === undefined || rawB === null || String(rawB).trim() === '' ? undefined : parseYear(rawB, 'yearB');
+    const result = buildGroupEvaluation(handle(), {
+      members: req.query.members,
+      ...(req.query.label !== undefined ? { label: req.query.label } : {}),
+      metricKey,
+      ...(yearA !== undefined ? { yearA } : {}),
+      ...(yearB !== undefined ? { yearB } : {}),
+    });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 

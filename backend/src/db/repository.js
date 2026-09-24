@@ -442,6 +442,30 @@ export function countEligibleObservations(db, indicatorId, year) {
     .get(indicatorId, year).n;
 }
 
+/**
+ * Country ids holding a stored valid observation for one indicator, any
+ * entity type (aggregates included — callers decide eligibility). One batched
+ * query for entity-discovery `hasData` annotation; optional year narrows to
+ * that year, otherwise any stored year counts.
+ *
+ * @returns {Set<string>} uppercase country ids
+ */
+export function getObservedCountryIds(db, indicatorId, year = null) {
+  const rows =
+    year === null || year === undefined
+      ? db
+          .prepare(
+            'SELECT DISTINCT country_id AS id FROM observations WHERE indicator_id = ? AND value IS NOT NULL',
+          )
+          .all(indicatorId)
+      : db
+          .prepare(
+            'SELECT DISTINCT country_id AS id FROM observations WHERE indicator_id = ? AND year = ? AND value IS NOT NULL',
+          )
+          .all(indicatorId, year);
+  return new Set(rows.map((r) => String(r.id).toUpperCase()));
+}
+
 /** Total stored observations, optionally for one indicator. */
 export function countObservations(db, indicatorId = null) {
   if (indicatorId === null) {

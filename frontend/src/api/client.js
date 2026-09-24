@@ -108,6 +108,14 @@ export const api = {
   countries: ({ includeAggregates } = {}, options) =>
     get('/api/countries', { includeAggregates }, options),
   metadata: (options) => get('/api/metadata', {}, options),
+  indicators: (options) => get('/api/indicators', {}, options),
+  // Phase-4 entity comparison (backend-authoritative; no economics in React).
+  entities: ({ type, search, page, pageSize, indicator, year } = {}, options) =>
+    get('/api/entities', { type, search, page, pageSize, indicator, year }, options),
+  compare: ({ entityA, entityB, labelA, labelB, indicator, yearA, yearB, operation, groupMode } = {}, options) =>
+    get('/api/compare', { entityA, entityB, labelA, labelB, indicator, yearA, yearB, operation, groupMode }, options),
+  groupsEvaluate: ({ members, label, indicator, yearA, yearB } = {}, options) =>
+    get('/api/groups/evaluate', { members: Array.isArray(members) ? members.join(',') : members, label, indicator, yearA, yearB }, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>
