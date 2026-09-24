@@ -111,4 +111,48 @@ export function describeMetric(metric) {
   };
 }
 
-export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, describeMetric, displayScaleFor };
+/**
+ * RICH MEASURE DESCRIPTION (Phase 2: semantic metadata foundation).
+ *
+ * describeMetric() above is the frozen legacy contract and must not grow new
+ * fields. describeMeasure() is the forward-looking view consumed only by the
+ * new GET /api/indicators endpoint (and future capability-driven UI): the
+ * full semantic contract a Phase-3 transform or Phase-4 comparison will gate
+ * on. Lifecycle/ingested state is composed by the route, not stored here.
+ */
+export function describeMeasure(metric) {
+  return {
+    key: metric.key,
+    subject: metric.subject,
+    domain: metric.domain,
+    family: metric.family,
+    indicatorCode: metric.indicatorCode,
+    label: metric.label,
+    shortLabel: metric.shortLabel,
+    unit: metric.unit,
+    unitLong: metric.unitLong,
+    currencySymbol: metric.currencySymbol ?? null,
+    group: metric.group ?? null,
+    priceBasis: metric.priceBasis ?? null,
+    currencyBasis: metric.currencyBasis ?? null,
+    frequency: metric.frequency ?? null,
+    observationType: metric.observationType,
+    validChangeTypes: [...(metric.validChangeTypes ?? [])],
+    aggregation: metric.aggregation,
+    rankingDirection: metric.rankingDirection,
+    interpretation: metric.interpretation,
+    comparisonCapability: [...(metric.comparisonCapability ?? [])],
+    signDomain: metric.signDomain,
+    requiredDenominator: metric.requiredDenominator ?? null,
+    quotation: metric.quotation ? { ...metric.quotation } : null,
+    derivation: { ...(metric.derivation ?? { kind: 'RAW' }) },
+    lifecycle: metric.lifecycle,
+    ppp: metric.ppp === true,
+    baseYear: metric.baseYear ?? null,
+    displayScale: metric.displayScaleHint ?? null,
+    worldBankPage: metric.worldBankPage,
+    ...(metric.verified ? { verified: { ...metric.verified } } : {}),
+  };
+}
+
+export default { formatNumber, formatValue, formatPercent, formatPercentagePoints, describeMetric, describeMeasure, displayScaleFor };

@@ -22,10 +22,10 @@
  * startup/refresh or is logged as a warning.
  */
 
-import { ALL_METRIC_KEYS, METRICS, assertRegistryIntegrity } from '../config.js';
+import { ALL_METRIC_KEYS, METRICS, PRODUCTION_METRIC_KEYS, assertRegistryIntegrity } from '../config.js';
 
-const EXPECTED_CODES = Object.freeze(ALL_METRIC_KEYS.map((k) => METRICS[k].indicatorCode).sort());
-const EXPECTED_METRIC_KEYS = Object.freeze([...ALL_METRIC_KEYS].sort());
+const EXPECTED_CODES = Object.freeze(PRODUCTION_METRIC_KEYS.map((k) => METRICS[k].indicatorCode).sort());
+const EXPECTED_METRIC_KEYS = Object.freeze([...PRODUCTION_METRIC_KEYS].sort());
 
 function result(check, passed, detail = null) {
   return { check, status: passed ? 'pass' : 'fail', detail };

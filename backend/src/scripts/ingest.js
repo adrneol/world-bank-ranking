@@ -11,7 +11,7 @@
  * it reports clearly what it is about to do.
  */
 
-import config, { ALL_METRIC_KEYS, METRICS } from '../config.js';
+import config, { METRICS, PRODUCTION_METRIC_KEYS } from '../config.js';
 import { closeDb, getDb } from '../db/index.js';
 import { countObservations, getYearRange } from '../db/repository.js';
 import { refreshData } from '../wb/ingest.js';
@@ -35,7 +35,7 @@ async function main() {
   console.log(`  Fetched range   : ${args.start - 1} to ${args.end} (one extra year for YoY)`);
   console.log(`  Database        : ${config.databaseFile}`);
   console.log('  Indicators      :');
-  for (const key of ALL_METRIC_KEYS) {
+  for (const key of PRODUCTION_METRIC_KEYS) {
     const metric = METRICS[key];
     console.log(`    ${metric.subject.padEnd(16)} ${key.padEnd(22)} ${metric.indicatorCode}  (${metric.unit})`);
   }

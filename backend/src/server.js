@@ -20,11 +20,15 @@ import { fileURLToPath } from 'node:url';
 import config, {
   ALL_METRIC_KEYS,
   FOCUS_COUNTRY,
+  FUTURE_METRIC_DEFINITIONS,
+  FUTURE_METRIC_KEYS,
   METRICS,
   METRIC_KEYS,
+  PRODUCTION_METRIC_KEYS,
   SOURCE_INFO,
   SUBJECT_KEYS,
   describeSubjects,
+  getDefinedMetric,
   getMetric,
   getSubject,
 } from './config.js';
@@ -42,7 +46,7 @@ import {
   listIndicators,
 } from './db/repository.js';
 import { describeUniverseRule } from './domain/universe.js';
-import { describeMetric } from './domain/format.js';
+import { describeMeasure, describeMetric } from './domain/format.js';
 import { buildLevelComparisonResponse, COMPARISON_ERROR_CODES } from './services/comparisonService.js';
 import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
@@ -80,6 +84,7 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/observations',
   '/api/countries',
   '/api/metadata',
+  '/api/indicators',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -561,13 +566,17 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   }));
 
   // ---------- metadata / audit ----------
+  // Legacy contract, frozen: expectedIndicators and subjects describe the
+  // production-enabled universe only, so Phase-2 disabled definitions cannot
+  // alter a single field of this response. Rich semantic metadata lives on
+  // the new GET /api/indicators endpoint instead (guardrails §26).
   app.get('/api/metadata', ah(async (req, res) => {
     const h = handle();
     res.json({
       source: SOURCE_INFO,
       apiBaseUrl: config.worldBank.baseUrl,
       indicators: listIndicators(h),
-      expectedIndicators: ALL_METRIC_KEYS.map((k) => getMetric(k)),
+      expectedIndicators: PRODUCTION_METRIC_KEYS.map((k) => getMetric(k)),
       subjects: describeSubjects().map((subject) => ({
         ...subject,
         metrics: subject.metricKeys.map((key) => describeMetric(METRICS[key])),
@@ -578,6 +587,36 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         aggregates: countAggregateCountries(h),
       },
       years: listAvailableYears(h),
+      methodology: methodologyBlock(),
+    });
+  }));
+
+  // ---------- measure catalog (Phase 2: semantic metadata, read-only) ----------
+  // Exposes the full DEFINED registry: production metrics plus disabled
+  // future definitions with their lifecycle state. No World Bank fetching, no
+  // ingestion, no calculations, no secrets — metadata display only. Future
+  // capability-driven UI (Phase 4/6) gates on these flags; legacy clients
+  // keep using /api/metadata, which is unchanged above.
+  app.get('/api/indicators', ah(async (req, res) => {
+    const h = handle();
+    const isIngested = (key) => getIndicatorByMetricKey(h, key) !== null;
+    const production = PRODUCTION_METRIC_KEYS.map((key) => ({
+      ...describeMeasure(getDefinedMetric(key)),
+      lifecycle: 'PRODUCTION',
+      productionEnabled: true,
+      ingested: isIngested(key),
+    }));
+    const defined = FUTURE_METRIC_KEYS.map((key) => ({
+      ...describeMeasure(getDefinedMetric(key)),
+      productionEnabled: false,
+      ingested: isIngested(key),
+    }));
+    res.json({
+      count: production.length + defined.length,
+      productionCount: production.length,
+      definedCount: defined.length,
+      production,
+      defined,
       methodology: methodologyBlock(),
     });
   }));

@@ -41,7 +41,7 @@
  *   rowsUnknownCountry     rows whose ISO3 is absent from the metadata entirely
  */
 
-import { ALL_METRIC_KEYS, METRICS, config } from '../config.js';
+import { METRICS, PRODUCTION_METRIC_KEYS, config, isProductionMetric } from '../config.js';
 import { getDb } from '../db/index.js';
 import {
   acquireRefreshLock,
@@ -417,7 +417,7 @@ export async function refreshData(options = {}) {
     requestedStartYear,
     requestedEndYear,
   );
-  const metricKeys = options.indicators ?? ALL_METRIC_KEYS;
+  const metricKeys = options.indicators ?? PRODUCTION_METRIC_KEYS;
   const trigger = options.trigger ?? 'manual';
 
   const totals = {
@@ -465,6 +465,21 @@ export async function refreshData(options = {}) {
       fetchedStartYear,
       fetchedEndYear,
     };
+
+    // Lifecycle enforcement (inside the try so the finally below always
+    // releases the refresh lock): only production-enabled metrics may be
+    // ingested. Disabled future definitions fail closed here instead of
+    // crashing on a missing METRICS entry or silently widening the refresh.
+    for (const key of metricKeys) {
+      if (!isProductionMetric(key)) {
+        const error = new Error(
+          `Refresh supports production metrics only: "${key}" is not production-enabled.`,
+        );
+        error.code = 'INVALID_INDICATOR';
+        error.httpStatus = 400;
+        throw error;
+      }
+    }
 
     runId = startFetchRun(db, {
       trigger,
