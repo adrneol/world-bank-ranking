@@ -150,7 +150,8 @@ async function seedBothSubjects() {
         rows.push({ countryId: iso3, indicatorId: indicator.id, year: Number(year), value });
       }
     }
-    // The aggregate row must be rejected by the universe rule, never stored.
+    // Aggregate rows bypass the eligible ranking universe (stored with entity
+    // typing since Phase 5, never ranked): repository writes do not filter.
     repository.upsertObservations(db, rows);
     return indicator;
   };
@@ -160,7 +161,7 @@ async function seedBothSubjects() {
   return { db, repository };
 }
 
-test('denominators are independent per metric; aggregates never stored', async () => {
+test('denominators are independent per metric; aggregates never ranked', async () => {
   const { db, repository } = await seedBothSubjects();
   const { buildFullRanking } = await import('../src/services/fullRanking.js');
 
@@ -173,11 +174,12 @@ test('denominators are independent per metric; aggregates never stored', async (
   assert.equal(perCapita.total, 3);
   assert.equal(perCapita.metric.subject, 'gdp_per_capita');
 
-  // The aggregate entity holds no observation under either indicator.
+  // The aggregate entity holds no RANKED observation under either indicator:
+  // eligible reads exclude aggregate-typed rows by construction.
   for (const key of ['total_current', 'nominal_current']) {
     const indicator = repository.getIndicatorByMetricKey(db, key);
     const agg = repository.getEligibleObservations(db, indicator.id, 2025).filter((r) => r.iso3 === 'AFE');
-    assert.equal(agg.length, 0, `${key}: aggregate must be excluded`);
+    assert.equal(agg.length, 0, `${key}: aggregate must be excluded from rankings`);
   }
 });
 
@@ -355,8 +357,8 @@ test('API: Total GDP comparison, observations, subject-scoped yearly and metadat
 
   const metadata = await get('/api/metadata');
   assert.equal(metadata.status, 200);
-  assert.deepEqual(metadata.body.subjects.map((s) => s.key), ['gdp_per_capita', 'gdp_total']);
-  assert.equal(metadata.body.expectedIndicators.length, 8);
+  assert.deepEqual(metadata.body.subjects.map((s) => s.key), ['gdp_per_capita', 'gdp_total', 'prices', 'trade', 'capital_flows', 'exchange', 'external', 'population']);
+  assert.equal(metadata.body.expectedIndicators.length, 20);
 
   const badSubject = await get('/api/india/gdp-ranking?subject=gdp');
   assert.equal(badSubject.status, 400);

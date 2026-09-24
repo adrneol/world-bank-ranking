@@ -157,6 +157,29 @@ export function buildGrowthComparisonResponse(db, options = {}) {
     throw comparisonError(COMPARISON_ERROR_CODES.INVALID_YEAR, 'yearA and yearB must be integer years.', 400);
   }
   const { order } = orderYears(yearA, yearB);
+  // YoY-growth mode is a relative percent-change analysis: metrics that do
+  // not declare YOY (rates, ratios, indexes) report unsupported instead of a
+  // misleading relative percentage. GDP/flow metrics are unaffected.
+  if (!metric.validChangeTypes.includes('YOY')) {
+    const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
+    return {
+      comparison: {
+        available: false,
+        reason: 'unsupported_transformation_for_metric',
+        mode: 'yoy',
+      },
+      metric: describeMetric(metric),
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      years: { a: yearA, b: yearB, order },
+      universe: null,
+      focusMovement: null,
+      economies: { counts: null, rows: [], truncated: false, totalRows: 0 },
+      denominatorExplanation: null,
+      evidence: null,
+      verification: { passed: false, checks: [] },
+      source: sourceAttribution(),
+    };
+  }
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   if (!/^[A-Z]{3}$/.test(focusIso3)) {
     throw comparisonError(COMPARISON_ERROR_CODES.INVALID_YEAR, `Invalid focus country "${options.focusIso3}".`, 400);

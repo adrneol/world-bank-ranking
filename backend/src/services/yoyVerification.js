@@ -31,6 +31,24 @@ export function buildYoyVerification(db, options = {}) {
 
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   const neighbors = normalizeNeighborCount(options.neighbors);
+  // YoY ranking orders relative percent changes: metrics that do not declare
+  // YOY (rates, ratios, indexes) report unsupported instead of ranking a
+  // misleading relative percentage. GDP/flow metrics are unaffected.
+  if (!metric.validChangeTypes.includes('YOY')) {
+    return {
+      available: false,
+      reason: 'unsupported_transformation_for_metric',
+      metric: describeMetric(metric),
+      year: options.year ?? null,
+      neighbors,
+      focus: null,
+      coverage: null,
+      above: [],
+      below: [],
+      denominator: 0,
+      source: sourceAttribution(),
+    };
+  }
   const indicator = getIndicatorByMetricKey(db, metricKey);
   const eligibleUniverse = countEligibleCountries(db);
 
@@ -165,8 +183,21 @@ export function buildFullYoyRanking(db, options = {}) {
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
 
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const indicator = getIndicatorByMetricKey(db, metricKey);
   const eligibleUniverse = countEligibleCountries(db);
+  // Same YOY capability gate as buildYoyVerification (see above).
+  if (!metric.validChangeTypes.includes('YOY')) {
+    return {
+      available: false,
+      reason: 'unsupported_transformation_for_metric',
+      metric: describeMetric(metric),
+      year: options.year ?? null,
+      rows: [],
+      total: 0,
+      eligibleUniverse,
+      source: sourceAttribution(),
+    };
+  }
+  const indicator = getIndicatorByMetricKey(db, metricKey);
 
   if (!indicator) {
     return {

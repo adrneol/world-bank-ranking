@@ -372,14 +372,31 @@ function applyOperation({ entityA, entityB, results, metric, years, yearA, yearB
   }
 
   // Change operations: per-entity Phase-3 transforms, then an exact gap.
-  const code = operation === 'absolute_change' ? TRANSFORMS.ABSOLUTE_CHANGE : operation === 'percent_change' ? TRANSFORMS.PERCENT_CHANGE : TRANSFORMS.CAGR;
+  const code =
+    operation === 'absolute_change'
+      ? TRANSFORMS.ABSOLUTE_CHANGE
+      : operation === 'percent_change'
+        ? TRANSFORMS.PERCENT_CHANGE
+        : operation === 'pp_change'
+          ? TRANSFORMS.PERCENTAGE_POINT_CHANGE
+          : operation === 'index_point_change'
+            ? TRANSFORMS.INDEX_POINT_CHANGE
+            : TRANSFORMS.CAGR;
   const changeInputs = (slot) =>
     code === TRANSFORMS.CAGR
       ? { a: valueOf(slot, yearA), b: valueOf(slot, yearB), years: Math.abs(yearB - yearA) }
       : { a: valueOf(slot, yearA), b: valueOf(slot, yearB) };
   const changeA = computeTransform(metric, code, changeInputs('a'));
   const changeB = computeTransform(metric, code, changeInputs('b'));
-  const gapUnit = code === TRANSFORMS.ABSOLUTE_CHANGE ? gapUnitFor(metric) : 'percentage points';
+  // Gap units: absolute gaps carry the metric unit; gaps of two percentage
+  // rates are percentage-point differences (never a percent); gaps of two
+  // point changes (pp/index) carry the same point unit.
+  const gapUnit =
+    code === TRANSFORMS.ABSOLUTE_CHANGE
+      ? gapUnitFor(metric)
+      : code === TRANSFORMS.PERCENTAGE_POINT_CHANGE || code === TRANSFORMS.INDEX_POINT_CHANGE
+        ? (changeA.unit ?? changeB.unit ?? gapUnitFor(metric))
+        : 'percentage points';
   // A gap of two absolute changes carries the metric unit; a gap of two
   // percentage rates is a percentage-point difference — never a percent.
   const gap =

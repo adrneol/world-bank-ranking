@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api/client.js';
 import {
   SUBJECTS,
+  hydrateRegistry,
   metricKeysForSubject,
   metricLabel,
   resolveMetricKey,
@@ -138,6 +139,27 @@ export default function App() {
     };
   }, [dataVersion]);
 
+  // Metric/subject discovery (Phase 5): the backend /api/indicators catalog
+  // is authoritative for which metrics and subjects exist. Hydration swaps
+  // the display registry; failure keeps the static fallback (fail-safe).
+  // A registry version bump re-renders every section through the same state.
+  const [registryVersion, setRegistryVersion] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .indicators()
+      .then((result) => {
+        if (cancelled) return;
+        if (hydrateRegistry(result)) setRegistryVersion((v) => v + 1);
+      })
+      .catch(() => {
+        // Static fallback stays active; views keep working with GDP metrics.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataVersion]);
+
   const eligibleCountries = useMemo(() => countriesData?.countries ?? [], [countriesData]);
   const availableYears = useMemo(() => yearsData?.years ?? [], [yearsData]);
   const minYear = yearsData?.minYear ?? null;
@@ -146,6 +168,10 @@ export default function App() {
 
   // Resolve effective filters against actually-available years.
   const effective = useMemo(() => {
+    // Metric/subject resolution reads the module-level display registry,
+    // which hydrateRegistry() swaps when /api/indicators loads: reference
+    // the version so filters re-resolve against backend metadata.
+    void registryVersion;
     const pick = (value, fallback) => {
       const n = Number.parseInt(value, 10);
       if (Number.isInteger(n) && availableYears.includes(n)) return n;
@@ -191,7 +217,7 @@ export default function App() {
     // truth): nominal_* metrics imply GDP per capita, total_* imply Total GDP.
     const subject = subjectOf(metric);
     return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName };
-  }, [filters, availableYears, maxYear, minYear, defaultStart, eligibleCountries]);
+  }, [filters, availableYears, maxYear, minYear, defaultStart, eligibleCountries, registryVersion]);
 
   const rankSubs = useMemo(
     () => [

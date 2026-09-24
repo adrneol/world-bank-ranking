@@ -62,7 +62,7 @@ export default function Overview({ year, subject = 'gdp_per_capita', country = '
             })}
           </div>
           <p className="footnote">
-            Rank calculated from World Bank WDI observations. The four {subjectLabel(subject)} series use different
+            Rank calculated from World Bank WDI observations. The {keys.length} {subjectLabel(subject)} series use different
             units and are never combined or scored against each other.
           </p>
         </>

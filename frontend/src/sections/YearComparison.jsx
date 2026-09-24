@@ -30,9 +30,9 @@ export default function YearComparison({ year, subject = 'gdp_per_capita', count
     >
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="year comparison" />
       {!loading && !error && row ? (
-        <div className="table-scroll" role="region" aria-label="Four-metric comparison" tabIndex={0}>
+        <div className="table-scroll" role="region" aria-label="Metric comparison" tabIndex={0}>
           <table className="table">
-            <caption className="sr-only">Four-metric comparison for {year}</caption>
+            <caption className="sr-only">{keys.length}-metric comparison for {year}</caption>
             <thead>
               <tr>
                 <th scope="col">Metric</th>

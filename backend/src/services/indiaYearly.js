@@ -24,6 +24,7 @@ import {
 } from '../db/repository.js';
 import { describeMetric, formatPercent, formatValue } from '../domain/format.js';
 import { rankByValue } from '../domain/ranking.js';
+import { TRANSFORM_NA_DESCRIPTIONS, TRANSFORM_NA_REASONS } from '../domain/transforms.js';
 import { buildYoySeries } from '../domain/yoy.js';
 
 /** A metric cell for a year when the metric has no stored series for that year. */
@@ -100,16 +101,30 @@ export function buildIndiaYearlyRows(db, options = {}) {
       startYear - 1,
       endYear,
     );
-    const yoyByYear = new Map(
-      buildYoySeries(focusSeries, startYear, endYear).map((entry) => [entry.year, entry]),
-    );
+    // YoY is a relative percent-change analysis: metrics that do not declare
+    // YOY (rates, ratios, indexes) keep level/rank behavior but report an
+    // explicit unsupported reason instead of a misleading relative percent.
+    const supportsYoy = metric.validChangeTypes.includes('YOY');
+    const focusByYear = new Map(focusSeries.map((entry) => [entry.year, entry.value]));
+    const yoyByYear = supportsYoy
+      ? new Map(buildYoySeries(focusSeries, startYear, endYear).map((entry) => [entry.year, entry]))
+      : new Map();
 
     const cells = new Map();
     for (let year = startYear; year <= endYear; year += 1) {
       const yearRows = rowsByYear.get(year) ?? [];
       const { ranked, total } = rankByValue(yearRows);
       const focusRow = ranked.find((row) => row.iso3 === focusIso3) ?? null;
-      const yoy = yoyByYear.get(year) ?? null;
+      // Unsupported metrics: same cell shape, explicit reason, raw previous
+      // value preserved (it is an observation, not a transformation).
+      const yoy = yoyByYear.get(year) ?? (!supportsYoy
+        ? {
+            yoyPercent: null,
+            reason: TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION,
+            description: TRANSFORM_NA_DESCRIPTIONS[TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION],
+            previousValue: focusByYear.has(year - 1) ? focusByYear.get(year - 1) : null,
+          }
+        : null);
 
       cells.set(year, {
         available: Boolean(focusRow),

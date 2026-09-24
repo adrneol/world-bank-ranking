@@ -17,10 +17,17 @@ import {
 } from '../fixtures/snapshot.js';
 import {
   TOTAL_GDP_LAST_UPDATED,
+  TOTAL_GDP_METRIC_KEYS,
   totalGdpIndicatorMetadataRow,
   totalGdpMetricKeyForCode,
   totalGdpRows,
 } from '../fixtures/totalGdp.js';
+import {
+  PHASE5_LAST_UPDATED,
+  phase5IndicatorMetadataRow,
+  phase5MetricKeyForCode,
+  phase5Rows,
+} from '../fixtures/phase5.js';
 
 /** Point the application at this stub. Call BEFORE importing src modules. */
 export function useStubBaseUrl(baseUrl) {
@@ -57,23 +64,42 @@ export async function startStubWorldBank(options = {}) {
 
   // Per-capita metrics are served from the committed versioned snapshot; the
   // Total GDP subject is served from its own offline fixture (the versioned
-  // snapshot is deliberately never regenerated for the new subject).
+  // snapshot is deliberately never regenerated for the new subject), and the
+  // Phase-5 families from theirs (same rule: live-verified anchors plus
+  // synthetic companions, aggregates included where published).
   const isSnapshotMetric = (metricKey) => Boolean(snapshot.indicators[metricKey]);
+  const isTotalGdpMetric = (metricKey) => TOTAL_GDP_METRIC_KEYS.includes(metricKey);
   const envelopeFor = (metricKey) => {
     if (isSnapshotMetric(metricKey)) return seriesEnvelope(metricKey);
-    const rows = totalGdpRows(metricKey);
+    if (isTotalGdpMetric(metricKey)) {
+      const rows = totalGdpRows(metricKey);
+      return [
+        { page: 1, pages: 1, per_page: rows.length, total: rows.length, sourceid: '2', lastupdated: TOTAL_GDP_LAST_UPDATED },
+        rows,
+      ];
+    }
+    const rows = phase5Rows(metricKey);
     return [
-      { page: 1, pages: 1, per_page: rows.length, total: rows.length, sourceid: '2', lastupdated: TOTAL_GDP_LAST_UPDATED },
+      { page: 1, pages: 1, per_page: rows.length, total: rows.length, sourceid: '2', lastupdated: PHASE5_LAST_UPDATED },
       rows,
     ];
   };
-  const metadataRowFor = (metricKey) =>
-    isSnapshotMetric(metricKey) ? indicatorMetadataRow(metricKey) : totalGdpIndicatorMetadataRow(metricKey);
+  const metadataRowFor = (metricKey) => {
+    if (isSnapshotMetric(metricKey)) return indicatorMetadataRow(metricKey);
+    if (isTotalGdpMetric(metricKey)) return totalGdpIndicatorMetadataRow(metricKey);
+    return phase5IndicatorMetadataRow(metricKey);
+  };
+  const lastUpdatedFor = (metricKey) =>
+    isSnapshotMetric(metricKey)
+      ? snapshot.indicators[metricKey].lastUpdated
+      : isTotalGdpMetric(metricKey)
+        ? TOTAL_GDP_LAST_UPDATED
+        : PHASE5_LAST_UPDATED;
 
   const metricKeyForCode = (code) =>
     Object.keys(snapshot.indicators).find(
       (key) => snapshot.indicators[key].indicatorCode === code,
-    ) ?? totalGdpMetricKeyForCode(code);
+    ) ?? totalGdpMetricKeyForCode(code) ?? phase5MetricKeyForCode(code);
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -160,7 +186,7 @@ export async function startStubWorldBank(options = {}) {
         return;
       }
       send([
-        { page: 1, pages: 1, per_page: 5, total: 1, sourceid: '2', lastupdated: isSnapshotMetric(metricKey) ? snapshot.indicators[metricKey].lastUpdated : TOTAL_GDP_LAST_UPDATED },
+        { page: 1, pages: 1, per_page: 5, total: 1, sourceid: '2', lastupdated: lastUpdatedFor(metricKey) },
         [metadataRowFor(metricKey)],
       ]);
       return;

@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FUTURE_METRIC_DEFINITIONS, METRICS } from '../src/config.js';
+import { METRICS } from '../src/config.js';
 import { createMemoryTestDb, seedEdgeCaseDb } from './helpers/testDb.js';
 import {
   ENTITY_ERROR_CODES,
@@ -376,7 +376,9 @@ test('Phase 4: like-for-like without a group is rejected explicitly', async () =
 // ---------------------------------------------------------------------------
 test('Phase 4.26-28: ratio and per-capita group rules', () => {
   // WEIGHTED_RATIO refuses plain group sums; per-capita refuses all sums.
-  assert.deepEqual(canCompare({ entityA: { kind: 'country' }, entityB: { kind: 'custom_group' }, metric: FUTURE_METRIC_DEFINITIONS.fdi_inflows_pct_gdp, operation: 'level' }), {
+  // (Phase-5 note: the FDI ratio is now a production metric; the capability
+  // rule is unchanged, only the registry address moved.)
+  assert.deepEqual(canCompare({ entityA: { kind: 'country' }, entityB: { kind: 'custom_group' }, metric: METRICS.fdi_inflows_pct_gdp, operation: 'level' }), {
     allowed: false,
     reason: 'NOT_AGGREGATABLE',
   });
@@ -403,7 +405,7 @@ test('Phase 4.28: GDP per-capita group compare fails closed over HTTP', async ()
 });
 
 test('Phase 4.29-30: inflation never becomes fake regional inflation', () => {
-  const cpi = FUTURE_METRIC_DEFINITIONS.inflation_cpi;
+  const cpi = METRICS.inflation_cpi;
   assert.deepEqual(
     canCompare({ entityA: { kind: 'country' }, entityB: { kind: 'custom_group' }, metric: cpi, operation: 'level' }),
     { allowed: false, reason: 'NOT_AGGREGATABLE' },
@@ -421,7 +423,7 @@ test('Phase 4.29-30: inflation never becomes fake regional inflation', () => {
 });
 
 test('Phase 4.31-32: exchange rates are never summed; cross-rate legs validate', () => {
-  const fx = FUTURE_METRIC_DEFINITIONS.fx_official;
+  const fx = METRICS.fx_official;
   assert.deepEqual(
     canCompare({ entityA: { kind: 'country' }, entityB: { kind: 'custom_group' }, metric: fx, operation: 'level' }),
     { allowed: false, reason: 'NOT_AGGREGATABLE' },
@@ -497,7 +499,6 @@ test('Phase 4.36: capability errors are explicit and distinguished', async () =>
       ['/api/compare?entityA=country:IND&entityB=group:&indicator=total_current&yearA=2005', 'EMPTY_GROUP'],
       ['/api/compare?entityA=country:IND&entityB=group:IND,XYZ&indicator=total_current&yearA=2005', 'INVALID_GROUP_MEMBER'],
       ['/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2005&groupMode=weird', 'INVALID_GROUP_MODE'],
-      ['/api/compare?entityA=country:IND&entityB=country:CHN&indicator=inflation_cpi&yearA=2005', 'INVALID_INDICATOR'],
     ];
     for (const [path, code] of cases) {
       const res = await getJSON(base, path);
@@ -505,6 +506,13 @@ test('Phase 4.36: capability errors are explicit and distinguished', async () =>
       assert.equal(res.body.error.code, code, path);
       assert.equal(res.body.stack, undefined);
     }
+    // Phase-5 note: inflation_cpi is now a promoted metric, so it resolves;
+    // on this fixture DB it is simply un-ingested (valid request, missing
+    // data) instead of INVALID_INDICATOR.
+    const promoted = await getJSON(base, '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=inflation_cpi&yearA=2005');
+    assert.equal(promoted.status, 200);
+    assert.equal(promoted.body.available, false);
+    assert.equal(promoted.body.reason, 'MISSING_REQUIRED_DATA');
     // Labels on non-group entities are rejected, not silently ignored.
     const labelled = await getJSON(base, '/api/compare?entityA=country:IND&labelA=X&entityB=country:CHN&indicator=total_current&yearA=2005');
     assert.equal(labelled.status, 400);

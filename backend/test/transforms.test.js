@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FUTURE_METRIC_DEFINITIONS, METRICS } from '../src/config.js';
+import { METRICS } from '../src/config.js';
 import { formatIndexPoints, formatPercentagePoints, formatValue } from '../src/domain/format.js';
 import {
   TRANSFORM_NA_REASONS,
@@ -33,12 +33,12 @@ import { buildYoySeries, computeYoy } from '../src/domain/yoy.js';
 
 const GDP = METRICS.nominal_current;
 const GDP_TOTAL = METRICS.total_constant;
-const CPI = FUTURE_METRIC_DEFINITIONS.inflation_cpi;
-const CPI_INDEX = FUTURE_METRIC_DEFINITIONS.inflation_cpi_index;
-const FX = FUTURE_METRIC_DEFINITIONS.fx_official;
-const EXPORTS = FUTURE_METRIC_DEFINITIONS.exports_current;
-const FDI_FLOW = FUTURE_METRIC_DEFINITIONS.fdi_inflows;
-const FDI_RATIO = FUTURE_METRIC_DEFINITIONS.fdi_inflows_pct_gdp;
+const CPI = METRICS.inflation_cpi;
+const CPI_INDEX = METRICS.inflation_cpi_index;
+const FX = METRICS.fx_official;
+const EXPORTS = METRICS.exports_current;
+const FDI_FLOW = METRICS.fdi_inflows;
+const FDI_RATIO = METRICS.fdi_inflows_pct_gdp;
 
 function assertUnavailable(result, reason, transform) {
   assert.equal(result.computable, false);

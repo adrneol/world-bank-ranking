@@ -45,7 +45,21 @@ test('the four World Bank indicator codes are exact and never substituted', () =
   assert.equal(METRICS.total_ppp_current.indicatorCode, 'NY.GDP.MKTP.PP.CD');
   assert.equal(METRICS.total_ppp_constant.indicatorCode, 'NY.GDP.MKTP.PP.KD');
 
-  // The curated registry is exactly these eight codes — no more, no fewer.
+  // Phase-5 promotions: twelve live-verified WDI series across six subjects.
+  assert.equal(METRICS.inflation_cpi.indicatorCode, 'FP.CPI.TOTL.ZG');
+  assert.equal(METRICS.inflation_cpi_index.indicatorCode, 'FP.CPI.TOTL');
+  assert.equal(METRICS.inflation_deflator.indicatorCode, 'NY.GDP.DEFL.KD.ZG');
+  assert.equal(METRICS.fx_official.indicatorCode, 'PA.NUS.FCRF');
+  assert.equal(METRICS.exports_current.indicatorCode, 'NE.EXP.GNFS.CD');
+  assert.equal(METRICS.imports_current.indicatorCode, 'NE.IMP.GNFS.CD');
+  assert.equal(METRICS.fdi_inflows.indicatorCode, 'BX.KLT.DINV.CD.WD');
+  assert.equal(METRICS.fdi_inflows_pct_gdp.indicatorCode, 'BX.KLT.DINV.WD.GD.ZS');
+  assert.equal(METRICS.current_account.indicatorCode, 'BN.CAB.XOKA.CD');
+  assert.equal(METRICS.reserves_ex_gold.indicatorCode, 'FI.RES.XGLD.CD');
+  assert.equal(METRICS.remittances_received.indicatorCode, 'BX.TRF.PWKR.CD.DT');
+  assert.equal(METRICS.population_total.indicatorCode, 'SP.POP.TOTL');
+
+  // The curated registry is exactly these twenty codes — no more, no fewer.
   const allowed = [
     'NY.GDP.PCAP.CD',
     'NY.GDP.PCAP.KD',
@@ -55,23 +69,35 @@ test('the four World Bank indicator codes are exact and never substituted', () =
     'NY.GDP.MKTP.KD',
     'NY.GDP.MKTP.PP.CD',
     'NY.GDP.MKTP.PP.KD',
+    'FP.CPI.TOTL.ZG',
+    'FP.CPI.TOTL',
+    'NY.GDP.DEFL.KD.ZG',
+    'PA.NUS.FCRF',
+    'NE.EXP.GNFS.CD',
+    'NE.IMP.GNFS.CD',
+    'BX.KLT.DINV.CD.WD',
+    'BX.KLT.DINV.WD.GD.ZS',
+    'BN.CAB.XOKA.CD',
+    'FI.RES.XGLD.CD',
+    'BX.TRF.PWKR.CD.DT',
+    'SP.POP.TOTL',
   ];
   const codes = ALL_METRIC_KEYS.map((key) => METRICS[key].indicatorCode);
-  assert.equal(ALL_METRIC_KEYS.length, 8);
-  assert.equal(new Set(codes).size, 8, 'each metric must use its own indicator code');
+  assert.equal(ALL_METRIC_KEYS.length, 20);
+  assert.equal(new Set(codes).size, 20, 'each metric must use its own indicator code');
   assert.deepEqual([...codes].sort(), [...allowed].sort());
 
   // Series that exist in WDI but are NOT usable here may never be registered:
   // local-currency levels are not cross-country comparable, growth percentages
   // must never enter the level/YoY engine, and unrelated families (GNI,
-  // industry share, CPI) are out of scope.
+  // industry share) are out of scope. (FP.CPI.TOTL.ZG left this forbid-list
+  // at Phase-5 promotion: CPI inflation is now a verified production metric.)
   for (const forbidden of [
     'NY.GDP.MKTP.KN',
     'NY.GDP.MKTP.CN',
     'NY.GDP.MKTP.KD.ZG',
     'NY.GDP.PCAP.KD.ZG',
     'NY.GNP.PCAP.CD',
-    'FP.CPI.TOTL.ZG',
     'NV.IND.TOTL.ZS',
     'NY.GDP.TOTAL.CD',
   ]) {
@@ -120,6 +146,18 @@ test('.env.example documents the indicator variables and the defaults', () => {
     'WORLD_BANK_TOTAL_CONSTANT_INDICATOR',
     'WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR',
     'WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR',
+    'WORLD_BANK_INFLATION_CPI_INDICATOR',
+    'WORLD_BANK_INFLATION_CPI_INDEX_INDICATOR',
+    'WORLD_BANK_INFLATION_DEFLATOR_INDICATOR',
+    'WORLD_BANK_FX_OFFICIAL_INDICATOR',
+    'WORLD_BANK_EXPORTS_CURRENT_INDICATOR',
+    'WORLD_BANK_IMPORTS_CURRENT_INDICATOR',
+    'WORLD_BANK_FDI_INFLOWS_INDICATOR',
+    'WORLD_BANK_FDI_INFLOWS_PCT_GDP_INDICATOR',
+    'WORLD_BANK_CURRENT_ACCOUNT_INDICATOR',
+    'WORLD_BANK_RESERVES_EX_GOLD_INDICATOR',
+    'WORLD_BANK_REMITTANCES_RECEIVED_INDICATOR',
+    'WORLD_BANK_POPULATION_TOTAL_INDICATOR',
     'DEFAULT_START_YEAR',
     'DEFAULT_END_YEAR',
     'INGEST_START_YEAR',
@@ -151,6 +189,18 @@ test('canonical indicator codes are frozen and every metric resolves to its own'
     total_constant: 'NY.GDP.MKTP.KD',
     total_ppp_current: 'NY.GDP.MKTP.PP.CD',
     total_ppp_constant: 'NY.GDP.MKTP.PP.KD',
+    inflation_cpi: 'FP.CPI.TOTL.ZG',
+    inflation_cpi_index: 'FP.CPI.TOTL',
+    inflation_deflator: 'NY.GDP.DEFL.KD.ZG',
+    fx_official: 'PA.NUS.FCRF',
+    exports_current: 'NE.EXP.GNFS.CD',
+    imports_current: 'NE.IMP.GNFS.CD',
+    fdi_inflows: 'BX.KLT.DINV.CD.WD',
+    fdi_inflows_pct_gdp: 'BX.KLT.DINV.WD.GD.ZS',
+    current_account: 'BN.CAB.XOKA.CD',
+    reserves_ex_gold: 'FI.RES.XGLD.CD',
+    remittances_received: 'BX.TRF.PWKR.CD.DT',
+    population_total: 'SP.POP.TOTL',
   });
   for (const key of ALL_METRIC_KEYS) {
     assert.equal(indicatorCodeFor(key), CANONICAL_INDICATOR_CODES[key]);

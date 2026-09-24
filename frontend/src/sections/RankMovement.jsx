@@ -72,7 +72,7 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
       <Field label="Basis" htmlFor="mv-basis">
         <select id="mv-basis" value={basis} onChange={(e) => onBasis(e.target.value)}>
           <option value={RANKING_BASIS.LEVEL}>
-            {subject === 'gdp_total' ? 'Total GDP level (value)' : 'Per-capita level (value)'}
+            {subject === 'gdp_total' ? 'Total GDP level (value)' : subject === 'gdp_per_capita' ? 'Per-capita level (value)' : 'Level (value)'}
           </option>
           <option value={RANKING_BASIS.GROWTH}>YoY % growth</option>
         </select>

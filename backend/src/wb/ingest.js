@@ -68,6 +68,7 @@ import {
   buildUniverse,
   classifyObservation,
   createUniverseIndex,
+  normalizeIso3,
   OBSERVATION_REJECTIONS,
 } from '../domain/universe.js';
 import {
@@ -199,6 +200,7 @@ export async function fetchIndicatorPayload(
     rowsInvalidYear: 0,
     rowsBlankIso3Skipped: 0,
     rowsAggregateExcluded: 0,
+    rowsAggregateStored: 0,
     rowsUnknownCountry: 0,
   };
 
@@ -217,20 +219,21 @@ export async function fetchIndicatorPayload(
   const yearStats = new Map();
   const statsForYear = (year) => {
     const key = Number.isFinite(year) ? year : null;
-    if (!yearStats.has(key)) {
-      yearStats.set(key, {
-        year: key,
-        rowsReceived: 0,
-        rowsWithValue: 0,
-        rowsWritten: 0,
-        rowsNullSkipped: 0,
-        rowsNonFiniteSkipped: 0,
-        rowsInvalidYear: 0,
-        rowsBlankIso3Skipped: 0,
-        rowsAggregateExcluded: 0,
-        rowsUnknownCountry: 0,
-      });
-    }
+      if (!yearStats.has(key)) {
+        yearStats.set(key, {
+          year: key,
+          rowsReceived: 0,
+          rowsWithValue: 0,
+          rowsWritten: 0,
+          rowsNullSkipped: 0,
+          rowsNonFiniteSkipped: 0,
+          rowsInvalidYear: 0,
+          rowsBlankIso3Skipped: 0,
+          rowsAggregateExcluded: 0,
+          rowsAggregateStored: 0,
+          rowsUnknownCountry: 0,
+        });
+      }
     return yearStats.get(key);
   };
 
@@ -252,6 +255,29 @@ export async function fetchIndicatorPayload(
     );
 
     if (!verdict.eligible) {
+      // Official aggregate observations are STORED (Phase 5), typed by
+      // countries.is_aggregate and never ranked. The AGGREGATE_ENTITY verdict
+      // already guarantees a finite value, a valid year and membership in the
+      // aggregate set (rejection precedence), so the row is staged identically
+      // to a country observation and flows through the same atomic publish.
+      if (verdict.reason === OBSERVATION_REJECTIONS.AGGREGATE_ENTITY) {
+        const aggregateIso3 = normalizeIso3(raw?.countryiso3code);
+        if (aggregateIso3 && aggregateIso3Set?.has(aggregateIso3)) {
+          counters.rowsAggregateStored += 1;
+          perYear.rowsAggregateStored += 1;
+          perYear.rowsWritten += 1;
+          const aggregateLexical = typeof raw?.value === 'string' ? canonicalDecimalString(raw.value) : null;
+          stagedRows.push({
+            metricKey,
+            countryId: aggregateIso3,
+            year,
+            value: rawValue,
+            valueRaw: aggregateLexical ?? String(rawValue),
+            wbLastUpdated: series.lastUpdated,
+          });
+          continue;
+        }
+      }
       const counter = REJECTION_COUNTER[verdict.reason];
       if (counter) {
         counters[counter] += 1;
@@ -429,6 +455,7 @@ export async function refreshData(options = {}) {
     rowsNonFiniteSkipped: 0,
     rowsInvalidYear: 0,
     rowsAggregateExcluded: 0,
+    rowsAggregateStored: 0,
     rowsBlankIso3Skipped: 0,
     rowsUnknownCountry: 0,
     pagesFetched: 0,
@@ -553,6 +580,7 @@ export async function refreshData(options = {}) {
         totals.rowsNonFiniteSkipped += result.rowsNonFiniteSkipped;
         totals.rowsInvalidYear += result.rowsInvalidYear;
         totals.rowsAggregateExcluded += result.rowsAggregateExcluded;
+        totals.rowsAggregateStored += result.rowsAggregateStored ?? 0;
         totals.rowsBlankIso3Skipped += result.rowsBlankIso3Skipped;
         totals.rowsUnknownCountry += result.rowsUnknownCountry;
         totals.pagesFetched += result.pagesFetched;

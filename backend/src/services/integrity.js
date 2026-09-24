@@ -3,7 +3,10 @@
  *
  * Explicit backend checks that fail safely (reported, never silent):
  *   A. impossible null insertion (observations.value is NOT NULL)
- *   B. unexpected aggregate insertion (no observation for is_aggregate = 1)
+ *   B. aggregate typing consistency (stored aggregate observations reference
+ *      aggregate-flagged metadata exactly as the latest successful run's
+ *      universe snapshot recorded it; the ranking universe stays
+ *      eligible-only by query construction, proven by ranking tests)
  *   C. unknown ISO3 insertion (no orphan country_id)
  *   D. duplicate observation (PK uniqueness)
  *   E. invalid year (null or outside the plausible WDI range)
@@ -38,7 +41,11 @@ export function runIntegrityChecks(db) {
   const nullValues = db.prepare('SELECT COUNT(*) AS n FROM observations WHERE value IS NULL').get().n;
   checks.push(result('A.null_value', nullValues === 0, { nullRows: nullValues }));
 
-  // B. No observation may belong to an aggregate entity.
+  // B. Aggregate typing consistency (Phase 5 stores official World Bank
+  // aggregate observations, typed by countries.is_aggregate, never ranked).
+  // Proves current metadata flags match the latest successful run's universe
+  // snapshot: a flipped flag would silently move rows into or out of every
+  // ranking universe. Aggregate/eligible row counts ride along as facts.
   const aggregateRows = db
     .prepare(
       `SELECT COUNT(*) AS n FROM observations o
@@ -46,7 +53,44 @@ export function runIntegrityChecks(db) {
        WHERE c.is_aggregate = 1`,
     )
     .get().n;
-  checks.push(result('B.aggregate_observation', aggregateRows === 0, { aggregateRows }));
+  const latestSnapshotRow = db
+    .prepare("SELECT universe_snapshot FROM fetch_runs WHERE status = 'success' AND universe_snapshot IS NOT NULL ORDER BY id DESC LIMIT 1")
+    .get();
+  let typingMismatches = [];
+  let snapshotComparable = false;
+  if (latestSnapshotRow?.universe_snapshot) {
+    try {
+      const snapshot = JSON.parse(latestSnapshotRow.universe_snapshot);
+      const eligibleIds = new Set(snapshot.eligibleIds ?? []);
+      const aggregateIds = new Set(snapshot.aggregateIds ?? []);
+      if (eligibleIds.size > 0 || aggregateIds.size > 0) {
+        snapshotComparable = true;
+        const flags = db.prepare('SELECT id, is_aggregate FROM countries').all();
+        for (const row of flags) {
+          const inEligible = eligibleIds.has(row.id);
+          const inAggregate = aggregateIds.has(row.id);
+          if (!inEligible && !inAggregate) continue; // newer than the snapshot: nothing to judge
+          const shouldBeAggregate = inAggregate && !inEligible;
+          if ((row.is_aggregate === 1) !== shouldBeAggregate) {
+            typingMismatches.push(row.id);
+          }
+        }
+      }
+    } catch {
+      snapshotComparable = false;
+    }
+  }
+  checks.push(
+    result('B.aggregate_typing', typingMismatches.length === 0, {
+      aggregateRows,
+      mismatches: typingMismatches.slice(0, 20),
+      mismatchCount: typingMismatches.length,
+      snapshotComparable,
+      note: snapshotComparable
+        ? 'current is_aggregate flags vs latest successful run snapshot'
+        : 'no comparable universe snapshot yet; typing unchecked',
+    }),
+  );
 
   // C. No orphan ISO3 (foreign key + ingest filter guarantee this).
   const orphanRows = db

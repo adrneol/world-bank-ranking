@@ -95,12 +95,13 @@ test('A. partial refresh publishes nothing and records a partial run', async () 
   const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-partial' });
 
   // A partial refresh returns (never throws): it is a recorded attempt, and
-  // the attempt status must say so explicitly.
+  // the attempt status must say so explicitly. (Phase 5: twenty production
+  // metrics, so nineteen succeed beside the one failure.)
   assert.equal(summary.status, 'partial');
   const failed = summary.perIndicator.filter((r) => r.error);
   assert.equal(failed.length, 1);
   assert.equal(failed[0].metricKey, 'total_constant');
-  assert.equal(summary.perIndicator.filter((r) => !r.error).length, 7);
+  assert.equal(summary.perIndicator.filter((r) => !r.error).length, 19);
 
   // The published dataset is EXACTLY the old one.
   const after = datasetSnapshot(db);

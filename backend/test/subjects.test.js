@@ -115,20 +115,22 @@ test('terminology: exact economist labels — nominal is current-price, real is 
 
 test('only curated, usable World Bank codes are registered', () => {
   const codes = ALL_METRIC_KEYS.map((key) => METRICS[key].indicatorCode);
-  // Every code is a GDP series from the two curated families.
+  // Every code is a verified WDI series from a curated family (Phase 5: GDP,
+  // prices, trade, capital flows, exchange, external sector, population).
   for (const code of codes) {
-    assert.match(code, /^NY\.GDP\.(PCAP|MKTP)\./);
+    assert.match(code, /^(NY\.GDP\.|FP\.CPI\.|NY\.GDP\.DEFL\.|PA\.NUS\.|NE\.(EXP|IMP)\.|BX\.(KLT|TRF)\.|BN\.CAB\.|FI\.RES\.|SP\.POP\.)/);
   }
   // Series that exist in WDI but are NOT usable here may never be registered:
   // local-currency series are not cross-country comparable, and the growth
   // indicators are percentages that the level/YoY model must not treat as levels.
+  // (Phase-5 note: FP.CPI.TOTL.ZG and FP.CPI.TOTL are registered as the
+  // CPI inflation rate and CPI index with PP/index-point semantics.)
   for (const forbidden of [
     'NY.GDP.MKTP.KN',
     'NY.GDP.MKTP.CN',
     'NY.GDP.MKTP.KD.ZG',
     'NY.GDP.PCAP.KD.ZG',
     'NY.GNP.PCAP.CD',
-    'FP.CPI.TOTL.ZG',
     'NV.IND.TOTL.ZS',
   ]) {
     assert.ok(!codes.includes(forbidden), `${forbidden} must not be registered`);
@@ -137,20 +139,27 @@ test('only curated, usable World Bank codes are registered', () => {
 });
 
 test('subjects partition the registry: every metric belongs to exactly one subject', () => {
-  assert.deepEqual(SUBJECT_KEYS, ['gdp_per_capita', 'gdp_total']);
+  assert.deepEqual(SUBJECT_KEYS, ['gdp_per_capita', 'gdp_total', 'prices', 'trade', 'capital_flows', 'exchange', 'external', 'population']);
   assert.equal(SUBJECTS.gdp_per_capita.label, 'GDP per capita');
   assert.equal(SUBJECTS.gdp_total.label, 'Total GDP');
+  assert.equal(SUBJECTS.prices.label, 'Prices');
+  assert.equal(SUBJECTS.trade.label, 'Trade');
+  assert.equal(SUBJECTS.capital_flows.label, 'Capital flows');
+  assert.equal(SUBJECTS.exchange.label, 'Exchange rates');
+  assert.equal(SUBJECTS.external.label, 'External sector');
+  assert.equal(SUBJECTS.population.label, 'Population');
   assert.deepEqual(metricKeysForSubject('gdp_per_capita'), [...METRIC_KEYS]);
   assert.deepEqual(metricKeysForSubject('gdp_total'), [...TOTAL_GDP_METRIC_KEYS]);
+  assert.deepEqual(metricKeysForSubject('prices'), ['inflation_cpi', 'inflation_cpi_index', 'inflation_deflator']);
 
-  const reachable = [...metricKeysForSubject('gdp_per_capita'), ...metricKeysForSubject('gdp_total')];
+  const reachable = SUBJECT_KEYS.flatMap((subjectKey) => metricKeysForSubject(subjectKey));
   assert.deepEqual([...reachable].sort(), [...ALL_METRIC_KEYS].sort());
   assert.equal(new Set(reachable).size, reachable.length, 'no metric may be in two subjects');
   for (const key of ALL_METRIC_KEYS) {
     assert.equal(subjectOf(key), METRICS[key].subject);
     assert.ok(SUBJECT_KEYS.includes(subjectOf(key)));
   }
-  assert.deepEqual(ALL_METRIC_KEYS, [...METRIC_KEYS, ...TOTAL_GDP_METRIC_KEYS]);
+  assert.deepEqual(ALL_METRIC_KEYS, [...METRIC_KEYS, ...TOTAL_GDP_METRIC_KEYS, 'inflation_cpi', 'inflation_cpi_index', 'inflation_deflator', 'exports_current', 'imports_current', 'fdi_inflows', 'fdi_inflows_pct_gdp', 'fx_official', 'current_account', 'reserves_ex_gold', 'remittances_received', 'population_total']);
   assert.equal(assertRegistryIntegrity(), true);
 });
 
@@ -172,11 +181,12 @@ test('describeSubjects exposes keys, labels and metric keys for the API', () => 
   const subjects = describeSubjects();
   assert.deepEqual(
     subjects.map((s) => s.key),
-    ['gdp_per_capita', 'gdp_total'],
+    ['gdp_per_capita', 'gdp_total', 'prices', 'trade', 'capital_flows', 'exchange', 'external', 'population'],
   );
   assert.deepEqual(subjects[0].metricKeys, [...METRIC_KEYS]);
   assert.deepEqual(subjects[1].metricKeys, [...TOTAL_GDP_METRIC_KEYS]);
   assert.equal(subjects[1].label, 'Total GDP');
+  assert.deepEqual(subjects[2].metricKeys, ['inflation_cpi', 'inflation_cpi_index', 'inflation_deflator']);
 });
 
 test('the new indicator environment variables are documented and optional', () => {
@@ -186,6 +196,18 @@ test('the new indicator environment variables are documented and optional', () =
     'WORLD_BANK_TOTAL_CONSTANT_INDICATOR',
     'WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR',
     'WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR',
+    'WORLD_BANK_INFLATION_CPI_INDICATOR',
+    'WORLD_BANK_INFLATION_CPI_INDEX_INDICATOR',
+    'WORLD_BANK_INFLATION_DEFLATOR_INDICATOR',
+    'WORLD_BANK_FX_OFFICIAL_INDICATOR',
+    'WORLD_BANK_EXPORTS_CURRENT_INDICATOR',
+    'WORLD_BANK_IMPORTS_CURRENT_INDICATOR',
+    'WORLD_BANK_FDI_INFLOWS_INDICATOR',
+    'WORLD_BANK_FDI_INFLOWS_PCT_GDP_INDICATOR',
+    'WORLD_BANK_CURRENT_ACCOUNT_INDICATOR',
+    'WORLD_BANK_RESERVES_EX_GOLD_INDICATOR',
+    'WORLD_BANK_REMITTANCES_RECEIVED_INDICATOR',
+    'WORLD_BANK_POPULATION_TOTAL_INDICATOR',
   ]) {
     assert.ok(envExample.includes(variable), `.env.example must document ${variable}`);
   }

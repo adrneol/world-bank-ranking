@@ -31,6 +31,7 @@ export function formatNumber(value, options = {}) {
  */
 const DISPLAY_SCALES = Object.freeze({
   trillions: Object.freeze({ divisor: 1e12, suffix: ' trillion', decimals: 2 }),
+  billions: Object.freeze({ divisor: 1e9, suffix: ' billion', decimals: 2 }),
 });
 
 /** The display scale declared by a metric, or null when it declares none. */
@@ -47,7 +48,9 @@ export function displayScaleFor(metric) {
  * @param {object} metric entry from config.js METRICS
  */
 export function formatValue(value, metric) {
-  const symbol = metric?.currencySymbol ?? '$';
+  // A null currencySymbol means "no symbol" (rates quoted without one, index
+  // points, headcounts) — never fall back to '$' for a non-USD measure.
+  const symbol = metric?.currencySymbol ?? '';
   const unit = metric?.unitLong ?? metric?.unit ?? null;
   const scale = displayScaleFor(metric);
   const plain = formatNumber(value, { decimals: 0 });

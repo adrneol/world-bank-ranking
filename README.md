@@ -1,12 +1,16 @@
-# World Bank — India GDP Ranking (GDP per Capita + Total GDP)
+# World Bank — India Economic Ranking (GDP, Prices, Trade, Capital Flows, Exchange, External Sector, Population)
 
 A data-verification application that retrieves World Bank World Development
 Indicators (WDI) and independently calculates India's yearly value,
-year-over-year change, rank, and denominator for eight indicators grouped
-into two analysis subjects: GDP per capita (four indicators) and Total GDP
-(four indicators). Both subjects flow through the same generic ranking / YoY
-/ comparison engines; each metric keeps its own independent ranking and
-denominator, and subjects are never mixed in one panel.
+year-over-year change, rank, and denominator for twenty indicators grouped
+into eight analysis subjects: GDP per capita (four indicators), Total GDP
+(four indicators), Prices (three), Trade (two), Capital flows (two), Exchange
+rates (one), External sector (three) and Population (one). Every subject flows
+through the same generic ranking / YoY / comparison engines; each metric keeps
+its own independent ranking and denominator, and subjects are never mixed in
+one panel. Non-GDP families carry explicit semantic metadata (rate vs
+percentage-point change, index points, signed flows, quotation conventions)
+so different economics never inherit GDP mathematics.
 
 > The World Bank provides the underlying observations. Historical country ranks
 > shown by this application are calculated by this application from those
@@ -14,14 +18,20 @@ denominator, and subjects are never mixed in one panel.
 
 ## Overview
 
-For each of eight World Bank indicators (four GDP-per-capita, four Total GDP),
-the application ingests official World Bank observations, filters out
-aggregate entities, ranks every eligible country/economy by raw value, and
+For each of twenty World Bank indicators (four GDP-per-capita, four Total GDP,
+three Prices, two Trade, two Capital flows, one Exchange rate, three External
+sector, one Population), the application ingests official World Bank
+observations — country observations plus officially published World Bank
+aggregate observations, typed by metadata and never mixed — ranks every
+eligible country/economy by raw value, and
 shows exactly where India stands — with the raw numbers, the neighboring
-countries, and the audit trail needed to verify each result. A React frontend
+countries, and the audit trail needed to verify each result. Official
+aggregates never enter country rankings; they are comparable as published
+entities through the generic entity-compare API. A React frontend
 presents the results; an Express API serves backend-calculated numbers;
 SQLite stores the retrieved observations. The frontend's Analysis selector
-(GDP per capita / Total GDP) switches the active subject; the metric key
+switches the active subject (metric/subject lists hydrate from backend
+metadata); the metric key
 (`?metric=…`) remains the single source of truth, so existing per-capita URLs
 keep working unchanged. Stored coverage reaches back to 1960 for non-PPP
 series (1990 for PPP series) and the year selector is always derived from
@@ -30,8 +40,8 @@ selectable after refresh with no code change.
 
 ## Features
 
-- Eight World Bank indicators in two subjects (GDP per capita, Total GDP), each ranked independently
-- India yearly table: value, YoY %, rank and denominator per year and metric
+- Twenty World Bank indicators in eight subjects (GDP per capita, Total GDP, Prices, Trade, Capital flows, Exchange rates, External sector, Population), each ranked independently
+- India yearly table: value, YoY % (only where the metric declares it), rank and denominator per year and metric
 - Year-range filtering and selected-year comparison
 - Level rank verification with configurable neighbor windows
 - Full country ranking with pagination and search by country, ISO3, or exact analytical rank
@@ -57,6 +67,18 @@ selectable after refresh with no code change.
 | Total GDP | Total GDP (real GDP) | `total_constant` | NY.GDP.MKTP.KD | constant 2015 US$ |
 | Total GDP | Total GDP, PPP | `total_ppp_current` | NY.GDP.MKTP.PP.CD | current international $ |
 | Total GDP | Total GDP, PPP | `total_ppp_constant` | NY.GDP.MKTP.PP.KD | constant 2021 international $ |
+| Prices | CPI inflation, annual % | `inflation_cpi` | FP.CPI.TOTL.ZG | annual % |
+| Prices | CPI index, 2010 = 100 | `inflation_cpi_index` | FP.CPI.TOTL | index (2010 = 100) |
+| Prices | GDP-deflator inflation, annual % | `inflation_deflator` | NY.GDP.DEFL.KD.ZG | annual % |
+| Trade | Exports, current US$ | `exports_current` | NE.EXP.GNFS.CD | current US$ |
+| Trade | Imports, current US$ | `imports_current` | NE.IMP.GNFS.CD | current US$ |
+| Capital flows | FDI net inflows, BoP current US$ | `fdi_inflows` | BX.KLT.DINV.CD.WD | current US$ |
+| Capital flows | FDI net inflows, % of GDP | `fdi_inflows_pct_gdp` | BX.KLT.DINV.WD.GD.ZS | % of GDP |
+| Exchange rates | Official exchange rate, LCU per US$ | `fx_official` | PA.NUS.FCRF | LCU per US$ |
+| External sector | Current account balance, BoP current US$ | `current_account` | BN.CAB.XOKA.CD | current US$ |
+| External sector | Total reserves minus gold, current US$ | `reserves_ex_gold` | FI.RES.XGLD.CD | current US$ |
+| External sector | Personal remittances received, current US$ | `remittances_received` | BX.TRF.PWKR.CD.DT | current US$ |
+| Population | Population, total | `population_total` | SP.POP.TOTL | people |
 
 The constant-price series come directly from the corresponding World Bank
 indicators. They are not derived from current-price data, price indices, or
@@ -294,13 +316,19 @@ this project has none to configure.
 
 ## Testing
 
-- Backend: `npm test` in `backend/` — 230 tests covering configuration,
-  subject/metric registry, country universe, ranking, ties, denominators, YoY,
+- Backend: `npm test` in `backend/` — 324 tests covering configuration,
+  subject/metric registry (twenty metrics, semantic metadata, lifecycle),
+  country universe, ranking, ties, denominators, YoY,
   YoY ranking, pagination, search (text and exact-rank), World Bank client
   behavior (retries, pagination completeness, error envelopes), ingestion
-  (both subjects, historical ranges), refresh locking, cache TTL, coverage
+  (all subjects, aggregate storage, historical ranges), refresh locking, cache TTL, coverage
   cases, services, per-capita regression, Total GDP math parity and API,
-  historical year handling, and HTTP endpoints. All 230 pass.
+  generic transformations (percent/pp/index-point/CAGR/group/cross-rate),
+  entity/group comparison (capability matrix, observed vs like-for-like,
+  provenance), new-indicator promotion and analytics,
+  historical year handling, and HTTP endpoints. All pass except one
+  environment-dependent refresh-auth test that expects an open endpoint while
+  the local `.env` configures `REFRESH_ADMIN_TOKEN` (pre-existing, unrelated).
 - Frontend: `npm run lint` and `npm run build` in `frontend/` — both pass.
   Integration is verified against the running backend (all views, filters,
   pagination, search, verification, refresh) with headless-browser checks.

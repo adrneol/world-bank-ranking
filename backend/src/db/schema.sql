@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   rows_retrieved          INTEGER DEFAULT 0, -- observation rows RECEIVED from the API
   rows_upserted           INTEGER DEFAULT 0, -- observation rows written
   rows_null_skipped       INTEGER DEFAULT 0, -- null observations skipped
-  rows_aggregate_excluded INTEGER DEFAULT 0, -- aggregate entities excluded
+  rows_aggregate_excluded INTEGER DEFAULT 0, -- aggregate rows rejected (legacy; aggregates with a usable ISO3 are now STORED, see below)
+  rows_aggregate_stored   INTEGER DEFAULT 0, -- official aggregate observations stored (typed by countries.is_aggregate; never ranked)
   rows_blank_iso3_skipped INTEGER DEFAULT 0, -- blank ISO3 rows excluded
   rows_unknown_country    INTEGER DEFAULT 0, -- ISO3 not present in metadata
   -- Added by the counter-separation fix: every meaning keeps its own column.
@@ -125,6 +126,9 @@ CREATE INDEX IF NOT EXISTS idx_fetch_runs_started ON fetch_runs (started_at DESC
 -- FACTS only. A single per-run total cannot show which years lost rows to the
 -- universe rule, so the ingest records the split per year and per metric here.
 -- Rows are only ever written for a run that actually fetched that year.
+-- Phase 5 stores official aggregate observations (typed by
+-- countries.is_aggregate, never ranked); rows_aggregate_stored records them
+-- per year so aggregate availability stays auditable.
 CREATE TABLE IF NOT EXISTS ingest_year_stats (
   fetch_run_id            INTEGER NOT NULL,
   metric_key              TEXT    NOT NULL,
@@ -138,6 +142,7 @@ CREATE TABLE IF NOT EXISTS ingest_year_stats (
   rows_invalid_year       INTEGER NOT NULL DEFAULT 0,
   rows_blank_iso3_skipped INTEGER NOT NULL DEFAULT 0,
   rows_aggregate_excluded INTEGER NOT NULL DEFAULT 0,
+  rows_aggregate_stored   INTEGER NOT NULL DEFAULT 0,
   rows_unknown_country    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (fetch_run_id, metric_key, year),
   FOREIGN KEY (fetch_run_id) REFERENCES fetch_runs (id) ON DELETE CASCADE

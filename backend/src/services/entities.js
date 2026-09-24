@@ -67,6 +67,8 @@ export const COMPARE_OPERATIONS = Object.freeze([
   'level',
   'absolute_change',
   'percent_change',
+  'pp_change',
+  'index_point_change',
   'cagr',
   'cross_rate',
 ]);
@@ -292,9 +294,13 @@ function checkPointOperation(metric, operation) {
         ? TRANSFORMS.ABSOLUTE_CHANGE
         : operation === 'percent_change'
           ? TRANSFORMS.PERCENT_CHANGE
-          : operation === 'cagr'
-            ? TRANSFORMS.CAGR
-            : null;
+          : operation === 'pp_change'
+            ? TRANSFORMS.PERCENTAGE_POINT_CHANGE
+            : operation === 'index_point_change'
+              ? TRANSFORMS.INDEX_POINT_CHANGE
+              : operation === 'cagr'
+                ? TRANSFORMS.CAGR
+                : null;
   if (wanted === null && operation !== 'level') {
     return { allowed: false, reason: ENTITY_ERROR_CODES.INVALID_OPERATION };
   }

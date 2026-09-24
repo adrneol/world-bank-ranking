@@ -61,7 +61,7 @@ export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_cap
         <div className="table-scroll" role="region" aria-label={`${displayName} yearly data table`} tabIndex={0}>
           <table className="table table-yearly">
             <caption className="sr-only">
-              {displayName} {subjectLabel(subject)} by year for all four World Bank indicators
+              {displayName} {subjectLabel(subject)} by year for all {keys.length} World Bank indicators
             </caption>
             <thead>
               <tr>

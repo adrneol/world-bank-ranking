@@ -43,8 +43,8 @@ test('refreshData ingests metadata plus EVERY configured indicator (both subject
   assert.ok(summary.rowsUpserted > 0, 'observations written');
   // The refresh is registry-wide: exactly the configured metrics, no more, no
   // fewer. The GDP-per-capita default set stays four, so no per-capita view
-  // silently expands to eight metrics.
-  assert.equal(ALL_METRIC_KEYS.length, 8, 'four GDP-per-capita + four Total GDP metrics');
+  // silently expands. (Phase 5: twenty production metrics across eight subjects.)
+  assert.equal(ALL_METRIC_KEYS.length, 20, 'eight GDP + twelve Phase-5 metrics');
   assert.equal(METRIC_KEYS.length, 4, 'the GDP-per-capita default set stays four');
   assert.deepEqual(
     summary.perIndicator.map((entry) => entry.metricKey).sort(),
@@ -62,11 +62,18 @@ test('refreshData ingests metadata plus EVERY configured indicator (both subject
   assert.ok(india, 'India 2025 nominal observation stored');
   assert.equal(typeof india.value, 'number');
 
-  // Aggregates must never reach the observations table.
+  // Official aggregate observations are stored (typed by metadata) but must
+  // never enter the eligible ranking universe.
   const aggregates = repository.listAggregateCountries(db);
   assert.ok(aggregates.length > 0);
   const aggregateIds = new Set(aggregates.map((row) => row.id));
   assert.equal(rows.some((row) => aggregateIds.has(row.iso3)), false);
+  const aggregateStored = db.prepare(
+    `SELECT COUNT(*) AS n FROM observations o
+     JOIN countries c ON c.id = o.country_id
+     WHERE c.is_aggregate = 1`,
+  ).get().n;
+  assert.ok(aggregateStored > 0, 'official aggregate observations are stored with entity typing');
 
   // Total GDP travels through the SAME pipeline: the live-verified IND 2025
   // value must be stored verbatim (raw precision preserved).

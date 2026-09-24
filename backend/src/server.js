@@ -726,6 +726,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       definedCount: defined.length,
       production,
       defined,
+      subjects: describeSubjects(),
       methodology: methodologyBlock(),
     });
   }));

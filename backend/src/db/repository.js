@@ -476,14 +476,24 @@ export function countObservations(db, indicatorId = null) {
     .get(indicatorId).n;
 }
 
-/** Available year range for the whole database or one indicator. */
+/** Available year range for the whole database or one indicator (eligible observations only). */
 export function getYearRange(db, indicatorId = null) {
   const row =
     indicatorId === null
-      ? db.prepare('SELECT MIN(year) AS minYear, MAX(year) AS maxYear FROM observations').get()
+      ? db
+          .prepare(
+            `SELECT MIN(o.year) AS minYear, MAX(o.year) AS maxYear
+             FROM observations o
+             JOIN countries c ON c.id = o.country_id
+             WHERE c.is_aggregate = 0`,
+          )
+          .get()
       : db
           .prepare(
-            'SELECT MIN(year) AS minYear, MAX(year) AS maxYear FROM observations WHERE indicator_id = ?',
+            `SELECT MIN(o.year) AS minYear, MAX(o.year) AS maxYear
+             FROM observations o
+             JOIN countries c ON c.id = o.country_id
+             WHERE o.indicator_id = ? AND c.is_aggregate = 0`,
           )
           .get(indicatorId);
   return { minYear: row?.minYear ?? null, maxYear: row?.maxYear ?? null };
@@ -584,6 +594,7 @@ export function finishFetchRun(db, id, patch) {
       rows_upserted           = ?,
       rows_null_skipped       = ?,
       rows_aggregate_excluded = ?,
+      rows_aggregate_stored   = ?,
       rows_blank_iso3_skipped = ?,
       rows_unknown_country    = ?,
       rows_with_value         = ?,
@@ -603,6 +614,7 @@ export function finishFetchRun(db, id, patch) {
     patch.rowsUpserted ?? 0,
     patch.rowsNullSkipped ?? 0,
     patch.rowsAggregateExcluded ?? 0,
+    patch.rowsAggregateStored ?? 0,
     patch.rowsBlankIso3Skipped ?? 0,
     patch.rowsUnknownCountry ?? 0,
     patch.rowsWithValue ?? 0,
@@ -632,8 +644,8 @@ export function upsertIngestYearStatsInner(db, runId, rows) {
       fetch_run_id, metric_key, indicator_code, year,
       rows_received, rows_with_value, rows_written, rows_null_skipped,
       rows_non_finite_skipped, rows_invalid_year, rows_blank_iso3_skipped,
-      rows_aggregate_excluded, rows_unknown_country
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      rows_aggregate_excluded, rows_aggregate_stored, rows_unknown_country
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fetch_run_id, metric_key, year) DO UPDATE SET
       indicator_code          = excluded.indicator_code,
       rows_received           = excluded.rows_received,
@@ -644,6 +656,7 @@ export function upsertIngestYearStatsInner(db, runId, rows) {
       rows_invalid_year       = excluded.rows_invalid_year,
       rows_blank_iso3_skipped = excluded.rows_blank_iso3_skipped,
       rows_aggregate_excluded = excluded.rows_aggregate_excluded,
+      rows_aggregate_stored   = excluded.rows_aggregate_stored,
       rows_unknown_country    = excluded.rows_unknown_country
   `);
   let n = 0;
@@ -662,6 +675,7 @@ export function upsertIngestYearStatsInner(db, runId, rows) {
       row.rowsInvalidYear ?? 0,
       row.rowsBlankIso3Skipped ?? 0,
       row.rowsAggregateExcluded ?? 0,
+      row.rowsAggregateStored ?? 0,
       row.rowsUnknownCountry ?? 0,
     );
     n += 1;

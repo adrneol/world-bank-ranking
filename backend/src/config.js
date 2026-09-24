@@ -81,6 +81,19 @@ export const CANONICAL_INDICATOR_CODES = Object.freeze({
   total_constant: 'NY.GDP.MKTP.KD',
   total_ppp_current: 'NY.GDP.MKTP.PP.CD',
   total_ppp_constant: 'NY.GDP.MKTP.PP.KD',
+  // Phase-5 promotions (each live-verified; see verified evidence on entries).
+  inflation_cpi: 'FP.CPI.TOTL.ZG',
+  inflation_cpi_index: 'FP.CPI.TOTL',
+  inflation_deflator: 'NY.GDP.DEFL.KD.ZG',
+  fx_official: 'PA.NUS.FCRF',
+  exports_current: 'NE.EXP.GNFS.CD',
+  imports_current: 'NE.IMP.GNFS.CD',
+  fdi_inflows: 'BX.KLT.DINV.CD.WD',
+  fdi_inflows_pct_gdp: 'BX.KLT.DINV.WD.GD.ZS',
+  current_account: 'BN.CAB.XOKA.CD',
+  reserves_ex_gold: 'FI.RES.XGLD.CD',
+  remittances_received: 'BX.TRF.PWKR.CD.DT',
+  population_total: 'SP.POP.TOTL',
 });
 
 /** Historical environment variable name per metric (test-override channel only). */
@@ -93,6 +106,18 @@ const INDICATOR_ENV_VARS = Object.freeze({
   total_constant: 'WORLD_BANK_TOTAL_CONSTANT_INDICATOR',
   total_ppp_current: 'WORLD_BANK_TOTAL_PPP_CURRENT_INDICATOR',
   total_ppp_constant: 'WORLD_BANK_TOTAL_PPP_CONSTANT_INDICATOR',
+  inflation_cpi: 'WORLD_BANK_INFLATION_CPI_INDICATOR',
+  inflation_cpi_index: 'WORLD_BANK_INFLATION_CPI_INDEX_INDICATOR',
+  inflation_deflator: 'WORLD_BANK_INFLATION_DEFLATOR_INDICATOR',
+  fx_official: 'WORLD_BANK_FX_OFFICIAL_INDICATOR',
+  exports_current: 'WORLD_BANK_EXPORTS_CURRENT_INDICATOR',
+  imports_current: 'WORLD_BANK_IMPORTS_CURRENT_INDICATOR',
+  fdi_inflows: 'WORLD_BANK_FDI_INFLOWS_INDICATOR',
+  fdi_inflows_pct_gdp: 'WORLD_BANK_FDI_INFLOWS_PCT_GDP_INDICATOR',
+  current_account: 'WORLD_BANK_CURRENT_ACCOUNT_INDICATOR',
+  reserves_ex_gold: 'WORLD_BANK_RESERVES_EX_GOLD_INDICATOR',
+  remittances_received: 'WORLD_BANK_REMITTANCES_RECEIVED_INDICATOR',
+  population_total: 'WORLD_BANK_POPULATION_TOTAL_INDICATOR',
 });
 
 /**
@@ -461,10 +486,495 @@ const TOTAL_GDP_METRICS = Object.freeze({
   }),
 });
 
-/** The complete registry: four GDP-per-capita metrics + four Total GDP metrics. */
+/**
+ * Subject: PRICES — CPI inflation (rate), CPI index and GDP-deflator inflation.
+ *
+ * All three verified live 2026-09-24 and re-verified unchanged at Phase-5
+ * promotion. Annual rate vs cumulative index vs whole-economy deflator are
+ * different concepts sharing a subject grouping only: no cross-metric math.
+ * Rate changes are percentage-point changes (PERCENT deliberately undeclared);
+ * index movement is index points, never percentage points.
+ */
+const PRICES_METRICS = Object.freeze({
+  inflation_cpi: Object.freeze({
+    key: 'inflation_cpi',
+    subject: 'prices',
+    indicatorCode: indicatorCodeFor('inflation_cpi'),
+    label: 'CPI inflation — annual %',
+    shortLabel: 'CPI inflation',
+    unit: 'annual %',
+    unitLong: 'annual %',
+    currencySymbol: null,
+    group: 'prices',
+    priceBasis: NOT_APPLICABLE,
+    domain: 'PRICES',
+    family: 'INFLATION_CPI',
+    observationType: 'RATE',
+    currencyBasis: NOT_APPLICABLE,
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PP']),
+    aggregation: 'OFFICIAL_ONLY',
+    rankingDirection: 'ASC',
+    interpretation: 'LOWER_PREFERRED_IN_STABILITY',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'SIGNED',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/FP.CPI.TOTL.ZG?format=json (re-verified unchanged at promotion)',
+      name: 'Inflation, consumer prices (annual %)',
+    }),
+  }),
+  inflation_cpi_index: Object.freeze({
+    key: 'inflation_cpi_index',
+    subject: 'prices',
+    indicatorCode: indicatorCodeFor('inflation_cpi_index'),
+    label: 'CPI index — 2010 = 100',
+    shortLabel: 'CPI index',
+    unit: 'index (2010 = 100)',
+    unitLong: 'index points (2010 = 100)',
+    currencySymbol: null,
+    group: 'prices',
+    priceBasis: NOT_APPLICABLE,
+    domain: 'PRICES',
+    family: 'INFLATION_CPI',
+    observationType: 'INDEX',
+    currencyBasis: NOT_APPLICABLE,
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'INDEX_POINT']),
+    aggregation: 'OFFICIAL_ONLY',
+    rankingDirection: 'NEUTRAL',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: 2010,
+    worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/FP.CPI.TOTL?format=json (re-verified unchanged at promotion)',
+      name: 'Consumer price index (2010 = 100)',
+    }),
+  }),
+  inflation_deflator: Object.freeze({
+    key: 'inflation_deflator',
+    subject: 'prices',
+    indicatorCode: indicatorCodeFor('inflation_deflator'),
+    label: 'GDP-deflator inflation — annual %',
+    shortLabel: 'GDP-deflator inflation',
+    unit: 'annual %',
+    unitLong: 'annual %',
+    currencySymbol: null,
+    group: 'prices',
+    priceBasis: NOT_APPLICABLE,
+    domain: 'PRICES',
+    family: 'INFLATION_DEFLATOR',
+    observationType: 'RATE',
+    currencyBasis: NOT_APPLICABLE,
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PP']),
+    aggregation: 'OFFICIAL_ONLY',
+    rankingDirection: 'ASC',
+    interpretation: 'LOWER_PREFERRED_IN_STABILITY',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'SIGNED',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.DEFL.KD.ZG',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/NY.GDP.DEFL.KD.ZG?format=json (re-verified unchanged at promotion)',
+      name: 'Inflation, GDP deflator (annual %)',
+    }),
+  }),
+});
+
+/**
+ * Subject: TRADE — current-US$ goods-and-services flows.
+ * Additive flows: group SUM valid; never mixed across price bases.
+ */
+const TRADE_METRICS = Object.freeze({
+  exports_current: Object.freeze({
+    key: 'exports_current',
+    subject: 'trade',
+    indicatorCode: indicatorCodeFor('exports_current'),
+    label: 'Exports — current US$',
+    shortLabel: 'Exports, current US$',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'trade',
+    priceBasis: 'current',
+    domain: 'TRADE',
+    family: 'EXPORTS',
+    observationType: 'FLOW',
+    currencyBasis: 'USD',
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'trillions',
+    worldBankPage: 'https://data.worldbank.org/indicator/NE.EXP.GNFS.CD',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/NE.EXP.GNFS.CD?format=json (re-verified unchanged at promotion)',
+      name: 'Exports of goods and services (current US$)',
+    }),
+  }),
+  imports_current: Object.freeze({
+    key: 'imports_current',
+    subject: 'trade',
+    indicatorCode: indicatorCodeFor('imports_current'),
+    label: 'Imports — current US$',
+    shortLabel: 'Imports, current US$',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'trade',
+    priceBasis: 'current',
+    domain: 'TRADE',
+    family: 'IMPORTS',
+    observationType: 'FLOW',
+    currencyBasis: 'USD',
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'trillions',
+    worldBankPage: 'https://data.worldbank.org/indicator/NE.IMP.GNFS.CD',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/NE.IMP.GNFS.CD?format=json (re-verified unchanged at promotion)',
+      name: 'Imports of goods and services (current US$)',
+    }),
+  }),
+});
+
+/**
+ * Subject: CAPITAL FLOWS — signed FDI level plus the official FDI/GDP ratio.
+ * Net flows may be zero/negative: PERCENT is undeclared for the level (Phase-3
+ * validity), and the ratio changes in percentage points via the World Bank
+ * ratio directly (never reconstructed, never summed).
+ */
+const CAPITAL_FLOWS_METRICS = Object.freeze({
+  fdi_inflows: Object.freeze({
+    key: 'fdi_inflows',
+    subject: 'capital_flows',
+    indicatorCode: indicatorCodeFor('fdi_inflows'),
+    label: 'FDI net inflows — current US$',
+    shortLabel: 'FDI net inflows',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'flows',
+    priceBasis: 'current',
+    domain: 'EXTERNAL',
+    family: 'FDI',
+    observationType: 'FLOW',
+    currencyBasis: 'USD',
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'YOY']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'SIGNED',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'billions',
+    worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.CD.WD',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/BX.KLT.DINV.CD.WD?format=json (re-verified unchanged at promotion)',
+      name: 'Foreign direct investment, net inflows (BoP, current US$)',
+    }),
+  }),
+  fdi_inflows_pct_gdp: Object.freeze({
+    key: 'fdi_inflows_pct_gdp',
+    subject: 'capital_flows',
+    indicatorCode: indicatorCodeFor('fdi_inflows_pct_gdp'),
+    label: 'FDI net inflows — % of GDP',
+    shortLabel: 'FDI net inflows, % of GDP',
+    unit: '% of GDP',
+    unitLong: '% of GDP',
+    currencySymbol: null,
+    group: 'flows',
+    priceBasis: NOT_APPLICABLE,
+    domain: 'EXTERNAL',
+    family: 'FDI',
+    observationType: 'RATIO',
+    currencyBasis: NOT_APPLICABLE,
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PP']),
+    aggregation: 'WEIGHTED_RATIO',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'SIGNED',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.WD.GD.ZS',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/BX.KLT.DINV.WD.GD.ZS?format=json (re-verified unchanged at promotion)',
+      name: 'Foreign direct investment, net inflows (% of GDP)',
+    }),
+  }),
+});
+
+/**
+ * Subject: EXCHANGE RATES — official LCU-per-USD rate.
+ * Increase = local depreciation, decrease = appreciation (quotation stored
+ * once). No official world aggregate exists (WLD is null): MEMBER_ONLY.
+ * YOY here means annual movement (percent), the valid FX change semantic.
+ */
+const EXCHANGE_METRICS = Object.freeze({
+  fx_official: Object.freeze({
+    key: 'fx_official',
+    subject: 'exchange',
+    indicatorCode: indicatorCodeFor('fx_official'),
+    label: 'Official exchange rate — LCU per US$',
+    shortLabel: 'Official FX vs USD',
+    unit: 'LCU per US$',
+    unitLong: 'local currency units per US$ (period average)',
+    currencySymbol: null,
+    group: 'fx',
+    priceBasis: NOT_APPLICABLE,
+    domain: 'FINANCIAL',
+    family: 'EXCHANGE_RATE',
+    observationType: 'QUOTED_RATE',
+    currencyBasis: NOT_APPLICABLE,
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY']),
+    aggregation: 'MEMBER_ONLY',
+    rankingDirection: 'NEUTRAL',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: Object.freeze({ convention: 'LCU_PER_USD', base: 'USD' }),
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    worldBankPage: 'https://data.worldbank.org/indicator/PA.NUS.FCRF',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/PA.NUS.FCRF?format=json (re-verified unchanged at promotion)',
+      name: 'Official exchange rate (LCU per US$, period average)',
+    }),
+  }),
+});
+
+/**
+ * Subject: EXTERNAL SECTOR — signed current-account flow, reserve stock and
+ * remittance flow. Current account is signed (live-verified negative for
+ * India); reserves are a stock level, not a flow.
+ */
+const EXTERNAL_METRICS = Object.freeze({
+  current_account: Object.freeze({
+    key: 'current_account',
+    subject: 'external',
+    indicatorCode: indicatorCodeFor('current_account'),
+    label: 'Current account balance — current US$',
+    shortLabel: 'Current account',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'external',
+    priceBasis: 'current',
+    domain: 'EXTERNAL',
+    family: 'CURRENT_ACCOUNT',
+    observationType: 'FLOW',
+    currencyBasis: 'USD',
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'YOY']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'SIGNED',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'billions',
+    worldBankPage: 'https://data.worldbank.org/indicator/BN.CAB.XOKA.CD',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/BN.CAB.XOKA.CD?format=json (live-verified at promotion; signed flow)',
+      name: 'Current account balance (BoP, current US$)',
+    }),
+  }),
+  reserves_ex_gold: Object.freeze({
+    key: 'reserves_ex_gold',
+    subject: 'external',
+    indicatorCode: indicatorCodeFor('reserves_ex_gold'),
+    label: 'Reserves minus gold — current US$',
+    shortLabel: 'Reserves ex-gold',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'external',
+    priceBasis: 'current',
+    domain: 'EXTERNAL',
+    family: 'RESERVES',
+    observationType: 'LEVEL',
+    currencyBasis: 'USD',
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'billions',
+    worldBankPage: 'https://data.worldbank.org/indicator/FI.RES.XGLD.CD',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/FI.RES.XGLD.CD?format=json (live-verified at promotion)',
+      name: 'Total reserves minus gold (current US$)',
+    }),
+  }),
+  remittances_received: Object.freeze({
+    key: 'remittances_received',
+    subject: 'external',
+    indicatorCode: indicatorCodeFor('remittances_received'),
+    label: 'Remittances received — current US$',
+    shortLabel: 'Remittances received',
+    unit: 'current US$',
+    unitLong: 'current US$',
+    currencySymbol: '$',
+    group: 'external',
+    priceBasis: 'current',
+    domain: 'EXTERNAL',
+    family: 'REMITTANCES',
+    observationType: 'FLOW',
+    currencyBasis: 'USD',
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'billions',
+    worldBankPage: 'https://data.worldbank.org/indicator/BX.TRF.PWKR.CD.DT',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/BX.TRF.PWKR.CD.DT?format=json (live-verified at promotion)',
+      name: 'Personal remittances, received (current US$)',
+    }),
+  }),
+});
+
+/**
+ * Subject: POPULATION — midyear de-facto count level. Denominator
+ * infrastructure for future per-capita derivation (no derivation in Phase 5).
+ */
+const POPULATION_METRICS = Object.freeze({
+  population_total: Object.freeze({
+    key: 'population_total',
+    subject: 'population',
+    indicatorCode: indicatorCodeFor('population_total'),
+    label: 'Population — total',
+    shortLabel: 'Population',
+    unit: 'people',
+    unitLong: 'people',
+    currencySymbol: null,
+    group: 'population',
+    priceBasis: NOT_APPLICABLE,
+    domain: 'DEMOGRAPHICS',
+    family: 'POPULATION',
+    observationType: 'LEVEL',
+    currencyBasis: NOT_APPLICABLE,
+    frequency: 'ANNUAL',
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
+    aggregation: 'SUM',
+    rankingDirection: 'DESC',
+    interpretation: 'NEUTRAL',
+    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
+    signDomain: 'POSITIVE_ONLY',
+    requiredDenominator: null,
+    quotation: null,
+    derivation: Object.freeze({ kind: 'RAW' }),
+    lifecycle: 'PRODUCTION',
+    ppp: false,
+    baseYear: null,
+    displayScaleHint: 'billions',
+    worldBankPage: 'https://data.worldbank.org/indicator/SP.POP.TOTL',
+    verified: Object.freeze({
+      date: '2026-09-24',
+      method: 'GET /v2/indicator/SP.POP.TOTL?format=json (live-verified at promotion)',
+      name: 'Population, total',
+    }),
+  }),
+});
+
+/** The complete production registry: GDP subjects plus Phase-5 families. */
 export const METRICS = Object.freeze({
   ...GDP_PER_CAPITA_METRICS,
   ...TOTAL_GDP_METRICS,
+  ...PRICES_METRICS,
+  ...TRADE_METRICS,
+  ...CAPITAL_FLOWS_METRICS,
+  ...EXCHANGE_METRICS,
+  ...EXTERNAL_METRICS,
+  ...POPULATION_METRICS,
 });
 
 /**
@@ -477,6 +987,14 @@ export const METRIC_KEYS = Object.freeze(Object.keys(GDP_PER_CAPITA_METRICS));
 
 /** Ordered list of the Total GDP subject's metric keys. */
 export const TOTAL_GDP_METRIC_KEYS = Object.freeze(Object.keys(TOTAL_GDP_METRICS));
+
+/** Ordered metric keys per Phase-5 subject, in canonical display order. */
+export const PRICES_METRIC_KEYS = Object.freeze(Object.keys(PRICES_METRICS));
+export const TRADE_METRIC_KEYS = Object.freeze(Object.keys(TRADE_METRICS));
+export const CAPITAL_FLOWS_METRIC_KEYS = Object.freeze(Object.keys(CAPITAL_FLOWS_METRICS));
+export const EXCHANGE_METRIC_KEYS = Object.freeze(Object.keys(EXCHANGE_METRICS));
+export const EXTERNAL_METRIC_KEYS = Object.freeze(Object.keys(EXTERNAL_METRICS));
+export const POPULATION_METRIC_KEYS = Object.freeze(Object.keys(POPULATION_METRICS));
 
 /** Every configured metric, in registry order (registry-wide operations only). */
 export const ALL_METRIC_KEYS = Object.freeze(Object.keys(METRICS));
@@ -518,331 +1036,51 @@ export const SUBJECTS = Object.freeze({
     label: 'Total GDP',
     metricKeys: TOTAL_GDP_METRIC_KEYS,
   }),
+  prices: Object.freeze({
+    key: 'prices',
+    label: 'Prices',
+    metricKeys: PRICES_METRIC_KEYS,
+  }),
+  trade: Object.freeze({
+    key: 'trade',
+    label: 'Trade',
+    metricKeys: TRADE_METRIC_KEYS,
+  }),
+  capital_flows: Object.freeze({
+    key: 'capital_flows',
+    label: 'Capital flows',
+    metricKeys: CAPITAL_FLOWS_METRIC_KEYS,
+  }),
+  exchange: Object.freeze({
+    key: 'exchange',
+    label: 'Exchange rates',
+    metricKeys: EXCHANGE_METRIC_KEYS,
+  }),
+  external: Object.freeze({
+    key: 'external',
+    label: 'External sector',
+    metricKeys: EXTERNAL_METRIC_KEYS,
+  }),
+  population: Object.freeze({
+    key: 'population',
+    label: 'Population',
+    metricKeys: POPULATION_METRIC_KEYS,
+  }),
 });
 
 /** Ordered list of subject keys, in canonical display order. */
 export const SUBJECT_KEYS = Object.freeze(Object.keys(SUBJECTS));
 
 /**
- * DEFINED-BUT-DISABLED FUTURE MEASURE DEFINITIONS (Phase 2).
+ * DEFINED-BUT-DISABLED FUTURE MEASURE DEFINITIONS.
  *
- * Every entry below was verified live via GET /v2/indicator/{code}?format=json
- * on 2026-09-24 (WDI source id 2); the official name recorded in `verified`
- * matches the live payload verbatim. They are SUPPORTED (code + semantics
- * known) but NOT production-enabled: they resolve through getDefinedMetric()
- * for metadata display only, never through getMetric(), never in SUBJECTS,
- * never in ingestion, never in integrity. Promotion to production (Phase 5)
- * means moving the entry into METRICS with subject wiring — an explicit,
- * reviewed step, never an automatic one.
- *
- * No new observations are ingested for these keys in Phase 2. No database
- * indicator rows may exist for them in production.
+ * Phase 5 promoted every verified Phase-2 definition into METRICS, so this
+ * map is intentionally empty. The mechanism is retained: a future measure
+ * is SUPPORTED here (verified code + declared semantics, validated by
+ * assertFutureDefinitions) while staying out of getMetric(), SUBJECTS,
+ * ingestion and integrity until an explicit promotion moves it into METRICS.
  */
-export const FUTURE_METRIC_DEFINITIONS = Object.freeze({
-  inflation_cpi: Object.freeze({
-    key: 'inflation_cpi',
-    indicatorCode: 'FP.CPI.TOTL.ZG',
-    label: 'Inflation, consumer prices (annual %)',
-    shortLabel: 'CPI inflation',
-    unit: 'annual %',
-    unitLong: 'annual %',
-    currencySymbol: '%',
-    group: 'prices',
-    priceBasis: NOT_APPLICABLE,
-    // Prospective subject: not in SUBJECTS until promotion. The validator
-    // requires future subjects to stay prospective so the subject partition
-    // invariant (every METRICS entry in exactly one subject) cannot drift.
-    subject: 'prices',
-    domain: 'PRICES',
-    family: 'INFLATION_CPI',
-    observationType: 'RATE',
-    currencyBasis: NOT_APPLICABLE,
-    frequency: 'ANNUAL',
-    // PP (B-A) is the default change for a rate. PERCENT (relative change of
-    // a percentage) is deliberately NOT declared: 6% -> 3% is -3 pp, not -50%.
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'PP']),
-    // Group inflation is never computed from members; only the World Bank's
-    // own published aggregates may serve as a regional value (Phase 4).
-    aggregation: 'OFFICIAL_ONLY',
-    // ASC declares the available descriptive "lower-first" ordering. It
-    // enables nothing until Phase 3/4 implement directional ranking; GDP
-    // behaviour (DESC) is untouched.
-    rankingDirection: 'ASC',
-    interpretation: 'LOWER_PREFERRED_IN_STABILITY',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'SIGNED',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/FP.CPI.TOTL.ZG?format=json',
-      name: 'Inflation, consumer prices (annual %)',
-    }),
-  }),
-  inflation_cpi_index: Object.freeze({
-    key: 'inflation_cpi_index',
-    indicatorCode: 'FP.CPI.TOTL',
-    label: 'Consumer price index (2010 = 100)',
-    shortLabel: 'CPI index',
-    unit: 'index (2010 = 100)',
-    unitLong: 'index points (2010 = 100)',
-    currencySymbol: null,
-    group: 'prices',
-    priceBasis: NOT_APPLICABLE,
-    subject: 'prices',
-    domain: 'PRICES',
-    family: 'INFLATION_CPI',
-    observationType: 'INDEX',
-    currencyBasis: NOT_APPLICABLE,
-    frequency: 'ANNUAL',
-    // Index movement is INDEX_POINT change, never "percentage points".
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'INDEX_POINT']),
-    aggregation: 'OFFICIAL_ONLY',
-    // NEUTRAL: raw CPI index levels must never be cross-country ranked as a
-    // "cost of living" metric (within-country construct; guardrails §14).
-    rankingDirection: 'NEUTRAL',
-    interpretation: 'NEUTRAL',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'POSITIVE_ONLY',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: 2010,
-    worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/FP.CPI.TOTL?format=json',
-      name: 'Consumer price index (2010 = 100)',
-    }),
-  }),
-  inflation_deflator: Object.freeze({
-    key: 'inflation_deflator',
-    indicatorCode: 'NY.GDP.DEFL.KD.ZG',
-    label: 'Inflation, GDP deflator (annual %)',
-    shortLabel: 'GDP-deflator inflation',
-    unit: 'annual %',
-    unitLong: 'annual %',
-    currencySymbol: '%',
-    group: 'prices',
-    priceBasis: NOT_APPLICABLE,
-    subject: 'prices',
-    domain: 'PRICES',
-    family: 'INFLATION_DEFLATOR',
-    observationType: 'RATE',
-    currencyBasis: NOT_APPLICABLE,
-    frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'PP']),
-    aggregation: 'OFFICIAL_ONLY',
-    rankingDirection: 'ASC',
-    interpretation: 'LOWER_PREFERRED_IN_STABILITY',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'SIGNED',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.DEFL.KD.ZG',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/NY.GDP.DEFL.KD.ZG?format=json',
-      name: 'Inflation, GDP deflator (annual %)',
-    }),
-  }),
-  fx_official: Object.freeze({
-    key: 'fx_official',
-    indicatorCode: 'PA.NUS.FCRF',
-    label: 'Official exchange rate (LCU per US$, period average)',
-    shortLabel: 'Official FX vs USD',
-    unit: 'LCU per US$',
-    unitLong: 'local currency units per US$ (period average)',
-    currencySymbol: null,
-    group: 'fx',
-    priceBasis: NOT_APPLICABLE,
-    subject: 'exchange',
-    domain: 'FINANCIAL',
-    family: 'EXCHANGE_RATE',
-    observationType: 'QUOTED_RATE',
-    currencyBasis: NOT_APPLICABLE,
-    frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT']),
-    // No World Bank world aggregate exists for this series (WLD is null);
-    // members are displayable but never summed, averaged or ranked by level.
-    aggregation: 'MEMBER_ONLY',
-    // NEUTRAL: 83 INR/USD vs 150 JPY/USD is units, not strength. Movement
-    // and cross-rates only (Phases 3-4).
-    rankingDirection: 'NEUTRAL',
-    interpretation: 'NEUTRAL',
-    comparisonCapability: Object.freeze(['COUNTRY', 'CUSTOM_GROUP']),
-    signDomain: 'POSITIVE_ONLY',
-    requiredDenominator: null,
-    // Quotation is stored once so appreciation/depreciation can never become
-    // a sign bug at UI call sites: increase = local depreciation vs USD.
-    quotation: Object.freeze({ convention: 'LCU_PER_USD', base: 'USD' }),
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/PA.NUS.FCRF',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/PA.NUS.FCRF?format=json',
-      name: 'Official exchange rate (LCU per US$, period average)',
-    }),
-  }),
-  exports_current: Object.freeze({
-    key: 'exports_current',
-    indicatorCode: 'NE.EXP.GNFS.CD',
-    label: 'Exports of goods and services (current US$)',
-    shortLabel: 'Exports, current US$',
-    unit: 'current US$',
-    unitLong: 'current US$',
-    currencySymbol: '$',
-    group: 'trade',
-    priceBasis: 'current',
-    subject: 'trade',
-    domain: 'TRADE',
-    family: 'EXPORTS',
-    observationType: 'FLOW',
-    currencyBasis: 'USD',
-    frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
-    aggregation: 'SUM',
-    rankingDirection: 'DESC',
-    interpretation: 'NEUTRAL',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'POSITIVE_ONLY',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/NE.EXP.GNFS.CD',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/NE.EXP.GNFS.CD?format=json',
-      name: 'Exports of goods and services (current US$)',
-    }),
-  }),
-  imports_current: Object.freeze({
-    key: 'imports_current',
-    indicatorCode: 'NE.IMP.GNFS.CD',
-    label: 'Imports of goods and services (current US$)',
-    shortLabel: 'Imports, current US$',
-    unit: 'current US$',
-    unitLong: 'current US$',
-    currencySymbol: '$',
-    group: 'trade',
-    priceBasis: 'current',
-    subject: 'trade',
-    domain: 'TRADE',
-    family: 'IMPORTS',
-    observationType: 'FLOW',
-    currencyBasis: 'USD',
-    frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR']),
-    aggregation: 'SUM',
-    rankingDirection: 'DESC',
-    interpretation: 'NEUTRAL',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'POSITIVE_ONLY',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/NE.IMP.GNFS.CD',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/NE.IMP.GNFS.CD?format=json',
-      name: 'Imports of goods and services (current US$)',
-    }),
-  }),
-  fdi_inflows: Object.freeze({
-    key: 'fdi_inflows',
-    indicatorCode: 'BX.KLT.DINV.CD.WD',
-    label: 'Foreign direct investment, net inflows (BoP, current US$)',
-    shortLabel: 'FDI net inflows',
-    unit: 'current US$',
-    unitLong: 'current US$',
-    currencySymbol: '$',
-    group: 'flows',
-    priceBasis: 'current',
-    subject: 'capital_flows',
-    domain: 'EXTERNAL',
-    family: 'FDI',
-    // Net flow: inflows minus disinvestment. Zero and negative values are
-    // legitimate, so PERCENT is NOT declared; YOY stays engine-gated later.
-    observationType: 'FLOW',
-    currencyBasis: 'USD',
-    frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'YOY']),
-    aggregation: 'SUM',
-    rankingDirection: 'DESC',
-    interpretation: 'NEUTRAL',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'SIGNED',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.CD.WD',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/BX.KLT.DINV.CD.WD?format=json',
-      name: 'Foreign direct investment, net inflows (BoP, current US$)',
-    }),
-  }),
-  fdi_inflows_pct_gdp: Object.freeze({
-    key: 'fdi_inflows_pct_gdp',
-    indicatorCode: 'BX.KLT.DINV.WD.GD.ZS',
-    label: 'Foreign direct investment, net inflows (% of GDP)',
-    shortLabel: 'FDI net inflows, % of GDP',
-    unit: '% of GDP',
-    unitLong: '% of GDP',
-    currencySymbol: '%',
-    group: 'flows',
-    priceBasis: NOT_APPLICABLE,
-    subject: 'capital_flows',
-    domain: 'EXTERNAL',
-    family: 'FDI',
-    // World Bank ratio: use directly, never reconstruct. Change is PP, never
-    // a percentage of a percentage; country percentages are never summed.
-    observationType: 'RATIO',
-    currencyBasis: NOT_APPLICABLE,
-    frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'PP']),
-    aggregation: 'WEIGHTED_RATIO',
-    rankingDirection: 'DESC',
-    interpretation: 'NEUTRAL',
-    comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
-    signDomain: 'SIGNED',
-    requiredDenominator: null,
-    quotation: null,
-    derivation: Object.freeze({ kind: 'RAW' }),
-    lifecycle: 'SUPPORTED',
-    ppp: false,
-    baseYear: null,
-    worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.WD.GD.ZS',
-    verified: Object.freeze({
-      date: '2026-09-24',
-      method: 'GET /v2/indicator/BX.KLT.DINV.WD.GD.ZS?format=json',
-      name: 'Foreign direct investment, net inflows (% of GDP)',
-    }),
-  }),
-});
+export const FUTURE_METRIC_DEFINITIONS = Object.freeze({});
 
 /** Ordered keys of the defined-but-disabled future measures. */
 export const FUTURE_METRIC_KEYS = Object.freeze(Object.keys(FUTURE_METRIC_DEFINITIONS));

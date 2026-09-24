@@ -50,7 +50,7 @@ test('clean database passes null/aggregate/orphan/duplicate/year/finite checks',
   }
 
   const report = await run(db);
-  for (const check of ['A.null_value', 'B.aggregate_observation', 'C.unknown_iso3', 'D.duplicate_observation', 'E.invalid_year', 'F.non_finite_value', 'F.raw_round_trip', 'J.metadata_consistency']) {
+  for (const check of ['A.null_value', 'B.aggregate_typing', 'C.unknown_iso3', 'D.duplicate_observation', 'E.invalid_year', 'F.non_finite_value', 'F.raw_round_trip', 'J.metadata_consistency']) {
     assert.equal(statusOf(report, check), 'pass', check);
   }
   assert.equal(report.passed, true);
@@ -92,12 +92,34 @@ test('empty database passes vacuously (nothing ingested yet)', async () => {
   }
 });
 
-test('B detects an aggregate observation smuggled past the ingest filter', async () => {
-  const { db, repository, indicator } = await seedEdgeCaseDb();
-  // Bypass the ingest filter on purpose: WLD is stored as an aggregate.
-  repository.upsertObservation(db, { countryId: 'WLD', indicatorId: indicator.id, year: 2005, value: 13500.5 });
+test('B passes with stored aggregate observations when typing matches the snapshot', async () => {
+  // Phase 5 stores official aggregate observations (seedEdgeCaseDb holds WLD
+  // rows); B now proves metadata typing matches the recorded universe instead
+  // of forbidding aggregate rows. No snapshot exists here, so typing is
+  // unchecked but aggregate rows are legitimate: B passes.
+  const { db } = await seedEdgeCaseDb();
   const report = await run(db);
-  assert.equal(statusOf(report, 'B.aggregate_observation'), 'fail');
+  assert.equal(statusOf(report, 'B.aggregate_typing'), 'pass');
+});
+
+test('B detects metadata typing drift against the recorded universe snapshot', async () => {
+  const { db, repository } = await seedEdgeCaseDb();
+  const { recordSuccessRun } = await import('./helpers/testDb.js');
+  const { buildUniverse } = await import('../src/domain/universe.js');
+  const { EDGE_METADATA, EDGE_BLANK_METADATA } = await import('./fixtures/edgeCases.js');
+  const universe = buildUniverse([...EDGE_METADATA, ...EDGE_BLANK_METADATA]);
+  await recordSuccessRun(db, repository, {
+    universeSnapshot: {
+      capturedAt: '2026-09-24T00:00:00.000Z',
+      eligibleIds: universe.eligible.map((row) => row.id).sort(),
+      aggregateIds: universe.aggregates.map((row) => row.id).sort(),
+    },
+  });
+  // Corrupt the typing after the snapshot: WLD flips to eligible.
+  db.prepare('UPDATE countries SET is_aggregate = 0 WHERE id = ?').run('WLD');
+  const report = await run(db);
+  assert.equal(statusOf(report, 'B.aggregate_typing'), 'fail');
+  assert.deepEqual(report.checks.find((c) => c.check === 'B.aggregate_typing').detail.mismatches, ['WLD']);
   assert.equal(report.passed, false);
 });
 
