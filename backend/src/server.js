@@ -758,6 +758,10 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         enabled: autoRefreshEnabled,
         ttlHours: cache.ttlHours,
       },
+      // Additive presentation signal (Phase 6): lets the public UI hide the
+      // manual-refresh action when the backend requires an admin token.
+      // Non-analytical; exposes only whether auth is required, never the token.
+      refreshRequiresAuth: config.refreshAdminToken !== '',
       latestRuns: listFetchRuns(h, 5),
       years: listAvailableYears(h),
       methodology: methodologyBlock(),

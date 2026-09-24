@@ -1,21 +1,18 @@
 /**
- * Focus-country picker (Phase 1: generic focus abstraction).
+ * Focus-country picker (Phase 6: accessible combobox).
  *
- * A deliberately basic searchable picker built from existing UI patterns
- * (Field + native controls, no new framework): a search box filters the
- * eligible-country list served by GET /api/countries, and a native select
- * commits the selection. The backend/database remains authoritative for
- * country names — nothing is hard-coded here.
- *
- * Custom groups, aggregates and regions are out of scope until Phase 4:
- * only eligible countries are listed.
+ * Same props contract as the Phase-1 picker; the interaction is now the
+ * shared SearchableSelect (type to filter, arrows/Enter/Escape, visible
+ * focus, click-outside, mobile bottom-sheet popover). The backend/database
+ * remains authoritative for country names — nothing is hard-coded here.
+ * Focus stays country-only; aggregates and groups belong to Compare.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { SearchableSelect } from './controls.jsx';
 import { Field } from './ui.jsx';
 
 export default function FocusPicker({ countries, value = 'IND', onChange, id = 'f-country' }) {
-  const [query, setQuery] = useState('');
   const list = useMemo(() => countries ?? [], [countries]);
 
   // No country metadata yet (loading or failed): fall back to a plain ISO3
@@ -36,37 +33,14 @@ export default function FocusPicker({ countries, value = 'IND', onChange, id = '
     );
   }
 
-  const q = query.trim().toLowerCase();
-  const filtered = (
-    q
-      ? list.filter(
-          (c) =>
-            String(c.name ?? '').toLowerCase().includes(q) || String(c.iso3 ?? '').toLowerCase().includes(q),
-        )
-      : list
-  ).slice(0, 300);
-  const selected = list.find((c) => c.iso3 === value) ?? null;
-  const options = selected && !filtered.some((c) => c.iso3 === selected.iso3) ? [selected, ...filtered] : filtered;
-
   return (
-    <Field label="Focus country" htmlFor={id}>
-      <span className="search-row">
-        <input
-          type="search"
-          value={query}
-          placeholder="Search countries…"
-          aria-label="Search focus countries"
-          autoComplete="off"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <select id={id} value={value} onChange={(event) => onChange(event.target.value)} aria-label="Focus country">
-          {options.map((c) => (
-            <option key={c.iso3} value={c.iso3}>
-              {c.name} ({c.iso3})
-            </option>
-          ))}
-        </select>
-      </span>
-    </Field>
+    <SearchableSelect
+      id={id}
+      label="Focus country"
+      value={value}
+      placeholder="Select a country…"
+      options={list.map((c) => ({ value: c.iso3, label: `${c.name} (${c.iso3})` }))}
+      onChange={onChange}
+    />
   );
 }

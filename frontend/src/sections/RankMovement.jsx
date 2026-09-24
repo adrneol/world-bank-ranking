@@ -9,10 +9,12 @@
 
 import { Fragment, useCallback, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
-import { METRICS, SUBJECTS, metricKeysForSubject, metricLabel, subjectOf } from '../config/metrics.js';
+import { METRICS, SUBJECTS, metricKeysForSubject, subjectOf } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { Field, Section, StatusBlock } from '../components/ui.jsx';
 import FocusPicker from '../components/FocusPicker.jsx';
+import MetricPicker from '../components/MetricPicker.jsx';
+import { SearchableSelect } from '../components/controls.jsx';
 
 function formatSigned(n) {
   if (n === null || n === undefined) return '—';
@@ -44,71 +46,51 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
       <FocusPicker countries={countries} value={country} onChange={(v) => onCountry?.(v)} id="mv-country" />
-      <Field label="Analysis" htmlFor="mv-subject">
-        <select
-          id="mv-subject"
-          value={subject}
-          onChange={(e) => {
-            const next = metricKeysForSubject(e.target.value);
-            onMetric(next.includes(metricKey) ? metricKey : next[0]);
-          }}
-        >
-          {Object.values(SUBJECTS).map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Metric" htmlFor="mv-metric">
-        <select id="mv-metric" value={metricKey} onChange={(e) => onMetric(e.target.value)}>
-          {metricKeysForSubject(subject).map((key) => (
-            <option key={key} value={key}>
-              {metricLabel(key)}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Basis" htmlFor="mv-basis">
-        <select id="mv-basis" value={basis} onChange={(e) => onBasis(e.target.value)}>
-          <option value={RANKING_BASIS.LEVEL}>
-            {subject === 'gdp_total' ? 'Total GDP level (value)' : subject === 'gdp_per_capita' ? 'Per-capita level (value)' : 'Level (value)'}
-          </option>
-          <option value={RANKING_BASIS.GROWTH}>YoY % growth</option>
-        </select>
-      </Field>
-      <Field label="Year A (earlier)" htmlFor="mv-yearA">
-        <select id="mv-yearA" value={yearA ?? ''} onChange={(e) => onYearA(Number(e.target.value))}>
-          {(availableYears ?? []).map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Middle year" htmlFor="mv-yearMid">
-        <select
-          id="mv-yearMid"
-          value={yearMid ?? ''}
-          onChange={(e) => onYearMid(e.target.value === '' ? null : Number(e.target.value))}
-        >
-          <option value="">None</option>
-          {validMidYears.map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Year B (later)" htmlFor="mv-yearB">
-        <select id="mv-yearB" value={yearB ?? ''} onChange={(e) => onYearB(Number(e.target.value))}>
-          {(availableYears ?? []).map((y) => (
-            <option key={y} value={y}>
-              {y}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <SearchableSelect
+        id="mv-subject"
+        label="Analysis"
+        value={subject}
+        options={Object.values(SUBJECTS).map((s) => ({ value: s.key, label: s.label }))}
+        onChange={(nextSubject) => {
+          const next = metricKeysForSubject(nextSubject);
+          onMetric(next.includes(metricKey) ? metricKey : next[0]);
+        }}
+      />
+      <MetricPicker id="mv-metric" label="Metric" value={metricKey} onChange={onMetric} />
+      <SearchableSelect
+        id="mv-basis"
+        label="Basis"
+        value={basis}
+        options={[
+          { value: RANKING_BASIS.LEVEL, label: subject === 'gdp_total' ? 'Total GDP level (value)' : subject === 'gdp_per_capita' ? 'Per-capita level (value)' : 'Level (value)' },
+          { value: RANKING_BASIS.GROWTH, label: 'YoY % growth' },
+        ]}
+        onChange={onBasis}
+      />
+      <SearchableSelect
+        id="mv-yearA"
+        label="Year A (earlier)"
+        value={yearA != null ? String(yearA) : ''}
+        placeholder="Select year…"
+        options={(availableYears ?? []).map((y) => ({ value: String(y), label: String(y) }))}
+        onChange={(v) => onYearA(Number(v))}
+      />
+      <SearchableSelect
+        id="mv-yearMid"
+        label="Middle year"
+        value={yearMid != null ? String(yearMid) : ''}
+        placeholder="None"
+        options={[{ value: '', label: 'None' }, ...validMidYears.map((y) => ({ value: String(y), label: String(y) }))]}
+        onChange={(v) => onYearMid(v === '' ? null : Number(v))}
+      />
+      <SearchableSelect
+        id="mv-yearB"
+        label="Year B (later)"
+        value={yearB != null ? String(yearB) : ''}
+        placeholder="Select year…"
+        options={(availableYears ?? []).map((y) => ({ value: String(y), label: String(y) }))}
+        onChange={(v) => onYearB(Number(v))}
+      />
       <Field label="Swap" htmlFor="mv-swap">
         <button id="mv-swap" type="button" className="btn btn-secondary" onClick={onSwap} aria-label="Swap year A and year B">
           ⇄ Swap A/B
@@ -124,6 +106,7 @@ function SummaryCards({ data }) {
   const metric = data.metric;
   if (!fm) return null;
   return (
+    <>
     <div className="cards" role="region" aria-label="India ranking movement summary">
       <div className="card">
         <h3>
@@ -172,6 +155,25 @@ function SummaryCards({ data }) {
         </p>
       </div>
     </div>
+    {fm.positionNumberChange != null && fm.commonEffect != null && fm.observedSetEffect != null ? (
+      <div className="lfl-grid" role="region" aria-label="Observed versus like-for-like movement">
+        <div className="lfl-box lfl-box-lfl">
+          <p className="lfl-label">Like-for-like movement</p>
+          <p className="card-result-value">
+            {formatSigned(fm.commonEffect)} <span className="result-unit">positions</span>
+          </p>
+          <p className="card-unit">Among economies observed in both years — within-universe economics.</p>
+        </div>
+        <div className="lfl-box lfl-box-observed">
+          <p className="lfl-label">Observed-set effect</p>
+          <p className="card-result-value">
+            {formatSigned(fm.observedSetEffect)} <span className="result-unit">positions</span>
+          </p>
+          <p className="card-unit">From economies entering or leaving the ranking above the focus — coverage, not economics.</p>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
 

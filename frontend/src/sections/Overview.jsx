@@ -12,8 +12,9 @@ import { METRICS, metricKeysForSubject, subjectLabel } from '../config/metrics.j
 import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { StatusBlock } from '../components/ui.jsx';
+import SubjectInsight from './SubjectInsight.jsx';
 
-export default function Overview({ year, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
+export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country = 'IND', focusName = 'India', availableYears = [], onCompareEntities = null }) {
   const keys = metricKeysForSubject(subject);
   const depsKey = `overview:${year ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(
@@ -65,6 +66,14 @@ export default function Overview({ year, subject = 'gdp_per_capita', country = '
             Rank calculated from World Bank WDI observations. The {keys.length} {subjectLabel(subject)} series use different
             units and are never combined or scored against each other.
           </p>
+          <SubjectInsight
+            metricKey={metricKey ?? keys[0]}
+            country={country}
+            focusName={displayName}
+            year={row.year}
+            availableYears={availableYears}
+            onCompareEntities={onCompareEntities}
+          />
         </>
       ) : null}
     </div>

@@ -11,17 +11,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api/client.js';
 import {
+  COMPARE_OPERATIONS,
   SUBJECTS,
   hydrateRegistry,
   metricKeysForSubject,
-  metricLabel,
   resolveMetricKey,
   subjectLabel,
   subjectOf,
 } from './config/metrics.js';
+import { entityToSpec } from './components/entities.js';
+import MetricPicker from './components/MetricPicker.jsx';
+import { SearchableSelect } from './components/controls.jsx';
 import { Field } from './components/ui.jsx';
 import FocusPicker from './components/FocusPicker.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
+import Compare from './sections/Compare.jsx';
 import Overview from './sections/Overview.jsx';
 import YearlyTable from './sections/YearlyTable.jsx';
 import YearComparison from './sections/YearComparison.jsx';
@@ -34,7 +38,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country', 'cmpEntityA', 'cmpEntityB', 'cmpLabelA', 'cmpLabelB', 'cmpMetric', 'cmpYearA', 'cmpYearB', 'cmpOp', 'cmpMode'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -48,15 +52,27 @@ function readUrlState() {
 
 function YearOptions({ years, id, value, onChange, label }) {
   return (
-    <Field label={label} htmlFor={id}>
-      <select id={id} value={value ?? ''} onChange={(event) => onChange(event.target.value)}>
-        {(years ?? []).map((y) => (
-          <option key={y} value={y}>
-            {y}
-          </option>
-        ))}
-      </select>
-    </Field>
+    <SearchableSelect
+      id={id}
+      label={label}
+      value={value != null ? String(value) : ''}
+      placeholder="Select year…"
+      options={(years ?? []).map((y) => ({ value: String(y), label: String(y) }))}
+      onChange={(v) => onChange(v === '' ? '' : Number(v))}
+    />
+  );
+}
+
+function YearOrEmpty({ years, id, value, onChange, label, emptyLabel = '—' }) {
+  return (
+    <SearchableSelect
+      id={id}
+      label={label}
+      value={value ?? ''}
+      placeholder={emptyLabel}
+      options={[{ value: '', label: emptyLabel }, ...((years ?? []).map((y) => ({ value: String(y), label: String(y) })))]}
+      onChange={(v) => onChange(v === '' ? '' : Number(v))}
+    />
   );
 }
 
@@ -66,6 +82,7 @@ const VIEWS = Object.freeze([
   { id: 'rank', label: 'Rank' },
   { id: 'movement', label: 'Movement' },
   { id: 'yoy', label: 'YoY' },
+  { id: 'compare', label: 'Compare' },
   { id: 'coverage', label: 'Coverage' },
   { id: 'audit', label: 'Audit' },
   { id: 'status', label: 'Status' },
@@ -91,6 +108,15 @@ export default function App() {
     fromYear: '',
     view: 'overview',
     country: 'IND',
+    cmpEntityA: '',
+    cmpEntityB: '',
+    cmpLabelA: '',
+    cmpLabelB: '',
+    cmpMetric: 'total_current',
+    cmpYearA: null,
+    cmpYearB: null,
+    cmpOp: 'level',
+    cmpMode: 'observed',
     ...readUrlState(),
   }));
   const [rankSub, setRankSub] = useState('verify');
@@ -216,7 +242,21 @@ export default function App() {
     // The analysis subject is derived from the metric key (single source of
     // truth): nominal_* metrics imply GDP per capita, total_* imply Total GDP.
     const subject = subjectOf(metric);
-    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName };
+    // Compare workspace state (single source of truth, URL-shareable).
+    // Entity specs are validated strictly by the backend; here they only
+    // need to be non-empty, with focus/country-aware defaults.
+    const cmpEntityA = filters.cmpEntityA != null && String(filters.cmpEntityA).trim() !== '' ? String(filters.cmpEntityA).trim() : `country:${country}`;
+    const defaultB = `country:${country === 'USA' ? 'CHN' : 'USA'}`;
+    const cmpEntityB = filters.cmpEntityB != null && String(filters.cmpEntityB).trim() !== '' ? String(filters.cmpEntityB).trim() : defaultB;
+    const cmpLabelA = filters.cmpLabelA != null ? String(filters.cmpLabelA) : '';
+    const cmpLabelB = filters.cmpLabelB != null ? String(filters.cmpLabelB) : '';
+    const cmpMetric = resolveMetricKey(filters.cmpMetric) ?? 'total_current';
+    const cmpYearB = pick(filters.cmpYearB, maxYear);
+    const cmpDecade = maxYear != null && availableYears.includes(maxYear - 10) ? maxYear - 10 : minYear;
+    const cmpYearA = pick(filters.cmpYearA, cmpDecade);
+    const cmpOp = COMPARE_OPERATIONS.some((op) => op.id === filters.cmpOp) ? filters.cmpOp : 'level';
+    const cmpMode = filters.cmpMode === 'like_for_like' ? 'like_for_like' : 'observed';
+    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName, cmpEntityA, cmpEntityB, cmpLabelA, cmpLabelB, cmpMetric, cmpYearA, cmpYearB, cmpOp, cmpMode };
   }, [filters, availableYears, maxYear, minYear, defaultStart, eligibleCountries, registryVersion]);
 
   const rankSubs = useMemo(
@@ -251,12 +291,37 @@ export default function App() {
     // India links keep working unchanged and stay clean.
     if (effective.country !== 'IND') query.set('country', effective.country);
     query.set('view', effective.view);
+    if (effective.view === 'compare') {
+      query.set('cmpEntityA', effective.cmpEntityA);
+      query.set('cmpEntityB', effective.cmpEntityB);
+      if (effective.cmpLabelA !== '') query.set('cmpLabelA', effective.cmpLabelA);
+      if (effective.cmpLabelB !== '') query.set('cmpLabelB', effective.cmpLabelB);
+      query.set('cmpMetric', effective.cmpMetric);
+      if (effective.cmpYearA != null) query.set('cmpYearA', effective.cmpYearA);
+      if (effective.cmpYearB != null) query.set('cmpYearB', effective.cmpYearB);
+      query.set('cmpOp', effective.cmpOp);
+      if (effective.cmpMode !== 'observed') query.set('cmpMode', effective.cmpMode);
+    }
     const next = `?${query.toString()}`;
     if (window.location.search !== next) window.history.replaceState(null, '', next);
   }, [effective]);
 
   const setFilter = useCallback((key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  // Deep link from subject views (e.g. FX cross-rate): prefill the Compare
+  // builder with two entities and a metric, then switch to the workspace.
+  const openCompareWith = useCallback((entityAObj, entityBObj, metric) => {
+    setFilters((prev) => ({
+      ...prev,
+      cmpEntityA: entityToSpec(entityAObj) || prev.cmpEntityA,
+      cmpEntityB: entityToSpec(entityBObj) || prev.cmpEntityB,
+      cmpLabelA: entityAObj?.kind === 'custom_group' ? (entityAObj.label ?? '') : '',
+      cmpLabelB: entityBObj?.kind === 'custom_group' ? (entityBObj.label ?? '') : '',
+      ...(metric ? { cmpMetric: metric } : {}),
+      view: 'compare',
+    }));
   }, []);
 
   const handleRefreshed = useCallback((summary) => {
@@ -331,7 +396,7 @@ export default function App() {
             ) : null}
           </div>
         ) : null}
-        {filtersReady && view !== 'movement' && view !== 'status' ? (
+        {filtersReady && view !== 'movement' && view !== 'status' && view !== 'compare' ? (
           <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Data filters">
               {/*
@@ -354,34 +419,25 @@ export default function App() {
                 onChange={(v) => setFilter('country', v)}
               />
               <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
-              <Field label="Analysis" htmlFor="f-subject">
-                <select
-                  id="f-subject"
-                  value={effective.subject}
-                  onChange={(e) => {
-                    const next = metricKeysForSubject(e.target.value);
-                    // The metric key is the single state: switching analysis
-                    // selects that subject's first metric (or keeps the
-                    // current one when it already belongs to the subject).
-                    setFilter('metric', next.includes(effective.metric) ? effective.metric : next[0]);
-                  }}
-                >
-                  {Object.values(SUBJECTS).map((subject) => (
-                    <option key={subject.key} value={subject.key}>
-                      {subject.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Metric" htmlFor="f-metric">
-                <select id="f-metric" value={effective.metric} onChange={(e) => setFilter('metric', e.target.value)}>
-                  {metricKeysForSubject(effective.subject).map((key) => (
-                    <option key={key} value={key}>
-                      {metricLabel(key)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <SearchableSelect
+                id="f-subject"
+                label="Analysis"
+                value={effective.subject}
+                options={Object.values(SUBJECTS).map((subject) => ({ value: subject.key, label: subject.label }))}
+                onChange={(nextSubject) => {
+                  const next = metricKeysForSubject(nextSubject);
+                  // The metric key is the single state: switching analysis
+                  // selects that subject's first metric (or keeps the
+                  // current one when it already belongs to the subject).
+                  setFilter('metric', next.includes(effective.metric) ? effective.metric : next[0]);
+                }}
+              />
+              <MetricPicker
+                id="f-metric"
+                label="Metric"
+                value={effective.metric}
+                onChange={(v) => setFilter('metric', v)}
+              />
               <Field label="Neighbors" htmlFor="f-neighbors">
                 <input
                   id="f-neighbors"
@@ -392,16 +448,7 @@ export default function App() {
                   onChange={(e) => setFilter('neighbors', e.target.value)}
                 />
               </Field>
-              <Field label="Compare from" htmlFor="f-from">
-                <select id="f-from" value={effective.fromYear ?? ''} onChange={(e) => setFilter('fromYear', e.target.value)}>
-                  <option value="">—</option>
-                  {availableYears.map((y) => (
-                    <option key={y} value={y}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <YearOrEmpty years={availableYears} id="f-from" label="Compare from" value={effective.fromYear ?? ''} onChange={(v) => setFilter('fromYear', v)} />
             </form>
           </div>
         ) : null}
@@ -418,7 +465,7 @@ export default function App() {
         <main id="main" key={`${dataVersion}:${view}:${effective.country}`}>
           {filtersReady && view === 'overview' ? (
             <>
-              <Overview year={effective.year} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
+              <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={availableYears} onCompareEntities={openCompareWith} />
               <YearComparison year={effective.year} subject={effective.subject} country={effective.country} />
             </>
           ) : null}
@@ -466,6 +513,30 @@ export default function App() {
                 <YoyVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} country={effective.country} focusName={effective.focusName} />
               )}
             </div>
+          ) : null}
+          {filtersReady && view === 'compare' ? (
+            <Compare
+              availableYears={availableYears}
+              countries={eligibleCountries}
+              entityA={effective.cmpEntityA}
+              entityB={effective.cmpEntityB}
+              labelA={effective.cmpLabelA}
+              labelB={effective.cmpLabelB}
+              metricKey={effective.cmpMetric}
+              yearA={effective.cmpYearA}
+              yearB={effective.cmpYearB}
+              operation={effective.cmpOp}
+              groupMode={effective.cmpMode}
+              onEntityA={(v) => setFilter('cmpEntityA', v)}
+              onEntityB={(v) => setFilter('cmpEntityB', v)}
+              onLabelA={(v) => setFilter('cmpLabelA', v)}
+              onLabelB={(v) => setFilter('cmpLabelB', v)}
+              onMetric={(v) => setFilter('cmpMetric', v)}
+              onYearA={(v) => setFilter('cmpYearA', v)}
+              onYearB={(v) => setFilter('cmpYearB', v)}
+              onOperation={(v) => setFilter('cmpOp', v)}
+              onGroupMode={(v) => setFilter('cmpMode', v)}
+            />
           ) : null}
           {filtersReady && view === 'coverage' ? (
             <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} subject={effective.subject} country={effective.country} focusName={effective.focusName} />

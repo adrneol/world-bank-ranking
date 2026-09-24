@@ -10,7 +10,7 @@ import { api } from '../api/client.js';
 import { metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatYoy } from '../utils/format.js';
-import { Section, StatusBlock, Pagination, Field } from '../components/ui.jsx';
+import { Section, StatusBlock, Pagination, Field, UnavailableState } from '../components/ui.jsx';
 
 // Must stay identical to backend parseRankQuery (domain/ranking.js).
 // Message-only use: the backend performs the actual rank lookup.
@@ -103,6 +103,14 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
       </form>
 
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="YoY ranking" />
+
+      {!loading && !error && data && data.available === false ? (
+        <UnavailableState
+          reason={data.reason}
+          code={data.reason}
+          hint="Year-over-year percent change is not defined for this metric — see the level ranking instead."
+        />
+      ) : null}
 
       {!loading && !error && data && search && data.search.matches.length === 0 && parseRankQuery(search) !== null ? (
         <p className="status" role="status">

@@ -168,6 +168,8 @@ test('GET /api/countries, /api/metadata, /api/data-status, /api/integrity', asyn
   const dataStatus = await get('/api/data-status');
   assert.equal(dataStatus.status, 200);
   assert.equal(dataStatus.body.observations > 0, true);
+  // Additive presentation signal: boolean only, never secret material.
+  assert.equal(typeof dataStatus.body.refreshRequiresAuth, 'boolean');
 
   const integrity = await get('/api/integrity');
   assert.equal(integrity.status, 200);

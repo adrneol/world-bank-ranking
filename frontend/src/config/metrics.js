@@ -146,7 +146,24 @@ export function hydrateRegistry(payload) {
         shortTitle: entry.shortLabel ?? entry.label ?? entry.key,
         indicatorCode: entry.indicatorCode ?? '',
         unit: entry.unit ?? '',
+        unitLong: entry.unitLong ?? entry.unit ?? '',
         subject: entry.subject,
+        domain: entry.domain ?? null,
+        family: entry.family ?? null,
+        // Capability metadata for capability-driven UI (Compare operations,
+        // group support, change semantics). Display-only mirrors: the backend
+        // remains authoritative; these only decide which actions are offered.
+        observationType: entry.observationType ?? null,
+        validChangeTypes: Object.freeze([...(entry.validChangeTypes ?? [])]),
+        aggregation: entry.aggregation ?? null,
+        rankingDirection: entry.rankingDirection ?? null,
+        interpretation: entry.interpretation ?? null,
+        comparisonCapability: Object.freeze([...(entry.comparisonCapability ?? [])]),
+        signDomain: entry.signDomain ?? null,
+        quotation: entry.quotation ? Object.freeze({ ...entry.quotation }) : null,
+        priceBasis: entry.priceBasis ?? null,
+        currencyBasis: entry.currencyBasis ?? null,
+        baseYear: entry.baseYear ?? null,
       });
       if (!subjectKeys[entry.subject]) {
         subjectKeys[entry.subject] = [];
@@ -206,4 +223,89 @@ export function metricLabel(key) {
 
 export function metricTitle(key) {
   return METRICS[key]?.title ?? key;
+}
+
+/** Capability metadata mirror for one metric (null when unknown). */
+export function metricCapabilities(key) {
+  const m = METRICS[key];
+  if (!m) return null;
+  return {
+    observationType: m.observationType ?? null,
+    validChangeTypes: [...(m.validChangeTypes ?? [])],
+    aggregation: m.aggregation ?? null,
+    rankingDirection: m.rankingDirection ?? null,
+    interpretation: m.interpretation ?? null,
+    comparisonCapability: [...(m.comparisonCapability ?? [])],
+    signDomain: m.signDomain ?? null,
+    quotation: m.quotation ? { ...m.quotation } : null,
+  };
+}
+
+/**
+ * Compare operations derivable from a metric's declared change types.
+ * Backend remains authoritative (it re-validates); this only decides which
+ * actions the UI offers, so an unsupported button can never be rendered.
+ */
+export const COMPARE_OPERATIONS = Object.freeze([
+  { id: 'level', label: 'Level', needsYears: 1 },
+  { id: 'absolute_change', label: 'Absolute change', needsYears: 2 },
+  { id: 'percent_change', label: 'Percent change', needsYears: 2 },
+  { id: 'pp_change', label: 'Percentage-point change', needsYears: 2 },
+  { id: 'index_point_change', label: 'Index-point change', needsYears: 2 },
+  { id: 'cagr', label: 'CAGR', needsYears: 2 },
+  { id: 'cross_rate', label: 'Cross-rate', needsYears: 1 },
+]);
+
+const OPERATION_CHANGE_TYPE = Object.freeze({
+  absolute_change: 'ABSOLUTE',
+  percent_change: 'PERCENT',
+  pp_change: 'PP',
+  index_point_change: 'INDEX_POINT',
+  cagr: 'CAGR',
+});
+
+export function operationsFor(metricKey) {
+  const caps = metricCapabilities(metricKey);
+  // Static fallback (pre-hydration GDP registry) mirrors backend semantics:
+  // level always; change ops per known GDP declarations.
+  const declared = caps ? caps.validChangeTypes : ['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR'];
+  return COMPARE_OPERATIONS.filter((op) => {
+    if (op.id === 'level') return true;
+    if (op.id === 'cross_rate') {
+      return caps
+        ? caps.observationType === 'QUOTED_RATE' && caps.quotation?.convention === 'LCU_PER_USD'
+        : false;
+    }
+    return declared.includes(OPERATION_CHANGE_TYPE[op.id]);
+  });
+}
+
+/** All operations with availability flags for one metric (for disabled UI). */
+export function operationsWithAvailability(metricKey) {
+  const allowed = new Set(operationsFor(metricKey).map((op) => op.id));
+  return COMPARE_OPERATIONS.map((op) => ({
+    ...op,
+    available: allowed.has(op.id),
+    disabledReason: allowed.has(op.id) ? null : 'Not declared for this metric',
+  }));
+}
+
+/** True when a metric can produce a summed custom-group value. */
+export function supportsGroupSum(metricKey) {
+  const caps = metricCapabilities(metricKey);
+  if (!caps) return false;
+  return caps.aggregation === 'SUM';
+}
+
+/** Human-readable observation-type label for metric headers. */
+export function observationTypeLabel(type) {
+  switch (type) {
+    case 'LEVEL': return 'Level';
+    case 'FLOW': return 'Flow';
+    case 'RATE': return 'Rate (annual %)';
+    case 'RATIO': return 'Ratio';
+    case 'INDEX': return 'Index';
+    case 'QUOTED_RATE': return 'Quoted rate';
+    default: return null;
+  }
 }

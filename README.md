@@ -51,6 +51,8 @@ selectable after refresh with no code change.
 - YoY coverage (current/previous valid counts, valid pairs)
 - Data coverage panels and evidence-only changing-totals explanations
 - Rank movement comparison (Movement tab): like-for-like common universe, entered/exited analysis, verified decomposition
+- Entity comparison (Compare tab): country, official World Bank aggregate, or user-selected group on either side; capability-filtered operations (level, change, CAGR, cross-rate); observed vs like-for-like group values with provenance
+- Subject-aware analysis: inflation in percentage points (never relative percent by default), CPI index in index points, exchange rates with explicit LCU-per-US$ quotation semantics
 - Audit/source transparency, including raw-value visibility
 - Data status, integrity checks, and manual refresh with progress
 - Responsive frontend (desktop, tablet, mobile)

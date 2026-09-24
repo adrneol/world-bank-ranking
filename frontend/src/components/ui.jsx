@@ -92,3 +92,117 @@ export function Unavailable({ reason }) {
     </span>
   );
 }
+
+/**
+ * Provenance badge: RAW (World Bank observation) vs APP_DERIVED, plus entity
+ * provenance for aggregates and user-defined groups. Quiet by design —
+ * precision without clutter.
+ */
+export function ProvenanceBadge({ kind }) {
+  if (kind === 'APP_DERIVED') {
+    return <span className="badge badge-derived">App-derived</span>;
+  }
+  if (kind === 'wb_aggregate') {
+    return <span className="badge badge-aggregate">World Bank aggregate</span>;
+  }
+  if (kind === 'custom_group') {
+    return <span className="badge badge-group">User-selected group</span>;
+  }
+  return <span className="badge badge-raw">World Bank observation</span>;
+}
+
+/** Entity-type badge used in compare headers and result cards. */
+export function EntityBadge({ kind }) {
+  if (kind === 'wb_aggregate') return <ProvenanceBadge kind="wb_aggregate" />;
+  if (kind === 'custom_group') return <ProvenanceBadge kind="custom_group" />;
+  return null;
+}
+
+/**
+ * Differentiated empty/unavailable/error states (Phase 6): missing data,
+ * unsupported operations and failures each read distinctly. Never a blank
+ * card, never a zero standing in for "not supported".
+ */
+export function EmptyState({ title = 'Nothing to show', children }) {
+  return (
+    <div className="state state-empty" role="status">
+      <p className="state-title">{title}</p>
+      {children ? <div className="state-body">{children}</div> : null}
+    </div>
+  );
+}
+
+export function UnavailableState({ reason, code, hint }) {
+  return (
+    <div className="state state-unavailable" role="status">
+      <p className="state-title">Not available for this selection</p>
+      {reason ? <p className="state-body">{String(reason).replace(/_/g, ' ')}</p> : null}
+      {code ? <p className="mono state-code">{code}</p> : null}
+      {hint ? <p className="state-body muted">{hint}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Collapsible methodology/source surface. Primary screens stay clean;
+ * provenance lives one disclosure away.
+ */
+export function MethodologyPanel({ source, indicatorCode, derived, formula, children }) {
+  return (
+    <details className="details methodology">
+      <summary>Methodology &amp; source</summary>
+      <dl className="facts">
+        <div>
+          <dt>Source</dt>
+          <dd>World Bank World Development Indicators</dd>
+        </div>
+        {indicatorCode ? (
+          <div>
+            <dt>Indicator</dt>
+            <dd className="mono">{indicatorCode}</dd>
+          </div>
+        ) : null}
+        {source ? (
+          <div>
+            <dt>Derivation</dt>
+            <dd>{source}</dd>
+          </div>
+        ) : null}
+        {derived ? (
+          <div>
+            <dt>Derived</dt>
+            <dd>{derived}</dd>
+          </div>
+        ) : null}
+        {formula ? (
+          <div>
+            <dt>Formula</dt>
+            <dd className="mono">{formula}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {children}
+    </details>
+  );
+}
+
+/**
+ * Metric hero: human-readable name, unit, subject, code and source in one
+ * compact editorial block. Secondary information only — never the analysis.
+ */
+export function AnalysisHeader({ title, unit, subjectLabel: subject, indicatorCode, observationTypeLabel, children }) {
+  return (
+    <div className="analysis-header">
+      <div>
+        <p className="eyebrow eyebrow-dark">{subject}</p>
+        <h2 className="analysis-title">{title}</h2>
+        <p className="analysis-meta">
+          {unit ? <span>{unit}</span> : null}
+          {observationTypeLabel ? <span> · {observationTypeLabel}</span> : null}
+          {indicatorCode ? <span className="mono"> · {indicatorCode}</span> : null}
+        </p>
+      </div>
+      {children ? <div className="analysis-header-side">{children}</div> : null}
+    </div>
+  );
+}

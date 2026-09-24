@@ -51,6 +51,9 @@ export default function DataStatus({ onRefreshed }) {
   }
 
   const lastRunFailed = data?.lastRun?.status === 'failed' || data?.latestRuns?.[0]?.status === 'failed';
+  // Public UI must never offer an action that predictably fails: when the
+  // backend requires an admin token, manual refresh is administrators-only.
+  const refreshOpen = data ? !data.refreshRequiresAuth : false;
 
   return (
     <Section
@@ -58,14 +61,16 @@ export default function DataStatus({ onRefreshed }) {
       title="Data status & refresh"
       subtitle="Persistent World Bank cache, freshness, and refresh controls."
       aside={
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={startRefresh}
-          disabled={refreshState.running || inProgress}
-        >
-          {refreshState.running || inProgress ? 'Refreshing…' : 'Refresh now'}
-        </button>
+        refreshOpen ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={startRefresh}
+            disabled={refreshState.running || inProgress}
+          >
+            {refreshState.running || inProgress ? 'Refreshing…' : 'Refresh now'}
+          </button>
+        ) : null
       }
     >
       <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="data status" />
@@ -108,6 +113,14 @@ export default function DataStatus({ onRefreshed }) {
             <div>
               <dt>Auto-refresh</dt>
               <dd>{data.autoRefresh ? (data.autoRefresh.enabled ? 'Enabled on stale cache' : 'Disabled') : 'Managed by backend'}</dd>
+            </div>
+            <div>
+              <dt>Manual refresh</dt>
+              <dd>
+                {data.refreshRequiresAuth
+                  ? 'Restricted to administrators — the cache refreshes automatically when stale.'
+                  : 'Open in this environment.'}
+              </dd>
             </div>
           </dl>
 
