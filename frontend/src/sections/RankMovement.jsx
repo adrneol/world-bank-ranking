@@ -1810,10 +1810,12 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
     return <p className="muted">None.</p>;
   }
   const levelYears = yearMid != null ? [yearA, yearMid, yearB] : [yearA, yearB];
-  // The "#" column shows the backend observed growth rank of the overall AB
-  // interval — the rank of the growth values displayed in this table, stable
-  // under search/filter/sort/pagination.
-  const rankOf = (r) => r.intervals?.AB?.obsRank;
+  // The "#" column shows the row's frontend display position: its 1-based
+  // index in the COMPLETE Common list ordered by the selected Sort by option
+  // (assigned by the caller before search/relation filtering). This is NOT an
+  // analytical rank — backend growth ranks remain visible only inside Details
+  // and the growth columns show backend values verbatim.
+  const rankOf = (r) => r.displayPosition;
   if (isMobile) {
     const levelOf = (r, y) => {
       if (y === yearA) return r.displayA;
@@ -2350,17 +2352,25 @@ function GrowthResults({ data }) {
   })();
 
   const filteredCommon = (() => {
-    // Numeric queries match the "#" rank (overall AB observed growth rank).
-    const searched = commonRows.filter((r) => matchesTextOrRank(commonQuery, r.intervals?.AB?.obsRank, r));
+    // Display-position numbering (frontend presentation only, NOT an
+    // analytical rank): 1. sort the COMPLETE Common set with the existing
+    // Sort by option; 2. assign positions (#1, #2, ...) BEFORE any visibility
+    // filtering; 3. search/relation filters only hide rows, keeping assigned
+    // positions; 4. paginate the visible rows. Changing Sort by reorders and
+    // renumbers; changing search/relation/page never renumbers.
+    const sortedAll = sortGrowthRows(commonRows, commonSort);
+    const numbered = sortedAll.map((r, i) => ({ ...r, displayPosition: i + 1 }));
+    // Numeric queries still resolve against the backend observed growth rank
+    // (unchanged search semantics); text keeps substring name/ISO3 match.
+    const searched = numbered.filter((r) => matchesTextOrRank(commonQuery, r.intervals?.AB?.obsRank, r));
     // Relation filter uses backend like-for-like growth relations per
     // interval, so an economy above India in one interval and below in
     // another stays explicit.
     const related = searched.filter((r) => matchesGrowthRelation(r, commonRelation, intervals, 'common'));
-    const sorted = sortGrowthRows(related, commonSort);
     const pageSize = 25;
-    const pages = Math.max(1, Math.ceil(sorted.length / pageSize));
+    const pages = Math.max(1, Math.ceil(related.length / pageSize));
     const page = Math.min(Math.max(1, commonPage), pages);
-    return { base: sorted, page, pages, pageSize, slice: sorted.slice((page - 1) * pageSize, page * pageSize) };
+    return { base: related, page, pages, pageSize, slice: related.slice((page - 1) * pageSize, page * pageSize) };
   })();
 
   return (

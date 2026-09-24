@@ -269,8 +269,20 @@ export default function App() {
         {filtersReady && view !== 'movement' && view !== 'status' ? (
           <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Data filters">
-              <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
-              <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
+              {/*
+                Period start / Period end are relevant only to the Data tab
+                (yearly table over a range). Every other tab works from a
+                single selected Year, so rendering them there only confuses.
+                Presentation-only: the shared filter state, URL parameters,
+                backend requests and analytical results are unchanged — the
+                controls are simply not rendered outside Data.
+              */}
+              {view === 'data' ? (
+                <>
+                  <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
+                  <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
+                </>
+              ) : null}
               <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
               <Field label="Analysis" htmlFor="f-subject">
                 <select
