@@ -9,6 +9,9 @@
 
 import { Fragment, useCallback, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
+import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
+import ChartCard from '../components/charts/ChartCard.jsx';
+import SlopeChart from '../components/charts/SlopeChart.jsx';
 import { METRICS, SUBJECTS, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
@@ -2306,7 +2309,7 @@ function GrowthDecomposition({ data, intervals }) {
   );
 }
 
-function GrowthResults({ data }) {
+function GrowthResults({ data, focusName = 'India' }) {
   const u = data.universe;
   const y = data.years;
   const metric = data.metric;
@@ -2415,6 +2418,19 @@ function GrowthResults({ data }) {
           Each interval compares the end-year value with the start-year value (period endpoint change).
           Multi-year percentages are not annualized and are never called YoY.
         </p>
+      ) : null}
+      {intervals.some(({ block }) => block?.available && block?.indiaGrowthPercent != null) ? (
+        <ChartCard
+          title={`${focusName} ${isFlow ? 'annual-flow change' : 'endpoint change'} by interval`}
+          unit="%"
+          summary={`${focusName} interval changes: ${intervals.filter(({ block }) => block?.available).map(({ block, label }) => `${label} ${block.indiaGrowthDisplay ?? ''}`).join('; ')}`}
+        >
+          <BarComparisonChart
+            entries={intervals.filter(({ block }) => block?.available && block?.indiaGrowthPercent != null).map(({ block, label }) => ({ name: label, value: block.indiaGrowthPercent }))}
+            unit="%"
+            decimals={2}
+          />
+        </ChartCard>
       ) : null}
       <div className="cards" role="region" aria-label="India growth by interval">
         {intervals.map(({ key }) => (
@@ -2732,6 +2748,24 @@ function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation 
     depsKey,
     { enabled: startYear != null && endYear != null && metricKey != null },
   );
+  // Annual observations composing the span (existing focus/yearly range —
+  // raw values verbatim for bars; the total itself always comes from the
+  // period summary above, never recomputed here).
+  const subject = subjectOf(metricKey);
+  const histDepsKey = `periodhist:${metricKey}:${startYear ?? ''}:${endYear ?? ''}:${country ?? ''}`;
+  const hist = useApi(
+    (signal) =>
+      api.focusYearly(
+        { startYear, endYear: (endYear ?? (startYear ?? 0) + 1) - 1, subject, country },
+        { signal },
+      ),
+    histDepsKey,
+    { enabled: startYear != null && endYear != null && endYear > startYear && metricKey != null },
+  );
+  const annualBars = (hist.data?.rows ?? [])
+    .filter((r) => r.year >= startYear && r.year < endYear)
+    .map((r) => ({ name: String(r.year), value: r[metricKey]?.indiaValue ?? null }));
+  const hasAnnualBars = annualBars.some((b) => Number.isFinite(b.value));
   const title = isAvg ? 'Period average' : 'Period total';
   return (
     <div className="result-cards">
@@ -2770,6 +2804,19 @@ function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation 
                   Development Indicators. Calculated by this application, not published by the World Bank.
                 </p>
               </MethodologyPanel>
+              {hasAnnualBars ? (
+                <ChartCard
+                  title={`Annual observations ${data.period.startYear}–${data.period.years?.at?.(-1) ?? data.period.endYear}`}
+                  unit={data.unit}
+                  summary={`Annual stored observations composing the period for ${focusName}`}
+                >
+                  <BarComparisonChart
+                    entries={annualBars}
+                    unit={data.unit}
+                    decimals={metricDecimals(metricKey)}
+                  />
+                </ChartCard>
+              ) : null}
             </>
           ) : (
             <UnavailableState
@@ -2977,13 +3024,34 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
       {!loading && !error && !sameYear && !periodActive && data ? (
         data.comparison?.available ? (
           isGrowth ? (
-            <GrowthResults data={data} />
+            <GrowthResults data={data} focusName={focusName} />
           ) : isThreeYear ? (
             <ThreeYearResults data={data} />
           ) : (
           <>
             <h3 className="subhead">What happened to India&apos;s position number?</h3>
             <SummaryCards data={data} />
+            {data.focusMovement?.fullRankA != null && data.focusMovement?.fullRankB != null ? (
+              <ChartCard
+                title={`${focusName} position movement, ${data.years.a} to ${data.years.b}`}
+                unit="analytical rank (1 at top)"
+                summary={`${focusName} observed rank ${data.focusMovement.fullRankA} to ${data.focusMovement.fullRankB}, like-for-like ${data.focusMovement.commonRankA} to ${data.focusMovement.commonRankB}`}
+              >
+                <SlopeChart
+                  items={[
+                    { label: 'Observed position', start: data.focusMovement.fullRankA, end: data.focusMovement.fullRankB },
+                    ...(data.focusMovement.commonRankA != null && data.focusMovement.commonRankB != null
+                      ? [{ label: 'Like-for-like position', start: data.focusMovement.commonRankA, end: data.focusMovement.commonRankB }]
+                      : []),
+                  ]}
+                  startLabel={String(data.years.a)}
+                  endLabel={String(data.years.b)}
+                  unit="rank"
+                  decimals={0}
+                  invertY
+                />
+              </ChartCard>
+            ) : null}
             <div className="explanation" role="note" aria-label="Result in words">
               <StorySentence data={data} />
             </div>

@@ -12,9 +12,12 @@
 
 import { api } from '../api/client.js';
 import EntityPicker from '../components/EntityPicker.jsx';
+import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
+import ChartCard from '../components/charts/ChartCard.jsx';
+import SlopeChart from '../components/charts/SlopeChart.jsx';
+import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
 import { entityDisplayName, entityToSpec, parseEntitySpecString } from '../components/entities.js';
 import MetricPicker from '../components/MetricPicker.jsx';
-import TrendChart from '../components/TrendChart.jsx';
 import { SearchableSelect } from '../components/controls.jsx';
 import {
   EmptyState,
@@ -27,6 +30,7 @@ import {
 } from '../components/ui.jsx';
 import {
   COMPARE_OPERATIONS,
+  METRICS,
   metricDecimals,
   metricLabel,
   metricTitle,
@@ -161,38 +165,62 @@ function ComparisonResult({ data }) {
 
   if (operation === 'level') {
     const perYear = comparison.perYear ?? {};
+    const years = Object.keys(perYear).sort();
+    const nameOf = (e) => (e?.kind === 'custom_group' ? (e?.label ?? 'group') : (e?.name ?? e?.iso3 ?? ''));
+    const barRows = years.map((year) => ({ x: year, A: perYear[year]?.a ?? null, B: perYear[year]?.b ?? null }));
+    const involvesDerived = [results.a, results.b].some((e) => e?.kind === 'custom_group');
     return (
-      <div className="table-scroll" role="region" aria-label="Level comparison by year" tabIndex={0}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th scope="col">Year</th>
-              <th scope="col" className="num">
-                A
-              </th>
-              <th scope="col" className="num">
-                B
-              </th>
-              <th scope="col" className="num">
-                Gap (A − B)
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {Object.entries(perYear).map(([year, row]) => (
-              <tr key={year}>
-                <th scope="row">{year}</th>
-                <td className="num">{formatValuePlain(row.a, metricKey)}</td>
-                <td className="num">{formatValuePlain(row.b, metricKey)}</td>
-                <td className="num" title={row.gapReason ? readableReason(row.gapReason) : undefined}>
-                  {row.gap === null || row.gap === undefined ? '—' : formatValuePlain(row.gap, metricKey)}
-                </td>
+      <>
+        <div className="table-scroll" role="region" aria-label="Level comparison by year" tabIndex={0}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th scope="col">Year</th>
+                <th scope="col" className="num">
+                  A
+                </th>
+                <th scope="col" className="num">
+                  B
+                </th>
+                <th scope="col" className="num">
+                  Gap (A − B)
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="footnote">Gap unit: {comparison.unit ?? unit}. Missing legs stay missing.</p>
-      </div>
+            </thead>
+            <tbody>
+              {Object.entries(perYear).map(([year, row]) => (
+                <tr key={year}>
+                  <th scope="row">{year}</th>
+                  <td className="num">{formatValuePlain(row.a, metricKey)}</td>
+                  <td className="num">{formatValuePlain(row.b, metricKey)}</td>
+                  <td className="num" title={row.gapReason ? readableReason(row.gapReason) : undefined}>
+                    {row.gap === null || row.gap === undefined ? '—' : formatValuePlain(row.gap, metricKey)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="footnote">Gap unit: {comparison.unit ?? unit}. Missing legs stay missing.</p>
+        </div>
+        {years.length > 0 ? (
+          <ChartCard
+            title={`Level values — ${nameOf(results.a)} vs ${nameOf(results.b)}`}
+            unit={comparison.unit ?? unit}
+            derived={involvesDerived}
+            summary={`${nameOf(results.a)} vs ${nameOf(results.b)} level values by year`}
+          >
+            <BarComparisonChart
+              entries={barRows}
+              series={[
+                { key: 'A', label: nameOf(results.a) },
+                { key: 'B', label: nameOf(results.b) },
+              ]}
+              unit={comparison.unit ?? unit}
+              decimals={metricDecimals(metricKey)}
+            />
+          </ChartCard>
+        ) : null}
+      </>
     );
   }
 
@@ -265,13 +293,16 @@ function GroupDetail({ entity, metricKey }) {
   );
 }
 
-function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames }) {
+function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames, operation }) {
   // Stored-observation trajectories for point entities (never groups):
   // one batched observations fetch per entity-year through the public API.
+  // Chart type follows the analysis: multi-year spans draw time-series
+  // lines (gaps stay gaps); exactly two years draw endpoint slopes (never
+  // a fake "trend"); single-year level analysis is barred in
+  // ComparisonResult instead of here.
   // Explicit unavailability instead of a silent empty chart: groups compare
-  // through the result cards (no stored group series exists), aggregates
-  // are served by entity comparison rather than the observations lookup,
-  // and single-year operations have no span to draw.
+  // through the result cards (no stored group series exists) and aggregates
+  // are served by entity comparison rather than the observations lookup.
   const pointEntity = (e) => e && (e.kind === 'country' || e.kind === 'wb_aggregate');
   const enabled = pointEntity(entityA) && pointEntity(entityB) && yearA != null && yearB != null;
   const involvesGroup = [entityA, entityB].some((e) => e?.kind === 'custom_group');
@@ -308,7 +339,7 @@ function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames })
     return (
       <UnavailableState
         reason="group_trajectory_unavailable"
-        hint="Trajectories draw stored country observations. Custom groups compare through the result cards and group detail above."
+        hint="Time series draw stored country observations. Custom groups compare through the result cards and group detail above."
       />
     );
   }
@@ -321,6 +352,9 @@ function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames })
     );
   }
   if (enabled && span.length < 2) {
+    // Single-year level analysis is barred in ComparisonResult; every
+    // other single-year operation keeps this explanatory note.
+    if (operation === 'level') return null;
     return (
       <UnavailableState
         reason="single_year_no_trajectory"
@@ -331,14 +365,38 @@ function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames })
   if (!fetchable || loading || !data) return null;
   const labelA = countryNames(entityA);
   const labelB = countryNames(entityB);
+  const unit = METRICS[metricKey]?.unitLong ?? METRICS[metricKey]?.unit ?? null;
+  const decimals = metricDecimals(metricKey);
+  const title = `${labelA} vs ${labelB}`;
+  const summary = `${title} — annual stored observations, ${sampled[0]} to ${sampled[sampled.length - 1]}`;
+  if (sampled.length === 2) {
+    const at = (rows, year) => rows.find((r) => r.year === year)?.value ?? null;
+    return (
+      <ChartCard title={title} unit={unit} summary={summary}>
+        <SlopeChart
+          items={[
+            { label: labelA, start: at(data.aRows, sampled[0]), end: at(data.aRows, sampled[1]) },
+            { label: labelB, start: at(data.bRows, sampled[0]), end: at(data.bRows, sampled[1]) },
+          ]}
+          startLabel={String(sampled[0])}
+          endLabel={String(sampled[1])}
+          unit={unit}
+          decimals={decimals}
+        />
+      </ChartCard>
+    );
+  }
   return (
-    <TrendChart
-      title={`${labelA} vs ${labelB}`}
-      series={[
-        { label: labelA, points: data.aRows.map((r) => ({ x: r.year, y: r.value })) },
-        { label: labelB, points: data.bRows.map((r) => ({ x: r.year, y: r.value })) },
-      ]}
-    />
+    <ChartCard title={title} unit={unit} summary={summary}>
+      <TimeSeriesChart
+        series={[
+          { label: labelA, points: data.aRows.map((r) => ({ x: r.year, y: r.value })) },
+          { label: labelB, points: data.bRows.map((r) => ({ x: r.year, y: r.value })) },
+        ]}
+        unit={unit}
+        decimals={decimals}
+      />
+    </ChartCard>
   );
 }
 
@@ -531,6 +589,7 @@ export default function Compare({
                   yearA={data.years.a}
                   yearB={data.years.b ?? data.years.a}
                   countryNames={countryNames}
+                  operation={operation}
                 />
                 {data.vintage?.warning ? (
                   <p className="status status-empty" role="status">

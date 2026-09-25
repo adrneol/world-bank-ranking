@@ -16,6 +16,8 @@
  */
 
 import { api } from '../api/client.js';
+import ChartCard from '../components/charts/ChartCard.jsx';
+import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
 import { metricCapabilities, metricDecimals, metricLabel, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal, formatYoy } from '../utils/format.js';
@@ -117,6 +119,18 @@ function RatePanel({ metricKey, country, focusName, startYear, endYear, realSubj
         Change {startYear} → {endYear}:
       </p>
       <ChangeSummary change={pp?.a} unitNoun="percentage points" />
+      <ChartCard
+        title={`${title} — annual rate`}
+        unit="annual %"
+        summary={`${focusName} ${title} by year; the table above lists every value`}
+      >
+        <TimeSeriesChart
+          series={[{ label: title, points: years.map((year) => ({ x: year, y: rateRows.get(year)?.indiaValue ?? null })) }]}
+          unit="annual %"
+          decimals={metricDecimals(metricKey)}
+          zeroLine
+        />
+      </ChartCard>
       <p className="footnote">
         Descriptive association only — inflation is not shown as a cause of growth. A fall from 6% to 3% reads as
         −3.0 percentage points, never −50%.
@@ -150,6 +164,19 @@ function IndexPanel({ metricKey, country, focusName, startYear, endYear }) {
         points, never a cross-country cost-of-living rank.
       </p>
       <ChangeSummary change={pt?.a} unitNoun="index points" />
+      {(index.data?.rows ?? []).length > 0 ? (
+        <ChartCard
+          title={`${title} — history`}
+          unit="index points (2010 = 100)"
+          summary={`${focusName} ${title} by year; within-entity movement only, never a cross-country rank`}
+        >
+          <TimeSeriesChart
+            series={[{ label: title, points: (index.data?.rows ?? []).map((r) => ({ x: r.year, y: r[metricKey]?.available ? r[metricKey].indiaValue : null })) }]}
+            unit="index points"
+            decimals={metricDecimals(metricKey)}
+          />
+        </ChartCard>
+      ) : null}
       {rows.length > 0 ? (
         <div className="table-scroll" role="region" aria-label="Index by year" tabIndex={0}>
           <table className="table table-compact">
@@ -229,6 +256,19 @@ function FxPanel({ metricKey, country, focusName, startYear, endYear, onCompareE
             </tbody>
           </table>
         </div>
+      ) : null}
+      {(fx.data?.rows ?? []).length > 0 ? (
+        <ChartCard
+          title={`${title} — movement`}
+          unit="LCU per US$"
+          summary={`${focusName} quoted rate by year; a rise is depreciation, a fall is appreciation`}
+        >
+          <TimeSeriesChart
+            series={[{ label: title, points: (fx.data?.rows ?? []).map((r) => ({ x: r.year, y: r[metricKey]?.available ? r[metricKey].indiaValue : null })) }]}
+            unit="LCU per US$"
+            decimals={metricDecimals(metricKey)}
+          />
+        </ChartCard>
       ) : null}
       <p>
         <button

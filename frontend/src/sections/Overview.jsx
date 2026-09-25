@@ -8,9 +8,11 @@
  */
 
 import { api } from '../api/client.js';
-import { METRICS, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
+import ChartCard from '../components/charts/ChartCard.jsx';
+import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
+import { METRICS, metricDecimals, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { formatRank, formatYoy } from '../utils/format.js';
+import { formatDecimal, formatRank, formatYoy } from '../utils/format.js';
 import { StatusBlock } from '../components/ui.jsx';
 import SubjectInsight from './SubjectInsight.jsx';
 
@@ -26,6 +28,24 @@ export default function Overview({ year, subject = 'gdp_per_capita', metricKey =
   const row = data?.rows?.[0] ?? null;
   const empty = !loading && !error && !row;
   const displayName = data?.focus?.name ?? focusName;
+  // History line for the primary metric over all stored years (existing
+  // focus/yearly range — raw annual values verbatim, gaps stay gaps).
+  const historyKey = metricKey ?? keys[0];
+  const historyYears = [...(availableYears ?? [])].sort((a, b) => a - b);
+  const histDepsKey = `overview-hist:${historyKey}:${subject}:${country}:${historyYears[0] ?? ''}:${historyYears[historyYears.length - 1] ?? ''}`;
+  const hist = useApi(
+    (signal) =>
+      api.focusYearly(
+        { startYear: historyYears[0], endYear: historyYears[historyYears.length - 1], subject, country },
+        { signal },
+      ),
+    histDepsKey,
+    { enabled: historyYears.length > 1 && historyKey != null },
+  );
+  const historyMeta = METRICS[historyKey];
+  const historyPoints = (hist.data?.rows ?? []).map((r) => ({ x: r.year, y: r[historyKey]?.indiaValue ?? null }));
+  const historyHasData = historyPoints.some((p) => Number.isFinite(p.y));
+  const historySummary = `Annual ${historyMeta?.shortTitle ?? historyKey} for ${displayName}, ${historyYears[0] ?? '—'} to ${historyYears[historyYears.length - 1] ?? '—'}`;
 
   return (
     <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
@@ -66,6 +86,42 @@ export default function Overview({ year, subject = 'gdp_per_capita', metricKey =
             Rank calculated from World Bank WDI observations. The {keys.length} {subjectLabel(subject)} series use different
             units and are never combined or scored against each other.
           </p>
+          {historyHasData ? (
+            <>
+              <ChartCard
+                title={`${historyMeta?.shortTitle ?? historyKey} — history`}
+                unit={historyMeta?.unitLong ?? historyMeta?.unit}
+                summary={historySummary}
+              >
+                <TimeSeriesChart
+                  series={[{ label: displayName, points: historyPoints }]}
+                  unit={historyMeta?.unitLong ?? historyMeta?.unit}
+                  decimals={metricDecimals(historyKey)}
+                />
+              </ChartCard>
+              <details className="chart-data-fallback">
+                <summary>View annual values as a table</summary>
+                <div className="table-scroll" role="region" aria-label="Annual history values" tabIndex={0}>
+                  <table className="table table-compact">
+                    <thead>
+                      <tr>
+                        <th scope="col">Year</th>
+                        <th scope="col" className="num">{historyMeta?.shortTitle ?? historyKey}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(hist.data?.rows ?? []).map((r) => (
+                        <tr key={r.year}>
+                          <th scope="row">{r.year}</th>
+                          <td className="num">{r[historyKey]?.indiaValueDisplay?.formatted ?? formatDecimal(r[historyKey]?.indiaValue, metricDecimals(historyKey))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </>
+          ) : null}
           <SubjectInsight
             metricKey={metricKey ?? keys[0]}
             country={country}
