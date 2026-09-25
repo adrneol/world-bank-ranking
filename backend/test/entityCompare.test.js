@@ -375,12 +375,13 @@ test('Phase 4: like-for-like without a group is rejected explicitly', async () =
 // RATIO / PER-CAPITA / INFLATION / FX capability (items 26-32, unit + HTTP)
 // ---------------------------------------------------------------------------
 test('Phase 4.26-28: ratio and per-capita group rules', () => {
-  // WEIGHTED_RATIO refuses plain group sums; per-capita refuses all sums.
+  // WEIGHTED_RATIO groups resolve via requiredDenominator legs (Phase 7C-2
+  // approved direction — no longer refused); per-capita refuses all sums.
   // (Phase-5 note: the FDI ratio is now a production metric; the capability
   // rule is unchanged, only the registry address moved.)
   assert.deepEqual(canCompare({ entityA: { kind: 'country' }, entityB: { kind: 'custom_group' }, metric: METRICS.fdi_inflows_pct_gdp, operation: 'level' }), {
-    allowed: false,
-    reason: 'NOT_AGGREGATABLE',
+    allowed: true,
+    reason: null,
   });
   assert.deepEqual(canCompare({ entityA: { kind: 'country' }, entityB: { kind: 'custom_group' }, metric: METRICS.nominal_current, operation: 'level' }), {
     allowed: false,

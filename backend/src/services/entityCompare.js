@@ -27,6 +27,7 @@ import {
   TRANSFORMS,
   computeTransform,
   crossRate,
+  groupRatioFromSums,
   groupSum,
 } from '../domain/transforms.js';
 import { sourceAttribution } from './attribution.js';
@@ -145,6 +146,175 @@ function buildGroupSeries(entity, memberRowsByYear, years, metric) {
 }
 
 /**
+ * WEIGHTED GROUP RATIO series (Phase 7C-2): SUM(numerator legs) /
+ * SUM(denominator legs) x 100 for the same group and year — e.g. group
+ * FDI % GDP from member FDI inflows over member total GDP. Never
+ * average(member ratios), never sum(member ratios).
+ *
+ * Strict per-year completeness: every member must hold BOTH legs; legs of
+ * the same series must share one World Bank vintage (cross-series vintage
+ * differences surface as warnings, as with group sums); numerator and
+ * denominator bases must match the registry linkage. One violation makes
+ * that year unavailable with an explicit reason — never a partial ratio.
+ * Like-for-like restricts to members fully legged in EVERY year.
+ *
+ * Exported for unit tests (basis/vintage branches); production calls flow
+ * through buildCompareResponse so capability gating always applies first.
+ */
+export function buildGroupRatioSeries(entity, numRowsByYear, denRowsByYear, years, metric, denMetric) {
+  const observed = {};
+  const likeForLike = {};
+  const coverage = {};
+  // Basis compatibility is declarative and leg-to-leg: the numerator series
+  // (from requiredDenominator.numeratorMetric) and the denominator series
+  // must share price and currency basis — current-price FDI over
+  // current-price GDP. The ratio itself carries no basis and is never one
+  // side of the comparison. A missing linkage fails closed (registry
+  // misconfiguration), never silently.
+  const numMetric = metric.requiredDenominator?.numeratorMetric
+    ? (METRICS[metric.requiredDenominator.numeratorMetric] ?? null)
+    : null;
+  if (!numMetric) {
+    throw entityError(
+      ENTITY_ERROR_CODES.UNSUPPORTED_TRANSFORMATION,
+      `Metric "${metric.key}" declares WEIGHTED_RATIO without a registered requiredDenominator.numeratorMetric linkage.`,
+    );
+  }
+  const basisOk =
+    numMetric.priceBasis === denMetric.priceBasis && numMetric.currencyBasis === denMetric.currencyBasis;
+  const basisDetail =
+    `numerator legs ${numMetric.key} (${numMetric.priceBasis}/${numMetric.currencyBasis}) vs ` +
+    `denominator legs ${denMetric.key} (${denMetric.priceBasis}/${denMetric.currencyBasis}) ` +
+    `(requiredDenominator.basis: ${metric.requiredDenominator?.basis ?? 'undeclared'})`;
+
+  const ratioFor = (year, members) => {
+    const numByIso = new Map(((numRowsByYear.get(year) ?? []).map((r) => [r.iso3, r])));
+    const denByIso = new Map(((denRowsByYear.get(year) ?? []).map((r) => [r.iso3, r])));
+    const valid = members.filter((iso3) => numByIso.has(iso3) && denByIso.has(iso3)).sort();
+    const missingNumerators = members.filter((iso3) => !numByIso.has(iso3));
+    const missingDenominators = members.filter((iso3) => !denByIso.has(iso3));
+    // Vintage coherence is enforced WITHIN each leg family: member rows of
+    // the same series must share one World Bank vintage, otherwise the set
+    // is incoherent. Across families (FDI series vs GDP series) different
+    // last-updated stamps are legitimate — series update on their own
+    // cycles — and surface through the response vintage warning instead
+    // of refusing (same tolerance as group sums across members).
+    const numVintages = new Set(valid.map((iso3) => numByIso.get(iso3).wbLastUpdated).filter((v) => v !== null && v !== undefined));
+    const denVintages = new Set(valid.map((iso3) => denByIso.get(iso3).wbLastUpdated).filter((v) => v !== null && v !== undefined));
+    const vintages = new Set([...numVintages, ...denVintages]);
+    const derivation = {
+      operation: 'GROUP_RATIO_FROM_SUMS',
+      formula: 'sum(numerator legs) / sum(denominator legs) x 100',
+      metricKey: metric.key,
+      numeratorMetric: numMetric.key,
+      denominatorMetric: denMetric.key,
+    };
+    // `missing` mirrors the SUM-series coverage shape (union of members
+    // lacking any leg) so shared renderers never branch on aggregation.
+    const missingUnion = [...new Set([...missingNumerators, ...missingDenominators])].sort();
+    const base = {
+      members: valid.length,
+      provenance: 'APP_DERIVED',
+      derivation,
+      coverage: {
+        valid,
+        missing: missingUnion,
+        missingNumerators,
+        missingDenominators,
+        validCount: valid.length,
+        missingCount: missingUnion.length,
+      },
+    };
+    if (!basisOk) {
+      return {
+        entry: { value: null, valueRaw: null, reason: ENTITY_ERROR_CODES.INCOMPATIBLE_LEGS, detail: basisDetail, ...base },
+        vintages,
+      };
+    }
+    if (missingNumerators.length > 0 || missingDenominators.length > 0) {
+      const detail = [
+        missingNumerators.length > 0 ? `missing ${metric.key} legs: ${missingNumerators.join(', ')}` : null,
+        missingDenominators.length > 0 ? `missing ${denMetric.key} legs: ${missingDenominators.join(', ')}` : null,
+      ].filter(Boolean).join('; ');
+      return {
+        entry: { value: null, valueRaw: null, reason: ENTITY_ERROR_CODES.MISSING_REQUIRED_DATA, detail, ...base },
+        vintages,
+      };
+    }
+    if (vintages.size > 1 && (numVintages.size > 1 || denVintages.size > 1)) {
+      return {
+        entry: {
+          value: null,
+          valueRaw: null,
+          reason: ENTITY_ERROR_CODES.INCOMPATIBLE_LEGS,
+          detail: `ratio legs carry mixed World Bank vintages within one series: numerators [${[...numVintages].sort().join(', ')}], denominators [${[...denVintages].sort().join(', ')}]`,
+          ...base,
+        },
+        vintages,
+      };
+    }
+    const computed = groupRatioFromSums(
+      { numerators: valid.map((iso3) => numByIso.get(iso3).value), denominators: valid.map((iso3) => denByIso.get(iso3).value) },
+      metric,
+    );
+    if (!computed.computable) {
+      return {
+        entry: { value: null, valueRaw: null, reason: computed.reason, detail: computed.description, ...base },
+        vintages,
+      };
+    }
+    return {
+      entry: { value: computed.value, valueRaw: String(computed.value), reason: null, detail: null, ...base },
+      vintages,
+    };
+  };
+
+  const allVintages = new Set();
+  for (const year of years) {
+    const { entry, vintages } = ratioFor(year, entity.members);
+    for (const vintage of vintages) allVintages.add(vintage);
+    const { coverage: yearCoverage, ...rest } = entry;
+    observed[year] = rest;
+    coverage[year] = yearCoverage;
+  }
+  // Like-for-like: members fully legged in EVERY requested year.
+  const commonSet = new Set(entity.members);
+  for (const year of years) {
+    const yearValid = new Set(coverage[year]?.valid ?? []);
+    for (const iso3 of [...commonSet]) {
+      if (!yearValid.has(iso3)) commonSet.delete(iso3);
+    }
+  }
+  const common = [...commonSet].sort();
+  for (const year of years) {
+    const { entry } = ratioFor(year, common);
+    const { coverage: _ignored, ...rest } = entry;
+    likeForLike[year] = rest;
+  }
+  coverage.common = common;
+  coverage.commonCount = common.length;
+  coverage.observedOnlyA = years.length > 1 ? ((coverage[years[0]]?.valid ?? []).filter((iso3) => !commonSet.has(iso3))) : [];
+  coverage.observedOnlyB = years.length > 1 ? ((coverage[years[years.length - 1]]?.valid ?? []).filter((iso3) => !commonSet.has(iso3))) : [];
+
+  let membershipEffect = null;
+  if (years.length > 1) {
+    const [yearA, yearB] = [years[0], years[years.length - 1]];
+    const obsA = observed[yearA]?.value;
+    const obsB = observed[yearB]?.value;
+    const lflA = likeForLike[yearA]?.value;
+    const lflB = likeForLike[yearB]?.value;
+    if ([obsA, obsB, lflA, lflB].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      membershipEffect = {
+        absolute: obsB - obsA - (lflB - lflA),
+        unit: metric.unitLong ?? metric.unit ?? null,
+        note: 'Observed ratio change minus like-for-like ratio change: the coverage/membership contribution. Within-member change is the like-for-like component.',
+      };
+    }
+  }
+  return { observed, likeForLike, coverage, membershipEffect, vintages: [...allVintages].sort() };
+}
+
+/**
  * Generic entity comparison.
  *
  * @param {object} db
@@ -219,12 +389,43 @@ export function buildCompareResponse(db, options = {}) {
 
   // One atomic eligible read covers every country and group member. Official
   // aggregates are read directly per year (they are excluded from eligible
-  // reads by the universe rule, by design).
+  // reads by the universe rule, by design). Weighted-ratio metrics additionally
+  // resolve their canonical denominator legs (requiredDenominator linkage).
   const eligibleRows = getEligibleObservationsForYears(db, indicator.id, years);
   const eligibleByYear = new Map(years.map((y) => [y, []]));
   for (const row of eligibleRows) {
     if (eligibleByYear.has(row.year)) {
       eligibleByYear.get(row.year).push(row);
+    }
+  }
+  let denMetric = null;
+  let denEligibleByYear = null;
+  let numEligibleByYear = null;
+  if (metric.aggregation === 'WEIGHTED_RATIO') {
+    const denKey = metric.requiredDenominator?.metricKey ?? null;
+    const numKey = metric.requiredDenominator?.numeratorMetric ?? null;
+    if (!denKey || !METRICS[denKey] || !numKey || !METRICS[numKey]) {
+      throw entityError(
+        ENTITY_ERROR_CODES.UNSUPPORTED_TRANSFORMATION,
+        `Metric "${metric.key}" declares WEIGHTED_RATIO without a registered requiredDenominator linkage (numerator + denominator).`,
+      );
+    }
+    denMetric = METRICS[denKey];
+    // Numerator legs come from the numerator SERIES (e.g. FDI net inflows),
+    // never from the ratio indicator itself: averaging or summing the
+    // published member ratios would reconstruct the forbidden statistic.
+    for (const [mapKey, seriesKey] of [['num', numKey], ['den', denKey]]) {
+      const seriesIndicator = getIndicatorByMetricKey(db, seriesKey);
+      const byYear = new Map(years.map((y) => [y, []]));
+      if (seriesIndicator) {
+        for (const row of getEligibleObservationsForYears(db, seriesIndicator.id, years)) {
+          if (byYear.has(row.year)) {
+            byYear.get(row.year).push(row);
+          }
+        }
+      }
+      if (mapKey === 'num') numEligibleByYear = byYear;
+      else denEligibleByYear = byYear;
     }
   }
 
@@ -236,16 +437,36 @@ export function buildCompareResponse(db, options = {}) {
   for (const [slot, entity] of [['a', entityA], ['b', entityB]]) {
     if (entity.kind === ENTITY_KINDS.CUSTOM_GROUP) {
       const memberRowsByYear = new Map();
+      const isRatio = metric.aggregation === 'WEIGHTED_RATIO';
       for (const year of years) {
         const all = eligibleByYear.get(year) ?? [];
         const memberSet = new Set(entity.members);
         const memberRows = all.filter((r) => memberSet.has(r.iso3));
         memberRowsByYear.set(year, memberRows);
-        for (const row of memberRows) {
-          if (row.wbLastUpdated) vintageValues.add(row.wbLastUpdated);
+        // Ratio groups resolve their own numerator/denominator legs below;
+        // only actually-used rows may contribute to vintage coherence.
+        if (!isRatio) {
+          for (const row of memberRows) {
+            if (row.wbLastUpdated) vintageValues.add(row.wbLastUpdated);
+          }
         }
       }
-      const series = buildGroupSeries(entity, memberRowsByYear, years, metric);
+      // WEIGHTED_RATIO groups resolve numerator + denominator legs per
+      // member/year (requiredDenominator linkage); every other group sums.
+      const series = isRatio
+        ? (() => {
+          const memberSet = new Set(entity.members);
+          const numRowsByYear = new Map();
+          const denRowsByYear = new Map();
+          for (const year of years) {
+            numRowsByYear.set(year, (numEligibleByYear.get(year) ?? []).filter((r) => memberSet.has(r.iso3)));
+            denRowsByYear.set(year, (denEligibleByYear.get(year) ?? []).filter((r) => memberSet.has(r.iso3)));
+          }
+          const ratio = buildGroupRatioSeries(entity, numRowsByYear, denRowsByYear, years, metric, denMetric);
+          for (const vintage of ratio.vintages) vintageValues.add(vintage);
+          return ratio;
+        })()
+        : buildGroupSeries(entity, memberRowsByYear, years, metric);
       results[slot] = {
         kind: entity.kind,
         label: entity.label,
@@ -427,24 +648,41 @@ export function buildGroupEvaluation(db, options = {}) {
   if (!metric) {
     throw entityError(ENTITY_ERROR_CODES.INVALID_INDICATOR, `Unknown indicator "${options.metricKey}".`);
   }
-  const canValue = metric.aggregation === 'SUM';
+  const canValue = metric.aggregation === 'SUM' || metric.aggregation === 'WEIGHTED_RATIO';
   const indicator = getIndicatorByMetricKey(db, options.metricKey);
+  // Weighted-ratio preview additionally resolves denominator legs so the
+  // evaluation shows numerator AND denominator coverage per year.
+  const denMetric = metric.aggregation === 'WEIGHTED_RATIO' && metric.requiredDenominator?.metricKey
+    ? (METRICS[metric.requiredDenominator.metricKey] ?? null)
+    : null;
+  const denIndicator = denMetric ? getIndicatorByMetricKey(db, denMetric.key) : null;
   let coverage = null;
   if (indicator && (options.yearA !== undefined || options.yearB !== undefined)) {
     const years = [options.yearA, options.yearB].filter((y) => Number.isInteger(y));
     if (years.length > 0) {
       const rows = getEligibleObservationsForYears(db, indicator.id, years);
+      const denRows = denIndicator ? getEligibleObservationsForYears(db, denIndicator.id, years) : [];
       const memberSet = new Set(entity.members);
       coverage = {};
       for (const year of years) {
         const valid = rows.filter((r) => r.year === year && memberSet.has(r.iso3)).map((r) => r.iso3).sort();
         const validSet = new Set(valid);
-        coverage[year] = {
+        const yearCoverage = {
           valid,
           missing: entity.members.filter((iso3) => !validSet.has(iso3)),
           validCount: valid.length,
           missingCount: entity.members.filter((iso3) => !validSet.has(iso3)).length,
         };
+        if (denMetric) {
+          const denValid = denRows.filter((r) => r.year === year && memberSet.has(r.iso3)).map((r) => r.iso3).sort();
+          const denValidSet = new Set(denValid);
+          yearCoverage.numeratorMetric = metric.key;
+          yearCoverage.denominatorMetric = denMetric.key;
+          yearCoverage.denominatorValid = denValid;
+          yearCoverage.missingNumerators = entity.members.filter((iso3) => !validSet.has(iso3));
+          yearCoverage.missingDenominators = entity.members.filter((iso3) => !denValidSet.has(iso3));
+        }
+        coverage[year] = yearCoverage;
       }
     }
   }

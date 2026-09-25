@@ -317,6 +317,61 @@ export function supportsGroupSum(metricKey) {
   return caps.aggregation === 'SUM';
 }
 
+/**
+ * True when a metric supports custom-group values at all (summed totals
+ * or weighted ratios). Drives group-mode toggles and group-tab offers.
+ */
+export function supportsGroupValues(metricKey) {
+  const caps = metricCapabilities(metricKey);
+  if (!caps) return false;
+  return caps.aggregation === 'SUM' || caps.aggregation === 'WEIGHTED_RATIO';
+}
+
+/**
+ * Entity-aware operation availability: metric capability metadata PLUS
+ * entity-kind rules, mirroring backend canCompare so the UI never offers
+ * an operation the backend will reject with HTTP 400. Backend remains
+ * authoritative (it re-validates); this only decides offers.
+ *
+ * @param {string} metricKey
+ * @param {{kind:string, iso3?:string}|null} entityA
+ * @param {{kind:string, iso3?:string}|null} entityB
+ * @returns {{id, label, needsYears, available, disabledReason}[]}
+ */
+export function operationsForEntities(metricKey, entityA, entityB) {
+  const caps = metricCapabilities(metricKey);
+  const base = operationsWithAvailability(metricKey);
+  // Entities unknown (builder incomplete): metric rules only; entity rules
+  // apply once both sides are selected.
+  if (!entityA || !entityB) return base;
+  const kinds = [entityA.kind, entityB.kind];
+  const involvesGroup = kinds.includes('custom_group');
+  const groupSupported = supportsGroupValues(metricKey);
+  const bothCountries = entityA.kind === 'country' && entityB.kind === 'country';
+  return base.map((op) => {
+    if (!op.available) return op;
+    // Cross-rates need two country legs with compatible quotations.
+    if (op.id === 'cross_rate' && !bothCountries) {
+      return { ...op, available: false, disabledReason: 'Cross-rate needs two countries' };
+    }
+    // Groups need a group-capable aggregation (SUM totals or weighted ratio).
+    if (involvesGroup && !groupSupported) {
+      return { ...op, available: false, disabledReason: 'This metric has no group aggregation' };
+    }
+    // NEUTRAL metrics (quoted FX, index levels) have no cross-entity level
+    // ordering: raw magnitudes across countries are not comparable.
+    if (
+      op.id === 'level' &&
+      caps?.rankingDirection === 'NEUTRAL' &&
+      bothCountries &&
+      entityA.iso3 !== entityB.iso3
+    ) {
+      return { ...op, available: false, disabledReason: 'Raw levels are not comparable across countries for this metric' };
+    }
+    return op;
+  });
+}
+
 /** Human-readable observation-type label for metric headers. */
 export function observationTypeLabel(type) {
   switch (type) {

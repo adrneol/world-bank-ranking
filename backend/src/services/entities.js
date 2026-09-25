@@ -52,6 +52,7 @@ export const ENTITY_ERROR_CODES = Object.freeze({
   NO_OFFICIAL_AGGREGATE: 'NO_OFFICIAL_AGGREGATE',
   UNSUPPORTED_ENTITY_COMBINATION: 'UNSUPPORTED_ENTITY_COMBINATION',
   UNSUPPORTED_TRANSFORMATION: 'UNSUPPORTED_TRANSFORMATION',
+  INCOMPATIBLE_LEGS: 'INCOMPATIBLE_LEGS',
   MISSING_REQUIRED_DATA: 'MISSING_REQUIRED_DATA',
   INCOMPATIBLE_QUOTATION: 'INCOMPATIBLE_QUOTATION',
   LIKE_FOR_LIKE_REQUIRES_GROUP: 'LIKE_FOR_LIKE_REQUIRES_GROUP',
@@ -246,9 +247,15 @@ export function resolveEntity(db, spec) {
  * Rules:
  *  - cross_rate: both entities must be countries; metric must allow
  *    CROSS_RATE via quotation metadata (Phase-3 canTransform).
- *  - any custom group value: metric aggregation must be SUM (WEIGHTED_RATIO
- *    group computation needs ratio legs unavailable in Phase 4 and is
- *    refused explicitly; per-capita/rates/FX refuse via NOT_AGGREGATABLE).
+ *  - raw level comparison of NEUTRAL metrics (quoted FX, index levels)
+ *    between two different countries is disabled: cross-currency quote
+ *    magnitudes and cross-basket index points are not comparable
+ *    quantities. Same-entity identity and movement operations are
+ *    unaffected.
+ *  - any custom group value: metric aggregation must be SUM or
+ *    WEIGHTED_RATIO (the latter resolves numerator/denominator legs via
+ *    requiredDenominator); per-capita/rates/FX/index refuse via
+ *    NOT_AGGREGATABLE.
  *  - change operations (absolute/percent/cagr): metric must declare them
  *    (Phase-3 canTransform on validChangeTypes).
  *  - official aggregates: always comparable as published entities; the
@@ -276,10 +283,24 @@ export function canCompare({ entityA, entityB, metric, operation }) {
       : { allowed: false, reason: ENTITY_ERROR_CODES.UNSUPPORTED_TRANSFORMATION };
   }
 
+  // NEUTRAL metrics (quoted exchange rates, index levels) have no
+  // meaningful cross-entity level ordering: 83 INR/USD vs 150 JPY/USD are
+  // different units, and index points live in different country baskets.
+  // Disabled by default per approved FX/index semantics; movement and
+  // cross-rate operations are unaffected.
+  if (
+    operation === 'level' &&
+    metric.rankingDirection === 'NEUTRAL' &&
+    entityA.kind === ENTITY_KINDS.COUNTRY &&
+    entityB.kind === ENTITY_KINDS.COUNTRY &&
+    entityA.iso3 !== entityB.iso3
+  ) {
+    return { allowed: false, reason: ENTITY_ERROR_CODES.UNSUPPORTED_ENTITY_COMBINATION };
+  }
+
   if (hasGroup) {
-    if (metric.aggregation === 'SUM') return checkPointOperation(metric, operation);
-    if (metric.aggregation === 'WEIGHTED_RATIO') {
-      return { allowed: false, reason: ENTITY_ERROR_CODES.NOT_AGGREGATABLE };
+    if (metric.aggregation === 'SUM' || metric.aggregation === 'WEIGHTED_RATIO') {
+      return checkPointOperation(metric, operation);
     }
     return { allowed: false, reason: ENTITY_ERROR_CODES.NOT_AGGREGATABLE };
   }

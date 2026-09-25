@@ -781,7 +781,14 @@ const CAPITAL_FLOWS_METRICS = Object.freeze({
     interpretation: 'NEUTRAL',
     comparisonCapability: Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']),
     signDomain: 'SIGNED',
-    requiredDenominator: null,
+    // Canonical denominator linkage for the approved weighted group ratio
+    // (Phase 7C-2): current-price FDI numerator (BX.KLT.DINV.CD.WD,
+    // priceBasis 'current', currencyBasis 'USD') over current-price total
+    // GDP (total_current, NY.GDP.MKTP.CD — same basis by construction).
+    // Group ratio = SUM(FDI legs) / SUM(GDP legs) x 100 for the same
+    // group/year; never average(member %) nor sum(member %). Declared
+    // here so no service hard-codes a GDP series.
+    requiredDenominator: Object.freeze({ metricKey: 'total_current', numeratorMetric: 'fdi_inflows', basis: 'current-price USD' }),
     quotation: null,
     derivation: Object.freeze({ kind: 'RAW' }),
     lifecycle: 'PRODUCTION',
@@ -1252,6 +1259,21 @@ export function assertSemanticFields(key, metric, { prospectiveSubject = false }
   if (metric.requiredDenominator !== null && typeof metric.requiredDenominator !== 'object') {
     fail('requiredDenominator must be null or a descriptor object');
   }
+  // Weighted-ratio linkage (Phase 7C-2): a declared denominator must name a
+  // registered metric key so group-ratio legs resolve canonically.
+  if (metric.requiredDenominator !== null) {
+    if (typeof metric.requiredDenominator.metricKey !== 'string' || !metric.requiredDenominator.metricKey) {
+      fail('requiredDenominator must declare a metricKey');
+    }
+    // A declared numerator leg must also resolve: basis compatibility is
+    // checked between the two leg series, never against the ratio itself
+    // (a ratio has no price basis of its own).
+    if (metric.requiredDenominator.numeratorMetric !== undefined) {
+      if (typeof metric.requiredDenominator.numeratorMetric !== 'string' || !metric.requiredDenominator.numeratorMetric) {
+        fail('requiredDenominator.numeratorMetric must be a metric key string when present');
+      }
+    }
+  }
   // Quotation convention is stored exactly once, on quoted rates only, so
   // appreciation/depreciation can never be re-inferred at call sites.
   if (metric.observationType === 'QUOTED_RATE') {
@@ -1329,6 +1351,18 @@ export function assertRegistryIntegrity() {
     }
     if (!metric.subject || !SUBJECTS[metric.subject]) {
       throw new Error(`Metric "${key}" declares unknown subject "${metric.subject}".`);
+    }
+    // Weighted-ratio linkage must resolve to a registered metric so leg
+    // resolution can never point at an unregistered series.
+    if (metric.requiredDenominator !== null && metric.requiredDenominator !== undefined) {
+      const denKey = metric.requiredDenominator.metricKey;
+      if (!denKey || !METRICS[denKey]) {
+        throw new Error(`Metric "${key}" declares unknown denominator metric "${denKey}".`);
+      }
+      const numKey = metric.requiredDenominator.numeratorMetric;
+      if (numKey !== undefined && !METRICS[numKey]) {
+        throw new Error(`Metric "${key}" declares unknown numerator metric "${numKey}".`);
+      }
     }
     for (const field of ['label', 'shortLabel', 'unit', 'unitLong', 'priceBasis']) {
       if (!metric[field]) throw new Error(`Metric "${key}" is missing required field "${field}".`);

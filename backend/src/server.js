@@ -180,10 +180,22 @@ function parseFocusCountry(db, value) {
   }
   const iso3 = parseCountry(value);
   const meta = getCountry(db, iso3);
-  if (!meta || meta.is_aggregate === 1) {
+  if (!meta) {
     throw httpError(
       400,
       `Unknown country "${value}". Expected the ISO3 code of an eligible country/economy (e.g. IND).`,
+      'INVALID_COUNTRY',
+    );
+  }
+  // Known official aggregates are addressable as entities (e.g.
+  // /api/compare with entityB=aggregate:WLD), never as countries here:
+  // this route serves stored country observations only, so the refusal
+  // names the correct path instead of looking like a broken endpoint.
+  if (meta.is_aggregate === 1) {
+    throw httpError(
+      400,
+      `"${value}" is an official World Bank aggregate ("${meta.name ?? iso3}"), not a country. ` +
+      `This route serves stored country observations only; compare aggregates via /api/compare with an aggregate: entity.`,
       'INVALID_COUNTRY',
     );
   }

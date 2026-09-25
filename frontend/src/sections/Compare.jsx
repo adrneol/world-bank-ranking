@@ -30,8 +30,8 @@ import {
   metricDecimals,
   metricLabel,
   metricTitle,
-  operationsWithAvailability,
-  supportsGroupSum,
+  operationsForEntities,
+  supportsGroupValues,
 } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal, readableReason } from '../utils/format.js';
@@ -268,14 +268,23 @@ function GroupDetail({ entity, metricKey }) {
 function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames }) {
   // Stored-observation trajectories for point entities (never groups):
   // one batched observations fetch per entity-year through the public API.
+  // Explicit unavailability instead of a silent empty chart: groups compare
+  // through the result cards (no stored group series exists), aggregates
+  // are served by entity comparison rather than the observations lookup,
+  // and single-year operations have no span to draw.
   const pointEntity = (e) => e && (e.kind === 'country' || e.kind === 'wb_aggregate');
   const enabled = pointEntity(entityA) && pointEntity(entityB) && yearA != null && yearB != null;
+  const involvesGroup = [entityA, entityB].some((e) => e?.kind === 'custom_group');
+  const involvesAggregate = [entityA, entityB].some((e) => e?.kind === 'wb_aggregate');
   const lo = Math.min(yearA ?? 0, yearB ?? 0);
   const hi = Math.max(yearA ?? 0, yearB ?? 0);
   const span = enabled ? Array.from({ length: hi - lo + 1 }, (_, i) => lo + i) : [];
   // Cap the request fan-out for very long spans (sample evenly, gaps stay gaps).
   const sampled = span.length > 31 ? span.filter((_, i) => i % Math.ceil(span.length / 31) === 0) : span;
+  const fetchable = enabled && !involvesGroup && !involvesAggregate && sampled.length > 1;
   const depsKey = `traj:${metricKey}:${entityA?.iso3 ?? ''}:${entityB?.iso3 ?? ''}:${sampled.join(',')}`;
+  // Single unconditional hook call (rules-of-hooks): fetching is gated by
+  // the enabled flag, never by an early return.
   const { data, loading } = useApi(
     async (signal) => {
       const fetchOne = async (iso3, year) => {
@@ -293,9 +302,33 @@ function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames })
       return { aRows, bRows };
     },
     depsKey,
-    { enabled: enabled && sampled.length > 1 },
+    { enabled: fetchable },
   );
-  if (!enabled || sampled.length < 2 || loading || !data) return null;
+  if (involvesGroup) {
+    return (
+      <UnavailableState
+        reason="group_trajectory_unavailable"
+        hint="Trajectories draw stored country observations. Custom groups compare through the result cards and group detail above."
+      />
+    );
+  }
+  if (involvesAggregate) {
+    return (
+      <UnavailableState
+        reason="aggregate_trajectory_unavailable"
+        hint="The observations lookup serves stored country observations only. Official aggregates compare through the result cards above."
+      />
+    );
+  }
+  if (enabled && span.length < 2) {
+    return (
+      <UnavailableState
+        reason="single_year_no_trajectory"
+        hint="This analysis covers a single year, so there is no span to draw. The result cards above hold the values."
+      />
+    );
+  }
+  if (!fetchable || loading || !data) return null;
   const labelA = countryNames(entityA);
   const labelB = countryNames(entityB);
   return (
@@ -331,18 +364,27 @@ export default function Compare({
   onOperation,
   onGroupMode,
 }) {
-  const entityObjA = parseEntitySpecString(entityA);
-  const entityObjB = parseEntitySpecString(entityB);
+  const entityObjA = parseEntitySpecString(entityA, labelA);
+  const entityObjB = parseEntitySpecString(entityB, labelB);
   const opDef = COMPARE_OPERATIONS.find((op) => op.id === operation) ?? COMPARE_OPERATIONS[0];
   const needsTwoYears = opDef.needsYears === 2;
   const involvesGroup = entityObjA?.kind === 'custom_group' || entityObjB?.kind === 'custom_group';
-  const showGroupMode = involvesGroup && supportsGroupSum(metricKey);
+  // Group offer + group-value mode both follow backend aggregation metadata:
+  // SUM totals and WEIGHTED_RATIO (resolved from legs) only. Anything else
+  // hides the toggle while the operation picker explains the refusal.
+  const groupOffered = supportsGroupValues(metricKey);
+  const showGroupMode = involvesGroup && groupOffered;
 
   const aggregatesQuery = useApi((signal) => api.entities({ type: 'aggregate', pageSize: 200 }, { signal }), 'compare:aggregates', {});
   const aggregates = aggregatesQuery.data?.entities ?? [];
 
   const canFetch =
-    entityObjA !== null && entityObjB !== null && metricKey != null && yearA != null && (!needsTwoYears || yearB != null);
+    entityObjA !== null && entityObjB !== null && metricKey != null && yearA != null && (!needsTwoYears || yearB != null) &&
+    // An in-progress empty group stays selectable in the builder but never
+    // submits (the backend would 400 EMPTY_GROUP); the empty state below
+    // keeps prompting for members instead.
+    (entityObjA.kind !== 'custom_group' || entityObjA.members.length > 0) &&
+    (entityObjB.kind !== 'custom_group' || entityObjB.members.length > 0);
   const depsKey = `compare:${entityA ?? ''}:${entityB ?? ''}:${labelA ?? ''}:${labelB ?? ''}:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${operation}:${groupMode}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
@@ -387,6 +429,8 @@ export default function Compare({
               value={entityObjA}
               countries={countries}
               aggregates={aggregates}
+              allowGroups={groupOffered}
+              metricKey={metricKey}
               onChange={(next) => {
                 onEntityA(next ? entityToSpec(next) : '');
                 onLabelA(next?.kind === 'custom_group' ? (next.label ?? '') : '');
@@ -404,6 +448,8 @@ export default function Compare({
               value={entityObjB}
               countries={countries}
               aggregates={aggregates}
+              allowGroups={groupOffered}
+              metricKey={metricKey}
               onChange={(next) => {
                 onEntityB(next ? entityToSpec(next) : '');
                 onLabelB(next?.kind === 'custom_group' ? (next.label ?? '') : '');
@@ -422,7 +468,7 @@ export default function Compare({
           {needsTwoYears ? (
             <YearSelect id="cmp-year-b" label="Year B" years={availableYears} value={yearB} onChange={onYearB} />
           ) : null}
-          <OperationSelect operation={operation} metricKey={metricKey} onOperation={onOperation} />
+          <OperationSelect operation={operation} metricKey={metricKey} entityA={entityObjA} entityB={entityObjB} onOperation={onOperation} />
           {showGroupMode ? (
             <div className="field">
               <span className="field-label" id="cmp-mode-label">
@@ -517,8 +563,11 @@ export default function Compare({
   );
 }
 
-function OperationSelect({ operation, metricKey, onOperation }) {
-  const options = operationsWithAvailability(metricKey).map((op) => ({
+function OperationSelect({ operation, metricKey, entityA, entityB, onOperation }) {
+  // Entity-aware: metric capability metadata plus entity-kind rules, so an
+  // operation the backend would reject is disabled here with its reason
+  // instead of failing after submit.
+  const options = operationsForEntities(metricKey, entityA, entityB).map((op) => ({
     value: op.id,
     label: op.label,
     disabled: !op.available,

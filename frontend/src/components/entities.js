@@ -13,7 +13,7 @@ export function entityToSpec(entity) {
 }
 
 /** Parse a wire spec back to an entity object (lenient: null when malformed). */
-export function parseEntitySpecString(spec) {
+export function parseEntitySpecString(spec, label = null) {
   if (!spec || typeof spec !== 'string') return null;
   const colon = spec.indexOf(':');
   if (colon < 0) return null;
@@ -25,11 +25,22 @@ export function parseEntitySpecString(spec) {
   if (kind === 'aggregate' && /^[A-Za-z]{3}$/.test(payload)) {
     return { kind: 'wb_aggregate', iso3: payload.toUpperCase() };
   }
-  if ((kind === 'group' || kind === 'custom_group') && payload !== '') {
+  if (kind === 'group' || kind === 'custom_group') {
+    // An empty payload ('group:') is an in-progress empty group, NOT a
+    // malformed spec: the builder needs to stay on the Group tab with zero
+    // members so the user can add some. Submission still requires members
+    // (canFetch) and the backend still rejects empty groups (EMPTY_GROUP).
+    if (payload === '') return { kind: 'custom_group', members: [], label: cleanLabel(label) };
     const members = [...new Set(payload.split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z]{3}$/.test(s)))].sort();
-    if (members.length > 0) return { kind: 'custom_group', members, label: null };
+    // Labels travel beside the spec (labelA/labelB params + URL state),
+    // never inside it; attach here so reloaded builders keep their name.
+    if (members.length > 0) return { kind: 'custom_group', members, label: cleanLabel(label) };
   }
   return null;
+}
+
+function cleanLabel(label) {
+  return typeof label === 'string' && label.trim() !== '' ? label.trim().slice(0, 80) : null;
 }
 
 export function entityDisplayName(entity, countries = [], aggregates = []) {

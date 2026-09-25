@@ -9,6 +9,8 @@
  */
 
 import { useMemo, useState } from 'react';
+import { api } from '../api/client.js';
+import { useApi } from '../hooks/useApi.js';
 import { SearchableSelect } from './controls.jsx';
 import { Field } from './ui.jsx';
 
@@ -18,7 +20,42 @@ const KIND_TABS = [
   { id: 'custom_group', label: 'Group' },
 ];
 
-function GroupBuilder({ countries, value, onChange, id }) {
+/** Server-validated group preview (canonical /groups/evaluate path). */
+function GroupPreview({ members, label, metricKey }) {
+  const depsKey = `groupeval:${members.join(',')}:${label ?? ''}:${metricKey ?? ''}`;
+  const { data, loading, error } = useApi(
+    (signal) => api.groupsEvaluate({ members, label, indicator: metricKey }, { signal }),
+    depsKey,
+    // Metric required: without it the preview endpoint has nothing to check.
+    { enabled: members.length > 0 && metricKey != null },
+  );
+  if (members.length === 0) return null;
+  if (loading) {
+    return (
+      <p className="status status-loading" role="status">
+        Checking group…
+      </p>
+    );
+  }
+  if (error) {
+    return (
+      <p className="status status-empty" role="status">
+        Group check: {error?.message ?? 'invalid group'} ({error?.code ?? 'REQUEST_ERROR'})
+      </p>
+    );
+  }
+  if (!data) return null;
+  return (
+    <p className="footnote" aria-live="polite">
+      {data.label} · {data.memberCount} member{data.memberCount === 1 ? '' : 's'} ·{' '}
+      {data.capability?.canComputeGroupValue
+        ? `group values supported (${data.capability.aggregation})`
+        : `group values unavailable (${data.capability?.reason ?? 'unsupported metric'})`}
+    </p>
+  );
+}
+
+function GroupBuilder({ countries, value, onChange, id, metricKey }) {
   const [query, setQuery] = useState('');
   const members = value?.members ?? [];
   const memberSet = useMemo(() => new Set(value?.members ?? []), [value]);
@@ -46,6 +83,17 @@ function GroupBuilder({ countries, value, onChange, id }) {
 
   return (
     <div className="group-builder">
+      <Field label="Group label (optional)" htmlFor={id + '-group-label'}>
+        <input
+          id={id + '-group-label'}
+          type="text"
+          value={value?.label ?? ''}
+          maxLength={80}
+          placeholder="e.g. Indian Ocean peers"
+          autoComplete="off"
+          onChange={(event) => onChange({ kind: 'custom_group', members, label: event.target.value || null })}
+        />
+      </Field>
       {members.length > 0 ? (
         <ul className="chip-list" aria-label="Selected group members">
           {members.map((iso3) => {
@@ -106,13 +154,17 @@ function GroupBuilder({ countries, value, onChange, id }) {
       <p className="footnote" id={`${id}-group-note`}>
         User-selected group — never an official region. Members: {members.length}.
       </p>
+      <GroupPreview members={members} label={value?.label ?? null} metricKey={metricKey} />
     </div>
   );
 }
 
-export default function EntityPicker({ id, label, value, countries = [], aggregates = [], allowGroups = true, onChange }) {
+export default function EntityPicker({ id, label, value, countries = [], aggregates = [], allowGroups = true, metricKey = null, onChange }) {
   const kind = value?.kind ?? 'country';
-  const tabs = allowGroups ? KIND_TABS : KIND_TABS.filter((t) => t.id !== 'custom_group');
+  // A pre-selected group stays reachable even when the metric no longer
+  // offers groups (e.g. metric switched afterwards); the operation picker
+  // then explains the refusal instead of stranding the selection.
+  const tabs = allowGroups || kind === 'custom_group' ? KIND_TABS : KIND_TABS.filter((t) => t.id !== 'custom_group');
 
   function selectKind(nextKind) {
     if (nextKind === 'country') {
@@ -164,7 +216,7 @@ export default function EntityPicker({ id, label, value, countries = [], aggrega
       ) : null}
       {kind === 'custom_group' ? (
         <Field label={label} htmlFor={`${id}-group-search`}>
-          <GroupBuilder countries={countries} value={value} onChange={onChange} id={id} />
+          <GroupBuilder countries={countries} value={value} onChange={onChange} id={id} metricKey={metricKey} />
         </Field>
       ) : null}
     </div>
