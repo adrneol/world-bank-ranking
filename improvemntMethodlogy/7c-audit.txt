@@ -1,0 +1,121 @@
+PHASE 7C-0 — FULL METHODOLOGY + ARCHITECTURE + FRONTEND/CHART AUDIT REPORT
+Mode: audit only. No file modified, no database altered, no server started (to avoid any auto-refresh write), no dependency installed, no commit. Evidence from six sources: the three mandatory repo documents (read in full), the 7A audit, the 7B completion note, the actual code (five parallel read-only sweeps plus my own targeted verification of every load-bearing claim: PERIOD_SUM grep = zero hits, MetricPicker.jsx:16-30 stale memo, 10 native <select> sites, package.json with zero chart deps, fdi_inflows = [ABSOLUTE, YOY]).
+
+Verdict preview: BLOCKED — 1 new wrong-number P0 (sign-flip YoY on signed flows — 7B missed it), incomplete flow-period methodology (no period aggregation exists at all), broken group workflow, plus P1/P2 backlog below. GDP anchors proven intact (§0).
+
+0. GDP REGRESSION ANCHORS — PROVEN INTACT
+Verified directly, not assumed:
+
+All 8 GDP entries still declare LEVEL / DESC / [ABSOLUTE, PERCENT, YOY, CAGR] / POSITIVE_ONLY, per-capita NOT_AGGREGATABLE, totals SUM (config.js:212-495).
+All generic defaults coincide with GDP semantics: comparatorFor/rankByValue default DESC (ranking.js:60-62, 96-97), buildLevelComparison/buildThreeYearLevelComparison default direction='DESC' (comparison.js:386, 1020), YoY prev<=0→null and SIGN_CHANGE/NEGATIVE_BASE guards provably no-op on GDP data, GDP declares YOY so every 7B gate passes it through byte-identically, GDP is LEVEL so no flowSemantics/endpointMeaning leaks into its payloads (asserted absent in phase7b.test.js).
+Display pins (0 pc / scaled 2 totals) hold; live probe in 7B showed $288,002 integer and DESC order intact.
+Rule for the corrective phase: every fix must remain metadata-threaded with GDP-coincident defaults. Any unexplained GDP analytical difference is a release blocker (guardrails §37 still applies).
+PART A — METRIC METHODOLOGY MATRIX (all 20, from config.js)
+Metric	WDI code	Type	Unit	Rankable?	Rank dir	Level compare?	Annual endpoint?	Annual YoY?	PP?	Index-pt?	CAGR?	Period sum?	Period avg?	Group agg?	Group ratio?	Obs/LFL?	Official agg?	Chart	Precision	Known defects
+nominal_current	NY.GDP.PCAP.CD	LEVEL	current US$	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a (levels don't sum over time)	n/a	Refused ✓	n/a	n/a (no group value)	if published	line	$int ✓	None
+nominal_constant	NY.GDP.PCAP.KD	LEVEL	constant 2015 US$	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a	n/a	Refused ✓	n/a	n/a	if published	line	$int ✓	None
+ppp_current	NY.GDP.PCAP.PP.CD	LEVEL	current int $	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a	n/a	Refused ✓	n/a	n/a	if published	line	$int ✓	None
+ppp_constant	NY.GDP.PCAP.PP.KD	LEVEL	constant 2021 int $	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a	n/a	Refused ✓	n/a	n/a	if published	line	$int ✓	None
+total_current / constant / ppp_current / ppp_constant	NY.GDP.MKTP.*	LEVEL	US$/int $	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a	n/a	SUM ✓	n/a	✓	if published	line	$X.XX T ✓	None
+inflation_cpi	FP.CPI.TOTL.ZG	RATE (signed)	annual %	Yes	ASC ✓ (7B)	✓ (gap in pp)	n/a	Refused ✓	✓	n/a	Refused ✓	n/a	missing — needed	OFFICIAL_ONLY ✓	n/a	n/a	WLD published ✓	line	2dp ✓ (7B)	H-4 (audit formula), avg-rate missing
+inflation_cpi_index	FP.CPI.TOTL	INDEX (2010=100)	index pts	NO ✓ (7B)	NEUTRAL→refuse ✓	raw served, warn needed	n/a	Refused ✓	never pp	✓	Refused ✓	n/a	n/a	OFFICIAL_ONLY ✓	n/a	n/a	WLD null ✓	line	1dp ✓ (7B)	H-8 (compare-level silent), cumulative-% undecided
+inflation_deflator	NY.GDP.DEFL.KD.ZG	RATE (signed)	annual %	Yes	ASC ✓ (7B)	✓ (gap in pp)	n/a	Refused ✓	✓	n/a	Refused ✓	n/a	missing — needed	OFFICIAL_ONLY ✓	n/a	n/a	expected	line	2dp ✓ (7B)	H-4, avg-rate missing
+exports_current	NE.EXP.GNFS.CD	FLOW (+)	current US$	Yes	DESC ✓	✓ (annual-flow gap)	✓ labeled	✓	n/a	n/a	✓	missing — needed	missing — needed	SUM ✓	n/a	✓ (point sums)	if published	bars/line	2dp scaled ✓	P0-design gap (Part B)
+imports_current	NE.IMP.GNFS.CD	FLOW (+)	current US$	Yes	DESC ✓	✓	✓ labeled	✓	n/a	n/a	✓	missing	missing	SUM ✓	n/a	✓	if published	bars/line	2dp scaled ✓	same
+fdi_inflows	BX.KLT.DINV.CD.WD	FLOW (signed)	current US$	Yes	DESC ✓	✓	✓ labeled	✓ iff base>0, sign-flip hole (H-1, P0)	n/a	n/a	Refused ✓	missing	missing	SUM ✓	n/a	✓ (point sums)	WLD published	bars/line	2dp scaled ✓	H-1 BLOCKER, Part B
+fdi_inflows_pct_gdp	BX.KLT.DINV.WD.GD.ZS	RATIO (signed)	% of GDP	Yes (raw %)	DESC ✓	✓ (gap in pp)	n/a	Refused ✓	✓	n/a	Refused ✓	never sum	n/a	WEIGHTED_RATIO dead (H)	n/a	n/a	n/a	line	2dp ✓	H-4, H-5 paths
+fx_official	PA.NUS.FCRF	QUOTED_RATE (LCU/USD)	LCU per US$	NO ✓ (7B)	NEUTRAL→refuse ✓	cross-currency gap served — dubious (M)	✓ movement	✓ movement	n/a	n/a	Refused ✓ (correct)	n/a	n/a	MEMBER_ONLY ✓	n/a	n/a	WLD null ✓	line (movement)	2dp ✓	H-7 headers, M gap
+current_account	BN.CAB.XOKA.CD	FLOW (signed)	current US$	Yes	DESC ✓	✓	✓ labeled	✓ iff base>0, sign-flip hole (H-1, P0)	n/a	n/a	Refused ✓	missing	missing	SUM ✓	n/a	✓ (point sums)	none published	bars/line	2dp scaled ✓	H-1 BLOCKER, Part B
+reserves_ex_gold	FI.RES.XGLD.CD	LEVEL (stock)	current US$	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a	n/a	SUM ✓	n/a	✓	none published	line	2dp scaled ✓	"growth" label (P2)
+remittances_received	BX.TRF.PWKR.CD.DT	FLOW (+)	current US$	Yes	DESC ✓	✓	✓ labeled	✓	n/a	n/a	✓	missing	missing	SUM ✓	n/a	✓	if published	bars/line	2dp scaled ✓	Part B
+population_total	SP.POP.TOTL	LEVEL (stock)	people	Yes	DESC ✓	✓	✓	✓	n/a	n/a	✓	n/a	n/a	SUM ✓	n/a	✓	published	line	2dp "X.XX billion" (P2 note: loses integer-count semantics; consistent with all scaled units — decide once, deliberately)	"growth" label (P2)
+PART B — FLOW METHODOLOGY (the core 7C design decision)
+Status quo (verified): there is no period aggregation anywhere — PERIOD_SUM has zero hits in backend/src; 7B's flowSemantics.periodRule is an honest denial ("No PERIOD SUM is computed"). Every multi-year flow comparison is ((flowB/flowA)−1)×100 on two endpoints, interiors ignored. 7B made the label honest ("Annual flow: B vs A") but did not create the missing statistics. The manual-testing complaint is therefore sustained: FDI 2004→2014→"+536%"-style output answers almost no economic question, and 2004→2015 currently means ((flow2015/flow2004)−1)×100 — two observations out of twelve.
+
+Recommended design (three distinct, never conflated):
+
+ANNUAL_FLOW_ENDPOINT (exists, keep, keep label): B vs A with abs + valid % — answers "how did the annual flow in B differ from A". Valid for all 5 flows (+ reserves/population as stock endpoint change). UI: current "Annual flow (endpoint B vs A)" label. This is the secondary mode for multi-year spans.
+PERIOD_FLOW_SUM (new, PRIMARY for multi-year flow spans): S(P) = Σ flows over the period, completeness rule = every year present else unavailable + member/year coverage attached (reuse groupSum strictness philosophy: never zero-fill, never interpolate). Period-vs-period change compares two sums with abs + % (guard: zero/negative base → reason, same engine as signed flows).
+PERIOD_FLOW_AVERAGE (new, companion): S(P)/N — answers "typical annual scale"; same completeness rule.
+Interval rule — half-open [A, B), proof: adjacent decade comparison must partition the timeline without double-counting the boundary year. [2004,2014) + [2014,2024) = years 2004…2013 and 2014…2023, disjoint and covering 2004…2023 exactly. Inclusive-with-non-overlap-rule is expressively equivalent but pushes boundary bookkeeping onto every caller and every test; half-open makes adjacency composable by construction and matches the existing completeness machinery (a missing year fails the range query either way). Explicit rule: endpoint ops use exactly {A, B}; period ops use [A, B); therefore user selection 2004→2015 = 11 annual observations (2004…2014) — documented in UI copy and methodology strings, with the count echoed in the response (periodYears: [2004…2014], periodSize: 11). Missing year → unavailable + reason + coverage, never zero-fill. Default for FLOW movement over spans > 1y: period-total comparison; annual-endpoint retained as a separate explicit mode. LEVEL/stock metrics keep endpoint semantics (GDP untouched by construction — new transforms gate on FLOW).
+
+Per-flow notes: exports/imports/remittances (POSITIVE_ONLY) — sums/averages straightforward. FDI/CA (SIGNED) — sums valid (net position over period is meaningful), % change on sums needs base-guard; negative-period-sum change reported as absolute + reason, never a sign-flipped %. Never sum ratios (FDI% stays pp-only; group ratio via leg resolution, see Part F).
+
+PART C — RATE METHODOLOGY (CPI inflation, GDP deflator)
+Annual: rate level (2dp ✓) + pp change B−A as the default and only unmarked change; relative % refused everywhere (verified closed on all endpoints in 7B).
+Period: endpoint pp difference + average annual rate (new PERIOD_AVG-style declarative statistic — mean of annual rates, explicitly labeled, never confused with cumulative effect) + distribution (min/max years). No CAGR on rates (correctly undeclared).
+Cumulative price-level effect does NOT belong to the rate metric — it belongs to the INDEX metric (Part D). This separation is the guardrails §13 rule and must be enforced in copy.
+Ranking: ASC (lower-first, descriptive) confirmed correct; LOWER_PREFERRED_IN_STABILITY interpretation stays out of the backend's mouth (no "better/worse" language found — good).
+Remaining: average-rate statistic missing; AuditSource.jsx:90-92 still prints the YoY formula unconditionally for rates (H-4, P1).
+PART D — INDEX METHODOLOGY (CPI index)
+No cross-country level ranking (NEUTRAL ✓ enforced in ranking/verify/comparison/coverage-focus). Confirmed correct: index is a within-country construct.
+Within-entity: index-point change ✓ valid; cumulative percent change ((B/A)−1)×100 is mathematically defined (POSITIVE_ONLY, base>0 always) and I recommend allowing it with explicit "cumulative price-level change" labeling — this resolves the 7A open item. It is not GDP-YoY; it is an index ratio, labeled as such.
+Cross-country raw comparison (/api/compare level): currently served silently (H-8, P2). Decision: allow raw display with an explicit non-comparability warning (index levels are not cost-of-living), never a rank. Requires the approved allow-vs-warn switch — implemented as a COMPARE_INDEX_LEVEL_WARN copy + provenance flag, not a silent serve.
+Never "percentage points" for index moves (guardrails §9 — verified: gapUnitFor returns index points ✓).
+PART E — FX METHODOLOGY
+Quotation LCU_PER_USD stored once (config.js:810) ✓; increase = depreciation, decrease = appreciation. No level ranking (NEUTRAL ✓ + nominal-quotation refusal detail ✓).
+Valid ops: absolute quote movement, percent movement (= depreciation %, correctly declared), annual movement YoY, cross-rate with traceable legs (verified: same-year, compatible quotation, both valid, APP_DERIVED).
+Correctness notes: CAGR correctly undeclared; WLD-null correctly yields no official aggregate.
+Remaining: YoyRanking.jsx:141-143 / YoyVerification.jsx:43-45 headers still read "YoY %" with no depreciation cue (H-7, P2 — SubjectInsight already fixed, finish the sweep); /api/compare level computes a cross-currency a−b gap in "LCU per US$" (M, P1 — gate it or label non-comparable; only cross_rate is meaningful there).
+PART F — GROUP METHODOLOGY
+Metric family	Country↔Country	Country↔OfficialAgg	Country↔CustomGroup	Group↔Group	LFL	Notes
+Total GDP, trade flows, FDI $, CA, reserves, remittances, population (SUM)	✓	✓ iff WB publishes that series/year (else 400)	✓ obs + LFL + membershipEffect	✓ both sides	✓	Sums same-basis only; strict completeness
+GDP per-capita (NOT_AGGREGATABLE)	✓	✓	members side-by-side only	side-by-side only	n/a	400 NOT_AGGREGATABLE
+Rates / index (OFFICIAL_ONLY)	✓ (+pp/index-pt)	✓ official series directly	member levels only, never averaged into regional rate	member distributions only	n/a	400 otherwise
+FDI % (WEIGHTED_RATIO)	✓	✓	currently dead — decide: implement leg resolution ΣFDI/ΣGDP×100 (both legs stored, same year/entity) or downgrade declaration	dead	n/a	Needs approval (7A F-P1-8 still open)
+FX (MEMBER_ONLY)	movements/cross-rate	unavailable (WLD null → 400)	member movements only	movements only	n/a	Never sum/average quotes
+Verified sound: official aggregates are read as published (never synthesized), excluded from all country rankings at every reader, custom groups never enter leaderboards (guardrails §18 holds).
+
+PART G — FRONTEND BUG AUDIT
+Overview init (ROOT CAUSE FOUND, High): MetricPicker.jsx:16-30 memoizes options from module-live SUBJECTS with deps [operationsByMetric] only. Global/Movement pickers pass operationsByMetric=null, so after hydrateRegistry() swaps the registry the memo never recomputes — subject list (rendered inline, fresh) grows while metric list stays at 4 GDP metrics. Overview's depsKey lacks any registry version, so it doesn't refetch; switching tabs remounts a fresh picker (plus main key={view}), which masks the bug as "metrics appear after visiting Movement." Fix is local: depend on the registry version (or read a version token) in the memo + include it in depsKey. No redesign needed.
+Native controls (10 sites, Medium): ui.jsx:64 Pagination rows-per-page + 9 filter/sort <select>s inside RankMovement.jsx (3-yr relation/common-relation/common-sort, growth relation/common-relation/common-sort, 2-yr relation/common-relation/common-sort). MovementControls itself is already fully custom — the brief's "Movement still contains native dropdowns" refers to these table-filter selects. All are trivially SearchableSelect-able (short lists, minFilter already handles that).
+State bugs (Medium): main key={dataVersion:view:country} (App.jsx:465) wipes all section-local state (pages, searches, sorts, compare cache) on view/country change while rankSub/yoySub survive above it — inconsistent; duplicate identical focusYearly fetches from Overview + YearComparison; cmp* URL params gated to compare-view (share-loss); rankSub/yoySub not URL-synced.
+Hard-coded assumptions: SubjectInsight assumes total_constant benchmark, hard subjects, hard ops, DEU peer, 5-yr window (High/Medium cluster — the clearest GDP-assumption inheritance in the app); RankMovement ~40 India-hardcoded strings/r.iso3==='IND' tags (High for focus-genericity, numbers unaffected); TrendChart ticks ignore metricDecimals/units (Medium); everything else triaged correct-or-harmless.
+PART H — COMPARE GROUP DEFECT (exact diagnosis)
+The chain is plumbed correctly end-to-end (transport drops nothing; backend resolution/aggregation/vintage correct; GroupDetail renders observed+LFL+effect). "Not functioning correctly" decomposes into:
+
+Labels unwritable (High UX): no label <input> in GroupBuilder; entityToSpec never encodes labels; backend always falls back to "User-selected group (N)". Provenance degrades to auto-label.
+Offered-then-400 (High, the functional break): picker always allows groups; OperationSelect is metric-only; backend correctly 400s (NOT_AGGREGATABLE / UNSUPPORTED_ENTITY_COMBINATION for cross_rate). Fix: entity-aware option disabling reusing supportsGroupSum + country-only cross_rate rule (all info already client-side).
+WEIGHTED_RATIO dead end (Part F decision).
+Trajectory silent-null for groups (by design — stored observations only) and for aggregates (bug-adjacent: api.observations 400s on aggregates while api.compare serves them — M2); both need EmptyState explanations, not silence.
+groups/evaluate preview is orphaned (zero callers) — either wire it into the builder or delete it.
+PART I — CHART AUDIT
+Inventory: exactly 2 visual encodings — hand-rolled SVG TrendChart (sole caller: Compare Trajectory) + CSS partition/duo readouts (content-width, not proportional — must never be mistaken for bars). Everything else is tables/cards. No log scales, no canvas, no sparklines.
+Unreadability confirmed: single shared linear y-domain flattens disparate magnitudes (USA ~25T vs India ~3T); 2-point ops render a literal segment ("flat line"); no visible title/unit/source (title lives only in aria-label); unrounded interpolated ticks; null empty states violating the app's own UnavailableState system.
+Use-case map: long series → line (linear, gaps break, titled, sourced); 2-endpoint change → slope/dumbbell, never a 2-point "trend line"; annual flows → bars/line; period totals/coverage → proportional bars; inflation → rate line + pp annotation; real-GDP+inflation → stacked small multiples sharing x (never one axis for % and $); rank movement → slope with rank 1 on top; country-vs-group → bars/dumbbell (SUM-only); disparity → small multiples/indexed, never silent log.
+Library: Recharts. React 19 + zero chart deps today; Recharts v3 (React-19-compatible) covers every type above declaratively (dumbbell = Scatter+Line, dual-unit = ComposedChart — though small multiples preferred), ~130–180 kB gz, SVG-DOM accessibility matching the app's table-first a11y, ResponsiveContainer mobile story, and single-chart incremental migration (Trajectory first). ECharts rejected (250–400+ kB, canvas a11y weaker, wrapper lag, glossy-theme rework). Hand-rolled extension rejected (niceTicks rounding debt already shows the maintenance curve). Do not install until approved.
+PART J — PYTHON vs NODE: KEEP NODE. Do not add Python.
+(a) All visualization is presentation of backend-finished numbers — React + Recharts covers it. (b) No audit-scope computation needs Python: period sums/averages, weighted ratios, CAGR, rank statistics, coverage CASE logic are scalar arithmetic over ≤ ~250 rows, all already implemented and tested in Node. (c) A Python service would fork deployment (no Dockerfile/render.yaml exists today — single Express + VITE_API_BASE_URL), double the secret/CORS surface, add a network hop under the app's AbortController staleness guards, and split the RAW vs APP_DERIVED provenance chain plus vintage coherence. Python only re-enters if a future phase needs genuine statistical/ML workloads — nothing in this audit qualifies.
+
+PART K — HIDDEN DEFECTS (new, with severity)
+H-1 — Sign-flip YoY served as valid (P0, BLOCKER-adjacent, 7B missed it): yoy.js/yoyRanking.js/growthComparison.js exclude only prev<=0; a positive→negative transition (CA surplus→deficit, FDI inflow→outflow, e.g. +10→−5) is served and ranked as −150% YoY through YoY ranking/verification, coverage focus, yearly cells, and Movement growth — while computeTransform calls the identical mathematics SIGN_CHANGE and refuses it. Same formula, opposite verdicts by route. Fix: thread the sign-change guard into the legacy YoY paths for SIGNED metrics (GDP provably unaffected: POSITIVE_ONLY can never hit it).
+H-3 — Coverage refusal UX (P1): refused rows drop all count fields; Coverage.jsx renders blanks + bare "No" — indistinguishable from missing data. Needs reason text + UnavailableState.
+H-4 — Audit formula unconditional (P1, 7A F-P1-6 still open): AuditSource.jsx:90-92 prints ((current/previous)−1)×100 for rates/ratios/index.
+H-5 — Entity-blind operation picker (P1, 7A F-P1-2 still open).
+H-6 — LEVEL multi-year "YoY % growth" label (P1): non-annualized endpoint % over >1y spans (including GDP) wears a YoY name. Numbers correct; label wrong. Rename to period change; keep formula.
+H-7 — FX "YoY %" headers (P2). H-8 — index compare-level silent serve (P2, needs allow-vs-warn approval). H-9 — 400-vs-200 reason-code split undocumented (P2). H-10 — India/SubjectInsight hardcodes persist (P2, acknowledged).
+Frontend state P1s: main-key wipe (§G.3), duplicate focusYearly, cmp-URL gating, unsynced subtabs.
+Population display (P2): "X.XX billion" loses integer-count semantics — consistent with all scaled units, but decide deliberately once.
+7B-claim verification: all six sampled claims match code (precision, direction threading in 5 services, coverage gate placement, flowSemantics, FX detail, phase7b tests). 7B is confirmed as labeling + gating, not computation — which is exactly why H-1 and the period-aggregation gap remain.
+
+FINAL OUTPUT
+Complete metric table: Part A.
+Family methodologies: Parts B–E (flows/rates/index/FX).
+FDI/flow-period recommendation: Part B — add PERIOD_SUM + PERIOD_AVG transforms gated on FLOW with half-open [A,B) rule (2004→2015 = 11 observations, count echoed), completeness-or-unavailable, period-total as default multi-year FLOW mode, endpoint as separate labeled mode. No per-indicator engines (guardrails §1: generic transforms + registry flags).
+Ranking directions: GDP DESC (frozen); inflation ASC (done); index/FX NEUTRAL→refuse (done); growth-rank stays DESC-as-depreciation with explicit labeling; YoY-rank direction-blindness is latent-safe (no ASC+YOY metric exists) — add an assertion, not a feature.
+Group recommendations: Part F + fix H labels, entity-aware picker gating, leg-resolution-or-downgrade for WEIGHTED_RATIO, aggregate-observations consistency, empty states.
+Chart recommendations: Part I map.
+Library: Recharts, migrate Trajectory first, do not install yet.
+Python: Keep Node, reasons in Part J.
+Overview defect: MetricPicker stale memo (§G.1) — local fix.
+Movement controls: MovementControls clean; 9 table-filter selects + Pagination select remain (§G.2).
+Compare groups: §H five-point diagnosis.
+Hidden defects: §K (H-1 is the release blocker).
+Corrective architecture: registry flags (periodAggregation: SUM|AVG|NONE per metric — declarative, guardrails §3) → generic PERIOD_SUM/PERIOD_AVG transforms (pure, strict completeness) → service threading (growth/compare/coverage) → capability-matrix + picker gating → Recharts migration → copy/formula sweep. No indicator-specific engines.
+Files to modify (proposed): backend/src/config.js (flags only), domain/transforms.js (2 new transforms), domain/coverage.js (period completeness), services/growthComparisonService.js + comparisonService.js (period modes), services/entities.js + entityCompare.js (leg resolution, index/FX gap rules), domain/yoy*.js + growthComparison.js (H-1 sign guard), frontend/.../MetricPicker.jsx, RankMovement.jsx (selects + labels), Compare.jsx + EntityPicker.jsx + entities.js (groups), TrendChart.jsx (Recharts), AuditSource/Coverage/Yoy* (copy), phase7b/phase7c tests.
+GDP regression risks: negligible by construction (POSITIVE_ONLY + LEVEL + DESC + YOY-declared make every new guard a no-op on GDP data); proof required: full suite + goldens + display pins + differential GDP fixtures (§17-style).
+Required tests: PERIOD_SUM/AVG goldens incl. boundary [A,B) counts, missing-year refusal, adjacent-decade non-overlap; H-1 sign-flip pins (served-where-valid, refused-where-not, cross-route agreement); group matrix (offer/gate at UI + 400 paths); picker gating unit tests; Recharts render/a11y checks; GDP differential goldens.
+Untouched: ingestion/storage/raw handling, universe rule, GDP paths/wording, ranking tie-break/ordinality, vintage/refresh machinery, deployment architecture, legacy URL behavior, describeMetric shape.
+Phases after audit: 7C-1 flow-period transforms + H-1 guard (needs Part B + boundary approval) → 7C-2 groups end-to-end (needs WEIGHTED_RATIO + index-warn approvals) → 7C-3 frontend state/controls/copy → 7C-4 Recharts migration → 7C-5 hardening/regression/release. Each independently verifiable; GDP goldens gate every stage.
+FINAL VERDICT: AUDIT COMPLETE — IMPLEMENTATION BLOCKED UNTIL METHODOLOGY DESIGN IS APPROVED. Specifically: (a) Part B period design + half-open rule, (b) H-1 sign-flip resolution, (c) WEIGHTED_RATIO implement-vs-downgrade, (d) index compare-level allow-vs-warn, (e) Recharts adoption. Do not release with sign-flipped flow "growth", endpoint-only decade flows, or offered-then-400 group operations.
+

@@ -27,18 +27,31 @@ import {
 } from '../components/ui.jsx';
 import {
   COMPARE_OPERATIONS,
+  metricDecimals,
   metricLabel,
   metricTitle,
   operationsWithAvailability,
   supportsGroupSum,
 } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { readableReason } from '../utils/format.js';
+import { formatDecimal, readableReason } from '../utils/format.js';
 
-function formatValuePlain(value) {
-  if (value === null || value === undefined) return '—';
-  if (!Number.isFinite(Number(value))) return '—';
-  return Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
+/**
+ * Raw backend number in metric units → registry displayDecimals. GDP
+ * per-capita pins 0, RATE/RATIO/FX pin 2, INDEX pins 1. Presentation only.
+ */
+function formatValuePlain(value, metricKey) {
+  return formatDecimal(value, metricDecimals(metricKey));
+}
+
+/**
+ * Decimals for a change/gap value: derived units (%, percentage points,
+ * index points) pin 2 per backend convention; absolute changes reuse the
+ * metric's own registry precision.
+ */
+function changeDecimals(unit, metricKey) {
+  if (unit === '%' || unit === 'percentage points' || unit === 'index points') return 2;
+  return metricDecimals(metricKey);
 }
 
 function YearSelect({ id, label, years, value, onChange }) {
@@ -95,7 +108,7 @@ function EntityResultCard({ slot, entity, countries, aggregates }) {
   );
 }
 
-function ChangeBlock({ title, change }) {
+function ChangeBlock({ title, change, metricKey }) {
   if (!change) return null;
   if (!change.computable) {
     return (
@@ -111,7 +124,7 @@ function ChangeBlock({ title, change }) {
       <p className="lfl-label">{title}</p>
       <p className="result-value">
         {sign}
-        {Number(change.value).toFixed(2)} <span className="result-unit">{change.unit}</span>
+        {formatDecimal(change.value, changeDecimals(change.unit, metricKey))} <span className="result-unit">{change.unit}</span>
       </p>
     </div>
   );
@@ -121,6 +134,7 @@ function ComparisonResult({ data }) {
   const { results, metric, years, operation } = data;
   const comparison = results.comparison;
   const unit = metric.unitLong ?? metric.unit;
+  const metricKey = metric?.key;
 
   if (operation === 'cross_rate') {
     if (!comparison.available) {
@@ -133,12 +147,12 @@ function ComparisonResult({ data }) {
             Cross-rate <ProvenanceBadge kind="APP_DERIVED" />
           </h3>
           <p className="result-value">
-            {Number(comparison.value).toFixed(4)}{' '}
+            {formatDecimal(comparison.value, metricDecimals(metricKey))}{' '}
             <span className="result-unit">{comparison.provenance?.outputUnit}</span>
           </p>
           <p className="footnote">
-            {comparison.legs.a.iso3}: {formatValuePlain(comparison.legs.a.value)} · {comparison.legs.b.iso3}:{' '}
-            {formatValuePlain(comparison.legs.b.value)} ({years.a})
+            {comparison.legs.a.iso3}: {formatValuePlain(comparison.legs.a.value, metricKey)} · {comparison.legs.b.iso3}:{' '}
+            {formatValuePlain(comparison.legs.b.value, metricKey)} ({years.a})
           </p>
         </article>
       </div>
@@ -168,10 +182,10 @@ function ComparisonResult({ data }) {
             {Object.entries(perYear).map(([year, row]) => (
               <tr key={year}>
                 <th scope="row">{year}</th>
-                <td className="num">{formatValuePlain(row.a)}</td>
-                <td className="num">{formatValuePlain(row.b)}</td>
+                <td className="num">{formatValuePlain(row.a, metricKey)}</td>
+                <td className="num">{formatValuePlain(row.b, metricKey)}</td>
                 <td className="num" title={row.gapReason ? readableReason(row.gapReason) : undefined}>
-                  {row.gap === null || row.gap === undefined ? '—' : formatValuePlain(row.gap)}
+                  {row.gap === null || row.gap === undefined ? '—' : formatValuePlain(row.gap, metricKey)}
                 </td>
               </tr>
             ))}
@@ -188,11 +202,11 @@ function ComparisonResult({ data }) {
       <div className="result-cards">
         <article className="card">
           <h3>Entity A change</h3>
-          <ChangeBlock title={operationLabel(operation)} change={comparison.a} />
+          <ChangeBlock title={operationLabel(operation)} change={comparison.a} metricKey={metricKey} />
         </article>
         <article className="card">
           <h3>Entity B change</h3>
-          <ChangeBlock title={operationLabel(operation)} change={comparison.b} />
+          <ChangeBlock title={operationLabel(operation)} change={comparison.b} metricKey={metricKey} />
         </article>
         <article className="card card-result">
           <h3>Gap</h3>
@@ -200,7 +214,7 @@ function ComparisonResult({ data }) {
             <UnavailableState reason={comparison.gap?.reason} hint="Both sides need a valid change for a gap." />
           ) : (
             <p className="result-value">
-              {(comparison.gap.value > 0 ? '+' : '') + Number(comparison.gap.value).toFixed(2)}{' '}
+              {(comparison.gap.value > 0 ? '+' : '') + formatDecimal(comparison.gap.value, changeDecimals(comparison.gap.unit, metricKey))}{' '}
               <span className="result-unit">{comparison.gap.unit}</span>
             </p>
           )}
@@ -217,7 +231,7 @@ function operationLabel(id) {
   return COMPARE_OPERATIONS.find((op) => op.id === id)?.label ?? id;
 }
 
-function GroupDetail({ entity }) {
+function GroupDetail({ entity, metricKey }) {
   if (entity.kind !== 'custom_group') return null;
   const years = Object.keys(entity.observed ?? {}).filter((y) => /^\d+$/.test(y));
   return (
@@ -226,7 +240,7 @@ function GroupDetail({ entity }) {
         <p className="lfl-label">Observed</p>
         {years.map((year) => (
           <p key={year}>
-            {year}: <strong>{formatValuePlain(entity.observed[year]?.value)}</strong> ({entity.observed[year]?.members ?? 0}{' '}
+            {year}: <strong>{formatValuePlain(entity.observed[year]?.value, metricKey)}</strong> ({entity.observed[year]?.members ?? 0}{' '}
             members)
           </p>
         ))}
@@ -235,14 +249,14 @@ function GroupDetail({ entity }) {
         <p className="lfl-label">Like-for-like</p>
         {years.map((year) => (
           <p key={year}>
-            {year}: <strong>{formatValuePlain(entity.likeForLike?.[year]?.value)}</strong> (
+            {year}: <strong>{formatValuePlain(entity.likeForLike?.[year]?.value, metricKey)}</strong> (
             {entity.likeForLike?.[year]?.members ?? 0} common members)
           </p>
         ))}
         {entity.membershipEffect ? (
           <p className="footnote">
             Membership effect: {(entity.membershipEffect.absolute > 0 ? '+' : '') +
-              Number(entity.membershipEffect.absolute).toFixed(0)}{' '}
+              formatDecimal(entity.membershipEffect.absolute, metricDecimals(metricKey))}{' '}
             {entity.membershipEffect.unit} — coverage change, not within-member economics.
           </p>
         ) : null}
@@ -461,8 +475,8 @@ export default function Compare({
                     aggregates={aggregates}
                   />
                 </div>
-                <GroupDetail entity={data.results.a} />
-                <GroupDetail entity={data.results.b} />
+                <GroupDetail entity={data.results.a} metricKey={metricKey} />
+                <GroupDetail entity={data.results.b} metricKey={metricKey} />
                 <ComparisonResult data={data} />
                 <Trajectory
                   entityA={data.entities.a}

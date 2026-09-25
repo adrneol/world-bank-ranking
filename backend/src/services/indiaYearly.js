@@ -23,7 +23,7 @@ import {
   getYearRange,
 } from '../db/repository.js';
 import { describeMetric, formatPercent, formatValue } from '../domain/format.js';
-import { rankByValue } from '../domain/ranking.js';
+import { directionFor, rankByValue } from '../domain/ranking.js';
 import { TRANSFORM_NA_DESCRIPTIONS, TRANSFORM_NA_REASONS } from '../domain/transforms.js';
 import { buildYoySeries } from '../domain/yoy.js';
 
@@ -36,6 +36,7 @@ function emptyCell(metric, reason, eligibleUniverse) {
     indiaValueRaw: null,
     indiaValueDisplay: null,
     indiaRank: null,
+    indiaRankReason: null,
     total: 0,
     missingObservations: eligibleUniverse,
     indiaYoY: null,
@@ -111,10 +112,14 @@ export function buildIndiaYearlyRows(db, options = {}) {
       : new Map();
 
     const cells = new Map();
+    // Ranking direction from the registry; NEUTRAL metrics (raw index
+    // levels, quoted FX) keep level values but receive no country rank.
+    const direction = directionFor(metric);
     for (let year = startYear; year <= endYear; year += 1) {
       const yearRows = rowsByYear.get(year) ?? [];
-      const { ranked, total } = rankByValue(yearRows);
+      const { ranked, total } = direction ? rankByValue(yearRows, direction) : { ranked: [], total: yearRows.length };
       const focusRow = ranked.find((row) => row.iso3 === focusIso3) ?? null;
+      const focusHasValue = focusRow ?? yearRows.find((row) => row.iso3 === focusIso3) ?? null;
       // Unsupported metrics: same cell shape, explicit reason, raw previous
       // value preserved (it is an observation, not a transformation).
       const yoy = yoyByYear.get(year) ?? (!supportsYoy
@@ -127,12 +132,13 @@ export function buildIndiaYearlyRows(db, options = {}) {
         : null);
 
       cells.set(year, {
-        available: Boolean(focusRow),
-        reason: focusRow ? null : 'no_valid_observation_for_focus_country_in_this_metric_year',
-        indiaValue: focusRow ? focusRow.value : null,
-        indiaValueRaw: focusRow ? (focusRow.valueRaw ?? String(focusRow.value)) : null,
-        indiaValueDisplay: focusRow ? formatValue(focusRow.value, metric) : null,
+        available: Boolean(focusHasValue),
+        reason: focusHasValue ? null : 'no_valid_observation_for_focus_country_in_this_metric_year',
+        indiaValue: focusHasValue ? focusHasValue.value : null,
+        indiaValueRaw: focusHasValue ? (focusHasValue.valueRaw ?? String(focusHasValue.value)) : null,
+        indiaValueDisplay: focusHasValue ? formatValue(focusHasValue.value, metric) : null,
         indiaRank: focusRow ? focusRow.rank : null,
+        indiaRankReason: focusRow ? null : (direction ? null : 'RANK_UNSUPPORTED'),
         total,
         missingObservations: Math.max(0, eligibleUniverse - total),
         indiaYoY: yoy ? yoy.yoyPercent : null,

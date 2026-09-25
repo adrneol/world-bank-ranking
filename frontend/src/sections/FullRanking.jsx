@@ -6,9 +6,9 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
-import { metricTitle } from '../config/metrics.js';
+import { METRICS, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { Section, StatusBlock, Pagination, Field } from '../components/ui.jsx';
+import { Section, StatusBlock, Pagination, Field, UnavailableState } from '../components/ui.jsx';
 
 // Must stay identical to backend parseRankQuery (domain/ranking.js).
 // Message-only use: the backend performs the actual rank lookup.
@@ -41,6 +41,17 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
   );
 
   const empty = !loading && !error && data && (data.rows ?? []).length === 0 && !search;
+  const unavailable = !loading && !error && data && data.available === false;
+  // Ordering claim comes from the registry direction, never a hardcoded
+  // "descending": ASC metrics order lower values first; NEUTRAL metrics
+  // (quoted FX) are never ranked across currencies.
+  const direction = METRICS[metricKey]?.rankingDirection ?? null;
+  const orderText =
+    direction === 'ASC'
+      ? 'raw value ascending (lower values first), ISO3 ascending'
+      : direction === 'NEUTRAL'
+        ? 'ranking not supported for this metric'
+        : 'raw value descending, ISO3 ascending';
 
   function handlePage(next, nextSize) {
     if (nextSize && nextSize !== pageSize) setPageSize(nextSize);
@@ -57,7 +68,7 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
     <Section
       id="full-ranking"
       title="Full country ranking"
-      subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by the backend: raw value descending, ISO3 ascending.`}
+      subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by the backend: ${orderText}.`}
     >
       <form className="toolbar" onSubmit={submitSearch} role="search" aria-label="Search ranking">
         <Field label="Search country, ISO3, or rank" htmlFor="fullrank-search">
@@ -90,7 +101,11 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
         </Field>
       </form>
 
-      <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="full ranking" />
+      <StatusBlock loading={loading} error={error} empty={empty && !unavailable} onRetry={retry} sectionName="full ranking" />
+
+      {unavailable ? (
+        <UnavailableState reason={data.reason} code={data.reason} hint={data.detail ?? undefined} />
+      ) : null}
 
       {!loading && !error && data && search ? (
         <p className="status" role="status">

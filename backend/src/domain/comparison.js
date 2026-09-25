@@ -12,9 +12,10 @@
  *   A = S_a, B = S_b
  *   Common = A intersect B, Exited = A minus B, Entered = B minus A
  *   rank_y(c)  = 1 + number of economies in S_y positioned before c
- *   The order is THE PROJECT'S ONLY COMPARATOR: value DESC, ISO3 ASC
- *   (compareByValueDesc from domain/ranking.js — imported here, never
- *    re-implemented, so level ordering cannot drift).
+ *   The order is the metric's declared direction (value DESC or ASC) with
+ *   ISO3 ASC tie-break, injected as the authoritative `rank` engine
+ *   (compareByValueDesc/compareByValueAsc from domain/ranking.js — imported
+ *   here, never re-implemented, so level ordering cannot drift).
  *
  * THEOREMS (exact integer identities; proofs partition the predecessor sets)
  *   (P1) commonRankA = fullRankA − exitedAboveA
@@ -378,17 +379,18 @@ function buildComparisonCore({
 }
 /**
  * LEVEL comparison entry point: sets come from the stored level observations and
- * the level engine (value DESC, ISO3 ASC).
+ * the level engine (metric direction, ISO3 ASC tie-break).
  *
- * @param {{ rowsA: object[], rowsB: object[], focusIso3: string }} input
+ * @param {{ rowsA: object[], rowsB: object[], focusIso3: string, direction?: string }} input
  */
-export function buildLevelComparison({ rowsA, rowsB, focusIso3 }) {
+export function buildLevelComparison({ rowsA, rowsB, focusIso3, direction = 'DESC' }) {
+  const rank = (rows) => rankByValue(rows, direction);
   return buildComparisonCore({
     mode: COMPARISON_MODE.LEVEL,
     focusIso3: String(focusIso3 ?? '').toUpperCase(),
     rowsA,
     rowsB,
-    rank: rankByValue,
+    rank,
     keyOf: (row) => row.value,
     extrasOf: (row) => ({ valueRaw: row.valueRaw ?? String(row.value) }),
     missingReasons: {
@@ -1010,18 +1012,20 @@ function buildThreeYearCore({
 
 /**
  * LEVEL three-year comparison entry point: sets come from the stored level
- * observations of all three years and the level engine (value DESC, ISO3 ASC).
+ * observations of all three years and the level engine (metric direction,
+ * ISO3 ASC tie-break).
  *
- * @param {{ rowsA: object[], rowsMid: object[], rowsB: object[], focusIso3: string }} input
+ * @param {{ rowsA: object[], rowsMid: object[], rowsB: object[], focusIso3: string, direction?: string }} input
  */
-export function buildThreeYearLevelComparison({ rowsA, rowsMid, rowsB, focusIso3 }) {
+export function buildThreeYearLevelComparison({ rowsA, rowsMid, rowsB, focusIso3, direction = 'DESC' }) {
+  const rank = (rows) => rankByValue(rows, direction);
   return buildThreeYearCore({
     mode: COMPARISON_MODE.LEVEL,
     focusIso3: String(focusIso3 ?? '').toUpperCase(),
     rowsA,
     rowsMid,
     rowsB,
-    rank: rankByValue,
+    rank,
     keyOf: (row) => row.value,
     extrasOf: (row) => ({ valueRaw: row.valueRaw ?? String(row.value) }),
   });

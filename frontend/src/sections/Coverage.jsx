@@ -7,6 +7,7 @@
 import { api } from '../api/client.js';
 import { metricLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
+import { formatDecimal } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 export default function Coverage({ year, metricKey, fromYear, toYear, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
@@ -96,7 +97,7 @@ export default function Coverage({ year, metricKey, fromYear, toYear, subject = 
                     <td className="num">{m.currentValidObservations}</td>
                     <td className="num">{m.previousValidObservations}</td>
                     <td className="num">{m.validYoyPairs}</td>
-                    <td>{m.focus?.yoyCalculable ? `Yes (${m.focus.yoyPercent?.toFixed?.(2) ?? ''}%)` : 'No'}</td>
+                    <td>{m.focus?.yoyCalculable ? `Yes (${formatDecimal(m.focus.yoyPercent, 2)}%)` : 'No'}</td>
                   </tr>
                 ))}
               </tbody>

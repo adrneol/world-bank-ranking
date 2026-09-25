@@ -43,6 +43,13 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
   const subject = subjectOf(metricKey);
+  // FLOW growth mode is an annual-endpoint comparison, never growth of an
+  // accumulated stock: label the offer explicitly. Metrics that do not
+  // declare YOY are refused by the backend, so the offer is disabled here
+  // with the reason instead of failing after the click.
+  const caps = METRICS[metricKey] ?? null;
+  const isFlow = caps?.observationType === 'FLOW';
+  const yoyOffered = Array.isArray(caps?.validChangeTypes) ? caps.validChangeTypes.includes('YOY') : true;
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
       <FocusPicker countries={countries} value={country} onChange={(v) => onCountry?.(v)} id="mv-country" />
@@ -63,7 +70,12 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
         value={basis}
         options={[
           { value: RANKING_BASIS.LEVEL, label: subject === 'gdp_total' ? 'Total GDP level (value)' : subject === 'gdp_per_capita' ? 'Per-capita level (value)' : 'Level (value)' },
-          { value: RANKING_BASIS.GROWTH, label: 'YoY % growth' },
+          {
+            value: RANKING_BASIS.GROWTH,
+            label: isFlow ? 'Annual flow (endpoint B vs A)' : 'YoY % growth',
+            disabled: !yoyOffered,
+            disabledReason: yoyOffered ? undefined : 'YoY growth is not declared for this metric',
+          },
         ]}
         onChange={onBasis}
       />
@@ -2052,12 +2064,12 @@ function sortGrowthRows(rows, sort) {
  * subsection (observed, then like-for-like), 5. subordinate indicator line,
  * 6. verification inside a collapsed Details row.
  */
-function GrowthIntervalCard({ iv, metric }) {
+function GrowthIntervalCard({ iv, metric, isFlow = false }) {
   if (!iv || !iv.available) {
     return (
       <div className="card">
         <h3>
-          Growth {iv ? growthIntervalLabel(iv) : '—'} <span className="card-unit">unavailable</span>
+          {isFlow ? 'Annual flow' : 'Growth'} {iv ? growthIntervalLabel(iv) : '—'} <span className="card-unit">unavailable</span>
         </h3>
         <p className="card-rank">n/a</p>
         <p className="card-unit">{iv?.reasonText ?? iv?.reason ?? 'Decomposition unavailable.'}</p>
@@ -2111,12 +2123,14 @@ function GrowthIntervalCard({ iv, metric }) {
   return (
     <div className="card">
       <h3>
-        Growth {growthIntervalLabel(iv)} <span className="card-unit">YoY % growth</span>
+        {isFlow ? `Annual flow ${iv.endYear} vs ${iv.startYear}` : `Growth ${growthIntervalLabel(iv)}`}{' '}
+        <span className="card-unit">{isFlow ? 'annual-flow endpoint comparison' : 'YoY % growth'}</span>
       </h3>
-      <p className="card-unit">India&apos;s growth</p>
+      <p className="card-unit">India&apos;s {isFlow ? 'annual-flow change' : 'growth'}</p>
       <p className="card-result-value" aria-label={`India growth ${iv.indiaGrowthDisplay} in ${growthIntervalLabel(iv)}`}>
         {iv.indiaGrowthDisplay ?? 'n/a'}
       </p>
+      {isFlow && iv.endpointMeaning ? <p className="footnote">{iv.endpointMeaning}</p> : null}
       <p className="card-unit">
         Level: {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}
       </p>
@@ -2297,6 +2311,9 @@ function GrowthResults({ data }) {
   const metric = data.metric;
   const growth = data.focusMovement?.growth ?? {};
   const intervals = growthIntervalsOf(data);
+  // describeMetric carries no observation type; resolve FLOW from the
+  // hydrated registry so flow intervals read as endpoint comparisons.
+  const isFlow = (METRICS[metric?.key] ?? null)?.observationType === 'FLOW';
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
@@ -2379,10 +2396,18 @@ function GrowthResults({ data }) {
 
   return (
     <>
-      <h3 className="subhead">What happened to India&apos;s growth?</h3>
+      <h3 className="subhead">
+        {isFlow ? "What happened to India's annual flow?" : "What happened to India's growth?"}
+      </h3>
+      {isFlow ? (
+        <p className="section-sub">
+          Each interval compares the annual flow observed in the end year with the annual flow in the start
+          year (“Annual flow: B vs A”) — never a sum over the span.
+        </p>
+      ) : null}
       <div className="cards" role="region" aria-label="India growth by interval">
         {intervals.map(({ key }) => (
-          <GrowthIntervalCard key={key} iv={growth[key]} metric={metric} />
+          <GrowthIntervalCard key={key} iv={growth[key]} metric={metric} isFlow={isFlow} />
         ))}
       </div>
       <p className="footnote">

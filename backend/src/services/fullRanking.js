@@ -14,7 +14,7 @@ import {
   getYearRange,
 } from '../db/repository.js';
 import { describeMetric, formatValue } from '../domain/format.js';
-import { paginate, rankByValue, searchRanked } from '../domain/ranking.js';
+import { directionFor, paginate, rankByValue, searchRanked } from '../domain/ranking.js';
 import { sourceAttribution } from './attribution.js';
 
 /**
@@ -30,6 +30,10 @@ export function buildFullRanking(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   const indicator = getIndicatorByMetricKey(db, metricKey);
   const eligibleUniverse = countEligibleCountries(db);
+  // Ranking direction comes from the metric registry: DESC (GDP default),
+  // ASC (e.g. inflation, lower first), or refusal for NEUTRAL metrics whose
+  // raw levels must never be ordered into a country rank.
+  const direction = directionFor(metric);
 
   if (!indicator) {
     return {
@@ -44,10 +48,29 @@ export function buildFullRanking(db, options = {}) {
     };
   }
 
+  if (!direction) {
+    return {
+      available: false,
+      reason: 'RANK_UNSUPPORTED',
+      // Quoted FX levels are nominal LCU per US$ (period average): naming the
+      // quotation here keeps any consumer from reading a real
+      // (inflation-adjusted) comparison into the refusal.
+      detail: metric.observationType === 'QUOTED_RATE'
+        ? 'Quoted nominal rate (local currency units per US$, period average): raw levels are never ranked across currencies, and no real (inflation-adjusted) comparison is implied.'
+        : 'Levels for this metric are not ordered into a country rank.',
+      metric: describeMetric(metric),
+      year: options.year ?? null,
+      rows: [],
+      total: 0,
+      eligibleUniverse,
+      source: sourceAttribution(),
+    };
+  }
+
   const year = options.year ?? getYearRange(db, indicator.id).maxYear;
   const { ranked, total } = year === null
     ? { ranked: [], total: 0 }
-    : rankByValue(getEligibleObservations(db, indicator.id, year));
+    : rankByValue(getEligibleObservations(db, indicator.id, year), direction);
 
   const decorate = (row) => ({
     rank: row.rank,
@@ -90,7 +113,9 @@ export function buildFullRanking(db, options = {}) {
     columns: ['rank', 'country', 'iso3', 'rawValue', 'displayValue'],
     source: sourceAttribution(),
     notes: [
-      'Rows are ordered by the raw World Bank value descending, with ISO3 ascending as the deterministic tie-break.',
+      direction === 'ASC'
+        ? 'Rows are ordered by the raw World Bank value ascending (lower values first), with ISO3 ascending as the deterministic tie-break.'
+        : 'Rows are ordered by the raw World Bank value descending, with ISO3 ascending as the deterministic tie-break.',
       'total is the number of eligible countries/economies holding a valid observation for this metric and year.',
     ],
   };

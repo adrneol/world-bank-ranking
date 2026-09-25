@@ -17,7 +17,7 @@ import {
   getYearRange,
 } from '../db/repository.js';
 import { describeMetric, formatValue } from '../domain/format.js';
-import { neighborWindow, rankByValue } from '../domain/ranking.js';
+import { directionFor, neighborWindow, rankByValue } from '../domain/ranking.js';
 import { sourceAttribution } from './attribution.js';
 
 /** Clamp a neighbour count into a sane, documented range. */
@@ -44,11 +44,34 @@ export function buildRankVerification(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   const neighbors = normalizeNeighborCount(options.neighbors);
   const indicator = getIndicatorByMetricKey(db, metricKey);
+  // See fullRanking.js: direction from the registry; NEUTRAL refused.
+  const direction = directionFor(metric);
 
   if (!indicator) {
     return {
       available: false,
       reason: 'metric_not_ingested',
+      metric: describeMetric(metric),
+      year: options.year ?? null,
+      neighbors,
+      focus: null,
+      above: [],
+      below: [],
+      total: 0,
+      eligibleUniverse: countEligibleCountries(db),
+      source: sourceAttribution(),
+    };
+  }
+
+  if (!direction) {
+    return {
+      available: false,
+      reason: 'RANK_UNSUPPORTED',
+      // See fullRanking.js: name the nominal quotation so the refusal can
+      // never be read as a real (inflation-adjusted) comparison.
+      detail: metric.observationType === 'QUOTED_RATE'
+        ? 'Quoted nominal rate (local currency units per US$, period average): raw levels are never ranked across currencies, and no real (inflation-adjusted) comparison is implied.'
+        : 'Levels for this metric are not ordered into a country rank.',
       metric: describeMetric(metric),
       year: options.year ?? null,
       neighbors,
@@ -80,7 +103,7 @@ export function buildRankVerification(db, options = {}) {
     };
   }
 
-  const { ranked, total } = rankByValue(getEligibleObservations(db, indicator.id, year));
+  const { ranked, total } = rankByValue(getEligibleObservations(db, indicator.id, year), direction);
   const focusIndex = ranked.findIndex((row) => row.iso3 === focusIso3);
   const focusRow = focusIndex >= 0 ? ranked[focusIndex] : null;
 
@@ -120,6 +143,9 @@ export function buildRankVerification(db, options = {}) {
           total,
           rowsAbove: focusRow.rank - 1,
           rowsBelow: total - focusRow.rank,
+          // Positional fraction of the ordered list at or before the focus
+          // (0 = first in the metric's ordering). Direction-consistent for
+          // both DESC and ASC because it measures list position, not value.
           percentilePosition: total > 1 ? (focusRow.rank - 1) / (total - 1) : null,
         }
       : null,

@@ -99,7 +99,7 @@ export function methodologyBlock() {
     dataset: SOURCE_INFO.dataset,
     rankWording: SOURCE_INFO.rankWording,
     rankDisclaimer: SOURCE_INFO.rankDisclaimer,
-    levelRanking: 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties are ordered deterministically by ISO3 and therefore receive distinct ordinal positions.',
+    levelRanking: 'value in the metric-declared direction (DESC; ASC where the registry declares lower-values-first), ISO3 ASC; rank = 1-based ordinal position. Ties are ordered deterministically by ISO3 and therefore receive distinct ordinal positions.',
     yoyFormula: '((currentRaw / previousRaw) - 1) * 100, raw values only; missing or non-positive base yields null, never 0%.',
     yoyRanking: 'YoY DESC, ISO3 ASC; denominator counts valid YoY pairs only.',
     numericalRepresentation:

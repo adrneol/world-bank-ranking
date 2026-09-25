@@ -27,7 +27,7 @@ import {
   verifyThreeYearComparison,
 } from '../domain/comparison.js';
 import { describeMetric, formatValue } from '../domain/format.js';
-import { rankByValue } from '../domain/ranking.js';
+import { directionFor, rankByValue } from '../domain/ranking.js';
 import { sourceAttribution } from './attribution.js';
 import { focusDisplayName } from './focusCountry.js';
 import { buildMetadataChange, explainTotalChange } from './coverageService.js';
@@ -163,6 +163,11 @@ export function buildLevelComparisonResponse(db, options = {}) {
   }
   const detail = options.detail === 'summary' ? 'summary' : 'full';
 
+  // Ranking direction from the registry (DESC default, ASC e.g. inflation).
+  // NEUTRAL metrics (raw index levels, quoted FX) have no defensible country
+  // rank order: refuse with RANK_UNSUPPORTED instead of ranking DESC.
+  const direction = directionFor(metric);
+
   // Optional point breaker: None (null) preserves the exact two-year path.
   const breakerRaw = normalizeBreakerInput(options);
   if (breakerRaw !== null && breakerRaw !== undefined) {
@@ -196,6 +201,28 @@ export function buildLevelComparisonResponse(db, options = {}) {
 
   const indicator = getIndicatorByMetricKey(db, metricKey);
   const eligibleUniverse = countEligibleCountries(db);
+  if (!direction) {
+    return {
+      comparison: { available: false, reason: 'RANK_UNSUPPORTED', mode: 'level' },
+      metric: describeMetric(metric),
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      years: { a: yearA, b: yearB, order },
+      universe: {
+        setA: 0,
+        setB: 0,
+        common: 0,
+        exited: 0,
+        entered: 0,
+        membershipRule: COMPARISON_POPULATION_LABEL,
+      },
+      focusMovement: null,
+      economies: { counts: null, rows: [], truncated: false, totalRows: 0 },
+      denominatorExplanation: null,
+      evidence: null,
+      verification: { passed: false, checks: [] },
+      source: sourceAttribution(),
+    };
+  }
   if (!indicator) {
     return {
       comparison: { available: false, reason: 'metric_not_ingested', mode: 'level' },
@@ -254,7 +281,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
 
   const domainInputA = rowsA.map((r) => ({ iso3: r.iso3, name: r.name, value: r.value, valueRaw: r.valueRaw }));
   const domainInputB = rowsB.map((r) => ({ iso3: r.iso3, name: r.name, value: r.value, valueRaw: r.valueRaw }));
-  const comparison = buildLevelComparison({ rowsA: domainInputA, rowsB: domainInputB, focusIso3 });
+  const comparison = buildLevelComparison({ rowsA: domainInputA, rowsB: domainInputB, focusIso3, direction });
   const verification = verifyComparison(comparison);
 
   // Service-level checks (storage-dependent; kept out of the pure domain).
@@ -263,8 +290,8 @@ export function buildLevelComparisonResponse(db, options = {}) {
     serviceChecks.push({ check, status: passed ? 'pass' : 'fail', detail });
 
   // 1. Full ranks match an independent recomputation with the trusted engine.
-  const engineA = rankByValue(domainInputA);
-  const engineB = rankByValue(domainInputB);
+  const engineA = rankByValue(domainInputA, direction);
+  const engineB = rankByValue(domainInputB, direction);
   const engineFocusA = engineA.ranked.find((r) => r.iso3 === focusIso3) ?? null;
   const engineFocusB = engineB.ranked.find((r) => r.iso3 === focusIso3) ?? null;
   serviceRecord(
@@ -490,7 +517,10 @@ export function buildLevelComparisonResponse(db, options = {}) {
     verification: { passed: true, checks: allChecks },
     source: sourceAttribution(),
     comparisonMethodology: {
-      ranking: 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3.',
+      ranking:
+        direction === 'ASC'
+          ? 'value ASC (lower values first, per metric rankingDirection), ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).'
+          : 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).',
       sets: 'Common = economies observed in both years; Exited = observed in year A only; Entered = observed in year B only.',
       aboveBelow: 'Above/below the focus economy is determined by ranking position, never by raw-value comparison.',
       identity: 'F_B - F_A = (K_B - K_A) + EnteredAbove_B - ExitedAbove_A.',
@@ -526,6 +556,9 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   const detail = options.detail === 'summary' ? 'summary' : 'full';
 
+  // Same direction rule as the two-year path (NEUTRAL refused).
+  const direction = directionFor(metric);
+
   const indicator = getIndicatorByMetricKey(db, metricKey);
   const emptyUniverse = {
     setA: 0,
@@ -541,6 +574,21 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   if (!indicator) {
     return {
       comparison: { available: false, reason: 'metric_not_ingested', mode: 'level', pointBreaker: { active: true, yearMid } },
+      metric: describeMetric(metric),
+      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      years: { a: yearA, mid: yearMid, b: yearB, order },
+      universe: emptyUniverse,
+      focusMovement: null,
+      economies: { counts: null, rows: [], truncated: false, totalRows: 0 },
+      denominatorExplanation: null,
+      evidence: null,
+      verification: { passed: false, checks: [] },
+      source: sourceAttribution(),
+    };
+  }
+  if (!direction) {
+    return {
+      comparison: { available: false, reason: 'RANK_UNSUPPORTED', mode: 'level', pointBreaker: { active: true, yearMid } },
       metric: describeMetric(metric),
       focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
       years: { a: yearA, mid: yearMid, b: yearB, order },
@@ -589,6 +637,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     rowsMid: toDomain(rowsMid),
     rowsB: toDomain(rowsB),
     focusIso3,
+    direction,
   });
   const verification = verifyThreeYearComparison(comparison);
 
@@ -596,9 +645,9 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   const serviceRecord = (check, passed, detailInfo = null) =>
     serviceChecks.push({ check, status: passed ? 'pass' : 'fail', detail: detailInfo });
 
-  const engineA = rankByValue(toDomain(rowsA));
-  const engineMid = rankByValue(toDomain(rowsMid));
-  const engineB = rankByValue(toDomain(rowsB));
+  const engineA = rankByValue(toDomain(rowsA), direction);
+  const engineMid = rankByValue(toDomain(rowsMid), direction);
+  const engineB = rankByValue(toDomain(rowsB), direction);
   const engineFocusA = engineA.ranked.find((r) => r.iso3 === focusIso3) ?? null;
   const engineFocusMid = engineMid.ranked.find((r) => r.iso3 === focusIso3) ?? null;
   const engineFocusB = engineB.ranked.find((r) => r.iso3 === focusIso3) ?? null;
@@ -880,7 +929,10 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     verification: { passed: true, checks: allChecks },
     source: sourceAttribution(),
     comparisonMethodology: {
-      ranking: 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3.',
+      ranking:
+        direction === 'ASC'
+          ? 'value ASC (lower values first, per metric rankingDirection), ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).'
+          : 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).',
       sets: 'Common = economies observed in all three selected years (start, point breaker, end); Outside = observed in at least one year but missing in at least one other year.',
       aboveBelow: 'Above/below the focus economy is determined by ranking position, never by raw-value comparison.',
       identity:

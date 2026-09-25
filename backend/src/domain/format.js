@@ -53,7 +53,16 @@ export function formatValue(value, metric) {
   const symbol = metric?.currencySymbol ?? '';
   const unit = metric?.unitLong ?? metric?.unit ?? null;
   const scale = displayScaleFor(metric);
-  const plain = formatNumber(value, { decimals: 0 });
+  // Display precision comes from the registry contract (displayDecimals),
+  // not from a call-site guess. Scaled outputs keep the scale's decimals
+  // (2 for trillions/billions); unscaled outputs use displayDecimals.
+  // LEVEL GDP per-capita pins 0, RATE/RATIO/FX pin 2, INDEX pins 1.
+  const unscaledDecimals =
+    Number.isInteger(metric?.displayDecimals) && metric.displayDecimals >= 0
+      ? metric.displayDecimals
+      : 0;
+  const decimals = scale ? scale.decimals : unscaledDecimals;
+  const plain = formatNumber(value, { decimals });
   return {
     raw: value === null || value === undefined ? null : Number(value),
     formatted:
@@ -64,7 +73,7 @@ export function formatValue(value, metric) {
           : `${symbol}${plain}`,
     unit,
     currencySymbol: symbol,
-    decimals: scale ? scale.decimals : 0,
+    decimals,
     ...(scale ? { displayScale: metric.displayScaleHint } : {}),
   };
 }
@@ -168,6 +177,7 @@ export function describeMeasure(metric) {
     ppp: metric.ppp === true,
     baseYear: metric.baseYear ?? null,
     displayScale: metric.displayScaleHint ?? null,
+    displayDecimals: metric.displayDecimals ?? 0,
     worldBankPage: metric.worldBankPage,
     ...(metric.verified ? { verified: { ...metric.verified } } : {}),
   };

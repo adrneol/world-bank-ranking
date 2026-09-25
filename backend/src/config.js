@@ -222,6 +222,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     ppp: false,
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.CD',
+    displayDecimals: 0,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -254,6 +255,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     ppp: false,
     baseYear: 2015,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.KD',
+    displayDecimals: 0,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -286,6 +288,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     ppp: true,
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.CD',
+    displayDecimals: 0,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -318,6 +321,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     ppp: true,
     baseYear: 2021,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD',
+    displayDecimals: 0,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -367,6 +371,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.CD',
+    displayDecimals: 2,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -400,6 +405,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     baseYear: 2015,
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.KD',
+    displayDecimals: 2,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -433,6 +439,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.PP.CD',
+    displayDecimals: 2,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -466,6 +473,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     baseYear: 2021,
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.PP.KD',
+    displayDecimals: 2,
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -525,6 +533,7 @@ const PRICES_METRICS = Object.freeze({
     ppp: false,
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/FP.CPI.TOTL.ZG?format=json (re-verified unchanged at promotion)',
@@ -560,6 +569,7 @@ const PRICES_METRICS = Object.freeze({
     ppp: false,
     baseYear: 2010,
     worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL',
+    displayDecimals: 1,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/FP.CPI.TOTL?format=json (re-verified unchanged at promotion)',
@@ -595,6 +605,7 @@ const PRICES_METRICS = Object.freeze({
     ppp: false,
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.DEFL.KD.ZG',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/NY.GDP.DEFL.KD.ZG?format=json (re-verified unchanged at promotion)',
@@ -638,6 +649,7 @@ const TRADE_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NE.EXP.GNFS.CD',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/NE.EXP.GNFS.CD?format=json (re-verified unchanged at promotion)',
@@ -674,6 +686,7 @@ const TRADE_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NE.IMP.GNFS.CD',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/NE.IMP.GNFS.CD?format=json (re-verified unchanged at promotion)',
@@ -719,6 +732,7 @@ const CAPITAL_FLOWS_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.CD.WD',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BX.KLT.DINV.CD.WD?format=json (re-verified unchanged at promotion)',
@@ -754,6 +768,7 @@ const CAPITAL_FLOWS_METRICS = Object.freeze({
     ppp: false,
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.WD.GD.ZS',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BX.KLT.DINV.WD.GD.ZS?format=json (re-verified unchanged at promotion)',
@@ -798,6 +813,7 @@ const EXCHANGE_METRICS = Object.freeze({
     ppp: false,
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/PA.NUS.FCRF',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/PA.NUS.FCRF?format=json (re-verified unchanged at promotion)',
@@ -842,6 +858,7 @@ const EXTERNAL_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/BN.CAB.XOKA.CD',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BN.CAB.XOKA.CD?format=json (live-verified at promotion; signed flow)',
@@ -878,6 +895,7 @@ const EXTERNAL_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/FI.RES.XGLD.CD',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/FI.RES.XGLD.CD?format=json (live-verified at promotion)',
@@ -914,6 +932,7 @@ const EXTERNAL_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/BX.TRF.PWKR.CD.DT',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BX.TRF.PWKR.CD.DT?format=json (live-verified at promotion)',
@@ -957,6 +976,7 @@ const POPULATION_METRICS = Object.freeze({
     baseYear: null,
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/SP.POP.TOTL',
+    displayDecimals: 2,
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/SP.POP.TOTL?format=json (live-verified at promotion)',
@@ -1222,6 +1242,11 @@ export function assertSemanticFields(key, metric, { prospectiveSubject = false }
     fail('APP_DERIVED measures must record formula and inputs');
   }
   if (!metric.subject || typeof metric.subject !== 'string') fail('missing subject');
+  // Display precision is a registry contract, not a call-site guess: a
+  // non-negative integer every formatter (backend + frontend) honors.
+  if (!Number.isInteger(metric.displayDecimals) || metric.displayDecimals < 0) {
+    fail('displayDecimals must be a non-negative integer');
+  }
   if (prospectiveSubject && SUBJECTS[metric.subject]) {
     fail(`prospective subject "${metric.subject}" already exists; promote the measure instead`);
   }

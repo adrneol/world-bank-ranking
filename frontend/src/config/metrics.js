@@ -20,6 +20,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.CD',
     unit: 'current US$',
     subject: 'gdp_per_capita',
+    displayDecimals: 0,
   }),
   nominal_constant: Object.freeze({
     key: 'nominal_constant',
@@ -28,6 +29,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.KD',
     unit: 'constant 2015 US$',
     subject: 'gdp_per_capita',
+    displayDecimals: 0,
   }),
   ppp_current: Object.freeze({
     key: 'ppp_current',
@@ -36,6 +38,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.PP.CD',
     unit: 'current international $',
     subject: 'gdp_per_capita',
+    displayDecimals: 0,
   }),
   ppp_constant: Object.freeze({
     key: 'ppp_constant',
@@ -44,6 +47,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.PP.KD',
     unit: 'constant 2021 international $',
     subject: 'gdp_per_capita',
+    displayDecimals: 0,
   }),
   total_current: Object.freeze({
     key: 'total_current',
@@ -52,6 +56,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.CD',
     unit: 'current US$',
     subject: 'gdp_total',
+    displayDecimals: 2,
   }),
   total_constant: Object.freeze({
     key: 'total_constant',
@@ -60,6 +65,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.KD',
     unit: 'constant 2015 US$',
     subject: 'gdp_total',
+    displayDecimals: 2,
   }),
   total_ppp_current: Object.freeze({
     key: 'total_ppp_current',
@@ -68,6 +74,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.PP.CD',
     unit: 'current international $',
     subject: 'gdp_total',
+    displayDecimals: 2,
   }),
   total_ppp_constant: Object.freeze({
     key: 'total_ppp_constant',
@@ -76,6 +83,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.PP.KD',
     unit: 'constant 2021 international $',
     subject: 'gdp_total',
+    displayDecimals: 2,
   }),
 });
 
@@ -164,6 +172,12 @@ export function hydrateRegistry(payload) {
         priceBasis: entry.priceBasis ?? null,
         currencyBasis: entry.currencyBasis ?? null,
         baseYear: entry.baseYear ?? null,
+        // Registry display precision: every raw-number format site reads this,
+        // never a hardcoded toFixed. Falls back to 0 only if the backend
+        // predates the contract (fail-safe display, backend stays authoritative).
+        displayDecimals: Number.isInteger(entry.displayDecimals) && entry.displayDecimals >= 0
+          ? entry.displayDecimals
+          : 0,
       });
       if (!subjectKeys[entry.subject]) {
         subjectKeys[entry.subject] = [];
@@ -223,6 +237,12 @@ export function metricLabel(key) {
 
 export function metricTitle(key) {
   return METRICS[key]?.title ?? key;
+}
+
+/** Display precision for one metric (registry displayDecimals; 0 when unknown). */
+export function metricDecimals(key) {
+  const d = METRICS[key]?.displayDecimals;
+  return Number.isInteger(d) && d >= 0 ? d : 0;
 }
 
 /** Capability metadata mirror for one metric (null when unknown). */

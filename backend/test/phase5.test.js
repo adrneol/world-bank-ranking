@@ -220,10 +220,10 @@ test('Phase 5.34/36: CPI ranking, deflator and index golden values', async () =>
   await ingestFull(db);
   const { base, close } = await startApp(db);
   try {
-    // 2024 CPI: USA 37.64 > DEU 5.70 > IND 4.95 > PAK 0.45 > XKX 0.0124.
+    // 2024 CPI ranks lower-first (ASC): XKX 0.0124 < PAK 0.45 < IND 4.95 < DEU 5.70 < USA 37.64.
     const ranking = await (await fetch(`${base}/api/ranking?indicator=inflation_cpi&year=2024`)).json();
     assert.equal(ranking.total, 5);
-    assert.deepEqual(ranking.rows.map((r) => r.iso3), ['USA', 'DEU', 'IND', 'PAK', 'XKX']);
+    assert.deepEqual(ranking.rows.map((r) => r.iso3), ['XKX', 'PAK', 'IND', 'DEU', 'USA']);
     const ind = ranking.rows.find((r) => r.iso3 === 'IND');
     assert.equal(ind.rank, 3);
     assert.equal(ind.rawValue, liveIndia2024('inflation_cpi'));

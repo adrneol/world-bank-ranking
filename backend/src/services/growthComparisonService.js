@@ -111,11 +111,23 @@ function buildLimits({ mixedVintage, commonSize, focusAvailable, hasMid }) {
   return limits;
 }
 
-function growthMethodology(hasMid) {
+function growthMethodology(hasMid, metric = null) {
+  // FLOW metrics compare annual endpoint flows ("Annual flow: B vs A"): the
+  // percent change relates the flow observed in the end year to the flow in
+  // the start year. It is never a sum or accumulated total over the span, no
+  // endpoint is zero-filled when missing, and intervals are never added
+  // together (no overlap double-count). Period sums/averages are not computed.
+  // With three selected years the AB interval still uses endpoints A and B
+  // only — never chained AM/MB sub-interval results.
+  const isFlow = metric?.observationType === 'FLOW';
+  const endpointClause = hasMid
+    ? ' With a middle year, each interval (AM, MB, AB) is an independent endpoint pair; the AB interval uses endpoints A and B only, never chained sub-interval results.'
+    : '';
   return {
     ranking: 'growthPercent DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Rank 1 is the highest growth.',
-    growth:
-      'Simple percentage change between the two selected observations: ((endValue / startValue) - 1) * 100 on raw values. Not annualized; no CAGR.',
+    growth: isFlow
+      ? `Annual-flow endpoint comparison: ((flow in end year / flow in start year) - 1) * 100 on raw values ("Annual flow: B vs A"). Never a sum or accumulated total over the span; a missing endpoint makes growth unavailable (no zero-fill); intervals are never added together.${endpointClause} Not annualized; no CAGR; no PERIOD SUM.`
+      : `Simple percentage change between the two selected endpoint observations: ((endValue / startValue) - 1) * 100 on raw values.${endpointClause} Not annualized; no CAGR.`,
     absoluteChange:
       'endValue minus startValue on raw values. Displayed for context only; it never affects rank, sorting, universe membership, relations or decomposition.',
     sets: hasMid
@@ -471,6 +483,11 @@ export function buildGrowthComparisonResponse(db, options = {}) {
       reasonText: iv.reason ? (GROWTH_REASON_DESCRIPTIONS[iv.reason] ?? reasonText(iv.reason)) : null,
       startYear: iv.startYear,
       endYear: iv.endYear,
+      // FLOW-only endpoint label; LEVEL intervals carry no such field so
+      // their response shape is byte-identical to before.
+      ...(metric?.observationType === 'FLOW'
+        ? { endpointMeaning: `Annual flow: ${iv.endYear} vs ${iv.startYear} — endpoint comparison, not a period sum.` }
+        : {}),
       indiaGrowthPercent: iv.indiaGrowthPercent,
       indiaGrowthDisplay: formatPercent(iv.indiaGrowthPercent),
       startValue: iv.startValue,
@@ -576,7 +593,16 @@ export function buildGrowthComparisonResponse(db, options = {}) {
     },
     verification: { passed: true, checks: allChecks },
     source: sourceAttribution(),
-    comparisonMethodology: growthMethodology(hasMid),
+    comparisonMethodology: growthMethodology(hasMid, metric),
+    // FLOW-only endpoint contract: additive, so LEVEL responses are untouched.
+    ...(metric?.observationType === 'FLOW'
+      ? {
+        flowSemantics: {
+          intervalMeaning: 'Annual flow: B vs A — endpoint comparison of annual flows, never a period sum.',
+          periodRule: 'No PERIOD SUM or PERIOD AVERAGE is computed; intervals are independent endpoint pairs.',
+        },
+      }
+      : {}),
   };
 }
 

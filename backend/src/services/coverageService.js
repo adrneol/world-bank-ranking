@@ -23,7 +23,7 @@ import {
 } from '../db/repository.js';
 import { buildYoyCoverage, explainCoverageChange, summarizeCoverage } from '../domain/coverage.js';
 import { describeMetric } from '../domain/format.js';
-import { rankByValue } from '../domain/ranking.js';
+import { directionFor, rankByValue } from '../domain/ranking.js';
 import { sourceAttribution } from './attribution.js';
 
 /** Coverage counters for one metric and year, from stored observations only. */
@@ -67,7 +67,10 @@ export function buildCoveragePanel(db, options = {}) {
     }
 
     const coverage = coverageForMetricYear(db, indicator.id, year, eligibleUniverse);
-    const { ranked } = rankByValue(getEligibleObservations(db, indicator.id, year));
+    // Focus rank honors the metric's declared direction; NEUTRAL metrics
+    // (raw index levels, quoted FX) receive no country rank. Counts stay.
+    const direction = directionFor(metric);
+    const { ranked } = direction ? rankByValue(getEligibleObservations(db, indicator.id, year), direction) : { ranked: [] };
     const focusRow = ranked.find((row) => row.iso3 === focusIso3) ?? null;
 
     return {
@@ -82,6 +85,7 @@ export function buildCoveragePanel(db, options = {}) {
         iso3: focusIso3,
         available: Boolean(focusRow),
         rank: focusRow ? focusRow.rank : null,
+        focusRankReason: focusRow ? null : (direction ? null : 'RANK_UNSUPPORTED'),
         total: coverage.validObservations,
       },
       // Explicit reminder of what the two numbers mean (specification section 5).
@@ -129,6 +133,18 @@ export function buildYoyCoveragePanel(db, options = {}) {
         metric: describeMetric(metric),
         available: false,
         reason: 'metric_not_ingested',
+        year: options.year ?? null,
+      };
+    }
+
+    // Generic percent-change YoY coverage is only meaningful for metrics
+    // that declare YOY. Rates, ratios and indexes report unsupported instead
+    // of a misleading relative percent (e.g. CPI −12% for 6%→3%).
+    if (!metric.validChangeTypes.includes('YOY')) {
+      return {
+        metric: describeMetric(metric),
+        available: false,
+        reason: 'unsupported_transformation_for_metric',
         year: options.year ?? null,
       };
     }

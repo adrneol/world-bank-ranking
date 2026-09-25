@@ -16,9 +16,9 @@
  */
 
 import { api } from '../api/client.js';
-import { metricCapabilities, metricLabel, metricTitle } from '../config/metrics.js';
+import { metricCapabilities, metricDecimals, metricLabel, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { formatYoy } from '../utils/format.js';
+import { formatDecimal, formatYoy } from '../utils/format.js';
 import { MethodologyPanel, ProvenanceBadge, UnavailableState } from '../components/ui.jsx';
 
 function useYearly({ metricKey, country, startYear, endYear, subject }) {
@@ -51,10 +51,12 @@ function ChangeSummary({ change, unitNoun }) {
     return <UnavailableState reason={change.reason} hint="The requested change is not defined for these values." />;
   }
   const sign = change.value > 0 ? '+' : '';
+  // Change results arrive as raw backend numbers; pp and index-point units
+  // both pin 2dp (backend formatPercentagePoints/formatIndexPoints).
   return (
     <p className="result-value">
       {sign}
-      {change.value.toFixed(2)} <span className="result-unit">{unitNoun}</span>
+      {formatDecimal(change.value, 2)} <span className="result-unit">{unitNoun}</span>
     </p>
   );
 }
@@ -103,7 +105,7 @@ function RatePanel({ metricKey, country, focusName, startYear, endYear, realSubj
               return (
                 <tr key={year}>
                   <th scope="row">{year}</th>
-                  <td className="num">{cell?.available ? cell.indiaValue.toFixed(2) : '—'}</td>
+                  <td className="num">{cell?.available ? (cell.indiaValueDisplay?.formatted ?? formatDecimal(cell.indiaValue, metricDecimals(metricKey))) : '—'}</td>
                   <td className="num">{growth?.available ? formatYoy(growth.indiaYoY, growth.indiaYoYDisplay) : '—'}</td>
                 </tr>
               );
@@ -163,7 +165,7 @@ function IndexPanel({ metricKey, country, focusName, startYear, endYear }) {
               {rows.map((r) => (
                 <tr key={r.year}>
                   <th scope="row">{r.year}</th>
-                  <td className="num">{r[metricKey].indiaValue.toFixed(1)}</td>
+                  <td className="num">{r[metricKey].indiaValueDisplay?.formatted ?? formatDecimal(r[metricKey].indiaValue, metricDecimals(metricKey))}</td>
                 </tr>
               ))}
             </tbody>
@@ -220,7 +222,7 @@ function FxPanel({ metricKey, country, focusName, startYear, endYear, onCompareE
               {rows.map((r) => (
                 <tr key={r.year}>
                   <th scope="row">{r.year}</th>
-                  <td className="num">{r[metricKey].indiaValue.toFixed(2)}</td>
+                  <td className="num">{r[metricKey].indiaValueDisplay?.formatted ?? formatDecimal(r[metricKey].indiaValue, metricDecimals(metricKey))}</td>
                   <td className="num">{formatYoy(r[metricKey].indiaYoY, r[metricKey].indiaYoYDisplay)}</td>
                 </tr>
               ))}

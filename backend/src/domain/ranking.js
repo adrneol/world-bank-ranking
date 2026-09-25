@@ -1,10 +1,13 @@
 /**
  * LEVEL RANKING ENGINE (pure functions, no I/O).
  *
- * Method (identical for every metric and every year):
+ * Method (identical for every metric and every year, modulo direction):
  *   1. take every eligible observation for that year
  *   2. drop null/missing values (they are never ranked, never treated as 0)
- *   3. sort by raw value DESCENDING
+ *   3. sort by raw value in the metric's declared direction
+ *      (DESCENDING for GDP-like size ordering, ASCENDING e.g. for inflation
+ *      where lower numeric values come first; NEUTRAL metrics are refused by
+ *      the calling service and never reach this engine)
  *   4. break ties by ISO3 ASCENDING (deterministic secondary key)
  *   5. rank = 1-based position in that ordering
  *
@@ -15,7 +18,14 @@
  *
  * The denominator is the number of rows that survived step 2 - the eligible
  * countries/economies with a valid observation for that year and metric.
+ *
+ * Direction defaults to DESC (frozen GDP behavior). Any value other than the
+ * exact string 'ASC' resolves to DESC, so an unknown direction can never
+ * silently invert a ranking.
  */
+
+/** Ranking directions supported by this engine. NEUTRAL is refused upstream. */
+export const RANK_DIRECTIONS = Object.freeze({ DESC: 'DESC', ASC: 'ASC' });
 
 /**
  * Deterministic comparator: value DESC, then ISO3 ASC.
@@ -29,6 +39,46 @@ export function compareByValueDesc(a, b) {
 }
 
 /**
+ * Deterministic comparator: value ASCENDING (lower numeric values first),
+ * then ISO3 ASC. Negative values naturally precede positive values; no
+ * desirability score is fabricated — this is ordinary numeric order.
+ *
+ * @param {{ iso3: string, value: number }} a
+ * @param {{ iso3: string, value: number }} b
+ */
+export function compareByValueAsc(a, b) {
+  if (a.value !== b.value) return a.value - b.value;
+  return a.iso3 < b.iso3 ? -1 : a.iso3 > b.iso3 ? 1 : 0;
+}
+
+/**
+ * Resolve the comparator for a direction. Anything but exact 'ASC' yields
+ * the frozen DESC comparator.
+ *
+ * @param {string} [direction]
+ */
+export function comparatorFor(direction = 'DESC') {
+  return direction === RANK_DIRECTIONS.ASC ? compareByValueAsc : compareByValueDesc;
+}
+
+/**
+ * Resolve the ranking direction declared by a metric registry entry.
+ *
+ * Returns 'DESC', 'ASC', or null when ranking is unsupported (NEUTRAL or
+ * undeclared). Calling services refuse null with RANK_UNSUPPORTED — they
+ * never fall back to a different direction silently, and they never rank
+ * NEUTRAL metrics.
+ *
+ * @param {object} metric registry entry (or null)
+ */
+export function directionFor(metric) {
+  const declared = metric?.rankingDirection;
+  if (declared === RANK_DIRECTIONS.ASC) return RANK_DIRECTIONS.ASC;
+  if (declared === RANK_DIRECTIONS.DESC) return RANK_DIRECTIONS.DESC;
+  return null;
+}
+
+/**
  * Rank a list of eligible observations.
  *
  * Sorting and comparison use ONLY the numeric value (never valueRaw, never a
@@ -36,19 +86,21 @@ export function compareByValueDesc(a, b) {
  * audit metadata.
  *
  * @param {{ iso3: string, name?: string, value: number, valueRaw?: string|null }[]} rows
+ * @param {string} [direction] 'DESC' (default, frozen) or 'ASC'
  * @returns {{
  *   ranked: { rank:number, iso3:string, name?:string, value:number, valueRaw?:string|null }[],
  *   total: number,
  *   dropped: number
  * }}
  */
-export function rankByValue(rows) {
+export function rankByValue(rows, direction = 'DESC') {
+  const resolved = direction === RANK_DIRECTIONS.ASC ? RANK_DIRECTIONS.ASC : RANK_DIRECTIONS.DESC;
   const valid = (rows ?? []).filter(
     (r) => r && typeof r.value === 'number' && Number.isFinite(r.value) && r.iso3,
   );
   const dropped = (rows?.length ?? 0) - valid.length;
 
-  const ranked = [...valid].sort(compareByValueDesc).map((row, index) => ({
+  const ranked = [...valid].sort(comparatorFor(resolved)).map((row, index) => ({
     rank: index + 1,
     iso3: row.iso3,
     name: row.name,
@@ -64,9 +116,10 @@ export function rankByValue(rows) {
  *
  * @param {{ iso3: string, name?: string, value: number }[]} rows
  * @param {string} iso3 target country
+ * @param {string} [direction] 'DESC' (default, frozen) or 'ASC'
  */
-export function rankAndLocate(rows, iso3) {
-  const { ranked, total, dropped } = rankByValue(rows);
+export function rankAndLocate(rows, iso3, direction = 'DESC') {
+  const { ranked, total, dropped } = rankByValue(rows, direction);
   const target = ranked.find((r) => r.iso3 === String(iso3).toUpperCase()) ?? null;
   return { ranked, total, dropped, target };
 }
@@ -168,4 +221,4 @@ export function describeRankChange(previousRank, currentRank) {
   };
 }
 
-export default { rankByValue, rankAndLocate, neighborWindow, paginate, parseRankQuery, searchRanked };
+export default { rankByValue, rankAndLocate, neighborWindow, paginate, parseRankQuery, searchRanked, compareByValueDesc, compareByValueAsc, comparatorFor, directionFor, RANK_DIRECTIONS };
