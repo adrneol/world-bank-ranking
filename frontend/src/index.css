@@ -901,7 +901,12 @@ hr.ddivider {
   font-size: 1rem;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  /* Wraps on narrow viewports instead of forcing horizontal overflow:
+     "+12 positions (moved up)" must never stretch past the screen. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .facts-grouped {

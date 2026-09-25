@@ -50,8 +50,11 @@ selectable after refresh with no code change.
 - Movement-table search, relation filters, sorting, and pagination that never renumber backend ranks
 - YoY coverage (current/previous valid counts, valid pairs)
 - Data coverage panels and evidence-only changing-totals explanations
-- Rank movement comparison (Movement tab): like-for-like common universe, entered/exited analysis, verified decomposition
-- Entity comparison (Compare tab): country, official World Bank aggregate, or user-selected group on either side; capability-filtered operations (level, change, CAGR, cross-rate); observed vs like-for-like group values with provenance
+- Rank movement comparison (Movement tab): like-for-like common universe, entered/exited analysis, verified decomposition; metric-aware bases — level endpoint, annual YoY / period endpoint change, and for annual flows annual endpoint vs period total vs period average
+- Entity comparison (Compare tab): country, official World Bank aggregate, or user-selected group on either side; capability-filtered operations (level, change, CAGR, cross-rate); observed vs like-for-like group values with provenance; named groups with member counts, URL persistence, and server-validated previews
+- Flow period analysis: annual endpoint comparison ("Annual flow: B vs A") kept distinct from half-open period totals ([A, B)) and period averages, with strict completeness (a missing year makes the period unavailable, never zero-filled)
+- Group methodology: additive families sum member observations (Total GDP, trade flows, FDI, current account, remittances, population); FDI % GDP for groups resolves as ΣFDI / ΣGDP × 100 from compatible legs (never averaged member percentages); per-capita, inflation, index and FX groups are refused with explicit reasons
+- Analytical charts (Recharts): time-series lines for histories, endpoint slopes (never fake trend lines), bars for period totals and group levels, rank-1-on-top movement slopes — every value rendered verbatim from backend responses with units, source, and APP_DERIVED labelling where applicable
 - Subject-aware analysis: inflation in percentage points (never relative percent by default), CPI index in index points, exchange rates with explicit LCU-per-US$ quotation semantics
 - Audit/source transparency, including raw-value visibility
 - Data status, integrity checks, and manual refresh with progress
@@ -165,8 +168,10 @@ For one indicator and two years (`GET /api/comparison/level`):
 - `F_A` / `F_B`: India full observed ranks; `K_A` / `K_B`: India positions
   inside Common using each year values (derived comparison positions, not
   World Bank ranks).
-- Above/below India is decided by ranking position (`value DESC, ISO3 ASC`,
-  1-based), never by raw-value comparison, so ISO3 tie-breaks are exact.
+- Above/below India is decided by ranking position (metric-declared direction,
+  `DESC` for GDP and `ASC` where the registry declares lower-values-first,
+  `ISO3 ASC` tie-break, 1-based), never by raw-value comparison, so ISO3
+  tie-breaks are exact.
 - Verified identity: `F_B − F_A = (K_B − K_A) + EnteredAbove_B − ExitedAbove_A`.
   `positionNumberChange = F_B − F_A` (positive = position number increased);
   `placesGained = F_A − F_B` (positive = moved up). The frontend displays
@@ -183,6 +188,44 @@ For one indicator and two years (`GET /api/comparison/level`):
   counters, metadata-universe comparison, completeness, fingerprint, limits,
   and the denominator explanation. Region/income metadata is labelled as the
   retrieved vintage, not as historical fact.
+
+## Flow Periods, Groups, and Charts
+
+Annual flows (exports, imports, FDI, current account, remittances) are not
+levels, so a multi-year span is never reduced to endpoint percentage growth:
+
+- **Annual endpoint** compares the annual flow in year B with year A
+  (“Annual flow: B vs A”), interiors ignored.
+- **Period total** sums the annual observations over the half-open interval
+  `[A, B)` — 2004 → 2014 means 2004…2013 (10 observations), 2014 → 2024
+  means 2014…2023, so adjacent periods never double-count a boundary year.
+- **Period average** is the total divided by the observation count (typical
+  annual scale), always shown beside — never substituted for — the total.
+- Strict completeness: one missing year makes the period unavailable with
+  reason `incomplete_period` plus the missing-year list. Missing is never
+  zero, never interpolated, never silently skipped.
+- Signed flows refuse sign-flipping percentages everywhere (`+10 → −5`
+  is unavailable with reason `sign_change_across_endpoints`, never −150%);
+  absolute change and period sums stay valid.
+
+Custom groups are request-scoped ISO3 lists, never regions and never ranked
+in country leaderboards. Additive families (Total GDP, trade flows, FDI,
+current account, remittances, population) sum valid member observations;
+FDI % GDP resolves as Σ member FDI ÷ Σ member total-GDP × 100 from
+same-year, same-vintage, same-basis legs (never averaged member ratios).
+Per-capita, inflation, CPI index and FX groups are refused with explicit
+machine-readable reasons (`NOT_AGGREGATABLE`, `UNSUPPORTED_TRANSFORMATION`,
+`UNSUPPORTED_ENTITY_COMBINATION`). Official World Bank aggregates are read
+as published observations, never synthesized; missing aggregates stay
+missing with a reason.
+
+Charts (Recharts) visualize backend numbers only and never calculate
+economics: time-series lines for genuine histories (gaps break lines),
+endpoint slopes for two-point comparisons (never fake trend lines), bars
+for period totals and group levels, rank slopes with rank 1 at the top.
+Every chart carries title, unit, source, and APP_DERIVED labelling where
+applicable; tooltips keep full registry precision; missing values render
+gaps, never zeros.
 
 ## Search and Filtering
 
@@ -318,16 +361,18 @@ this project has none to configure.
 
 ## Testing
 
-- Backend: `npm test` in `backend/` — 324 tests covering configuration,
+- Backend: `npm test` in `backend/` — 359 tests covering configuration,
   subject/metric registry (twenty metrics, semantic metadata, lifecycle),
   country universe, ranking, ties, denominators, YoY,
   YoY ranking, pagination, search (text and exact-rank), World Bank client
   behavior (retries, pagination completeness, error envelopes), ingestion
   (all subjects, aggregate storage, historical ranges), refresh locking, cache TTL, coverage
   cases, services, per-capita regression, Total GDP math parity and API,
-  generic transformations (percent/pp/index-point/CAGR/group/cross-rate),
+  generic transformations (percent/pp/index-point/CAGR/group/cross-rate/period),
   entity/group comparison (capability matrix, observed vs like-for-like,
-  provenance), new-indicator promotion and analytics,
+  weighted ratios, provenance), new-indicator promotion and analytics,
+  flow periods ([A,B) boundaries, completeness, sign guards), chart data
+  adapters (exact passthrough, null preservation),
   historical year handling, and HTTP endpoints. All pass except one
   environment-dependent refresh-auth test that expects an open endpoint while
   the local `.env` configures `REFRESH_ADMIN_TOKEN` (pre-existing, unrelated).
