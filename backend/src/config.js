@@ -186,6 +186,12 @@ export const MEASURE_INTERPRETATIONS = Object.freeze([
   'CONTEXT_DEPENDENT',
 ]);
 export const AGGREGATION_MODES = Object.freeze(['SUM', 'WEIGHTED_RATIO', 'OFFICIAL_ONLY', 'MEMBER_ONLY', 'NOT_AGGREGATABLE']);
+// Period aggregation over time (Phase 7C-1): which multi-year period
+// statistics may be computed from a metric's annual observations. SUM and
+// AVG apply to FLOW semantics (summing annual flows over [A,B)); every
+// other family declares none. An empty list means NONE — levels never sum
+// over time, rates/ratios/indexes/quoted rates never inherit flow periods.
+export const PERIOD_AGGREGATION_MODES = Object.freeze(['SUM', 'AVG']);
 export const ENTITY_KINDS = Object.freeze(['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP']);
 export const SIGN_DOMAINS = Object.freeze(['POSITIVE_ONLY', 'NON_NEGATIVE', 'SIGNED']);
 export const LIFECYCLE_STATES = Object.freeze(['PRODUCTION', 'SUPPORTED', 'DEFINED']);
@@ -223,6 +229,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.CD',
     displayDecimals: 0,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -256,6 +263,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     baseYear: 2015,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.KD',
     displayDecimals: 0,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -289,6 +297,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.CD',
     displayDecimals: 0,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -322,6 +331,7 @@ const GDP_PER_CAPITA_METRICS = Object.freeze({
     baseYear: 2021,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD',
     displayDecimals: 0,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_PER_CAPITA',
     observationType: 'LEVEL',
@@ -372,6 +382,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.CD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -406,6 +417,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.KD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -440,6 +452,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.PP.CD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -474,6 +487,7 @@ const TOTAL_GDP_METRICS = Object.freeze({
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.MKTP.PP.KD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     domain: 'NATIONAL_ACCOUNTS',
     family: 'GDP_TOTAL',
     observationType: 'LEVEL',
@@ -534,6 +548,7 @@ const PRICES_METRICS = Object.freeze({
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/FP.CPI.TOTL.ZG?format=json (re-verified unchanged at promotion)',
@@ -570,6 +585,7 @@ const PRICES_METRICS = Object.freeze({
     baseYear: 2010,
     worldBankPage: 'https://data.worldbank.org/indicator/FP.CPI.TOTL',
     displayDecimals: 1,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/FP.CPI.TOTL?format=json (re-verified unchanged at promotion)',
@@ -606,6 +622,7 @@ const PRICES_METRICS = Object.freeze({
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/NY.GDP.DEFL.KD.ZG',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/NY.GDP.DEFL.KD.ZG?format=json (re-verified unchanged at promotion)',
@@ -650,6 +667,7 @@ const TRADE_METRICS = Object.freeze({
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NE.EXP.GNFS.CD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze(['SUM', 'AVG']),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/NE.EXP.GNFS.CD?format=json (re-verified unchanged at promotion)',
@@ -687,6 +705,7 @@ const TRADE_METRICS = Object.freeze({
     displayScaleHint: 'trillions',
     worldBankPage: 'https://data.worldbank.org/indicator/NE.IMP.GNFS.CD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze(['SUM', 'AVG']),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/NE.IMP.GNFS.CD?format=json (re-verified unchanged at promotion)',
@@ -733,6 +752,7 @@ const CAPITAL_FLOWS_METRICS = Object.freeze({
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.CD.WD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze(['SUM', 'AVG']),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BX.KLT.DINV.CD.WD?format=json (re-verified unchanged at promotion)',
@@ -769,6 +789,7 @@ const CAPITAL_FLOWS_METRICS = Object.freeze({
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/BX.KLT.DINV.WD.GD.ZS',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BX.KLT.DINV.WD.GD.ZS?format=json (re-verified unchanged at promotion)',
@@ -814,6 +835,7 @@ const EXCHANGE_METRICS = Object.freeze({
     baseYear: null,
     worldBankPage: 'https://data.worldbank.org/indicator/PA.NUS.FCRF',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/PA.NUS.FCRF?format=json (re-verified unchanged at promotion)',
@@ -859,6 +881,7 @@ const EXTERNAL_METRICS = Object.freeze({
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/BN.CAB.XOKA.CD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze(['SUM', 'AVG']),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BN.CAB.XOKA.CD?format=json (live-verified at promotion; signed flow)',
@@ -896,6 +919,7 @@ const EXTERNAL_METRICS = Object.freeze({
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/FI.RES.XGLD.CD',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/FI.RES.XGLD.CD?format=json (live-verified at promotion)',
@@ -933,6 +957,7 @@ const EXTERNAL_METRICS = Object.freeze({
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/BX.TRF.PWKR.CD.DT',
     displayDecimals: 2,
+    periodAggregation: Object.freeze(['SUM', 'AVG']),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/BX.TRF.PWKR.CD.DT?format=json (live-verified at promotion)',
@@ -977,6 +1002,7 @@ const POPULATION_METRICS = Object.freeze({
     displayScaleHint: 'billions',
     worldBankPage: 'https://data.worldbank.org/indicator/SP.POP.TOTL',
     displayDecimals: 2,
+    periodAggregation: Object.freeze([]),
     verified: Object.freeze({
       date: '2026-09-24',
       method: 'GET /v2/indicator/SP.POP.TOTL?format=json (live-verified at promotion)',
@@ -1246,6 +1272,18 @@ export function assertSemanticFields(key, metric, { prospectiveSubject = false }
   // non-negative integer every formatter (backend + frontend) honors.
   if (!Number.isInteger(metric.displayDecimals) || metric.displayDecimals < 0) {
     fail('displayDecimals must be a non-negative integer');
+  }
+  // Period aggregation over time (Phase 7C-1): a closed list of allowed
+  // period statistics. Only FLOW metrics declare SUM/AVG; every other
+  // family declares none, so period sums can never leak into levels,
+  // rates, ratios, indexes or quoted rates. Fail closed on unknown entries.
+  if (!Array.isArray(metric.periodAggregation)) {
+    fail('periodAggregation must be a list (possibly empty)');
+  }
+  for (const op of metric.periodAggregation) {
+    if (!PERIOD_AGGREGATION_MODES.includes(op)) {
+      fail(`unknown periodAggregation "${op}" (expected one of ${PERIOD_AGGREGATION_MODES.join(', ')})`);
+    }
   }
   if (prospectiveSubject && SUBJECTS[metric.subject]) {
     fail(`prospective subject "${metric.subject}" already exists; promote the measure instead`);

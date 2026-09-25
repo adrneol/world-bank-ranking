@@ -20,6 +20,8 @@
  * ISO3 rather than shared ranks.
  */
 
+import { computeYoy } from './yoy.js';
+
 /**
  * Rank a list of countries by YoY percentage change.
  *
@@ -69,6 +71,12 @@ export function rankByYoyAndLocate(rows, iso3) {
 /**
  * Build YoY rows for every country that has both years available.
  *
+ * Validity is delegated per pair to computeYoy() — the SAME rule as every
+ * other YoY consumer (coverage focus, yearly cells, growth verdicts): both
+ * present and finite, strictly positive base, and no sign change. A
+ * positive-to-negative transition is excluded here exactly as it is refused
+ * by the generic percentChange, so no route can serve a sign-flip percent.
+ *
  * @param {{ iso3:string, name?:string, value:number }[]} currentRows eligible values for `year`
  * @param {{ iso3:string, name?:string, value:number }[]} previousRows eligible values for `year - 1`
  * @returns {{ rows: object[], consideredCurrent:number, consideredPrevious:number, pairs:number }}
@@ -83,9 +91,11 @@ export function buildYoyRows(currentRows, previousRows) {
   for (const current of currentRows ?? []) {
     const previous = previousByIso3.get(current.iso3);
     if (!previous) continue; // No previous observation -> not YoY-rankable.
-    if (!Number.isFinite(previous.value) || !Number.isFinite(current.value)) continue;
-    // A non-positive base yields no defined growth rate; excluded explicitly.
-    if (previous.value <= 0) continue;
+    const verdict = computeYoy({ current: current.value, previous: previous.value });
+    // computeYoy already excludes missing, non-finite, non-positive-base
+    // and sign-change pairs with explicit reasons; only computable pairs
+    // enter the ranked universe.
+    if (!verdict.computable) continue;
 
     rows.push({
       iso3: current.iso3,
@@ -96,7 +106,7 @@ export function buildYoyRows(currentRows, previousRows) {
       // the numeric values above, never from these strings.
       ...(previous.valueRaw !== undefined ? { previousValueRaw: previous.valueRaw } : {}),
       ...(current.valueRaw !== undefined ? { currentValueRaw: current.valueRaw } : {}),
-      yoyPercent: ((current.value / previous.value) - 1) * 100,
+      yoyPercent: verdict.yoyPercent,
     });
   }
 

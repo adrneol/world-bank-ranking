@@ -43,6 +43,9 @@ export const TRANSFORMS = Object.freeze({
   GROUP_SUM: 'GROUP_SUM',
   GROUP_RATIO_FROM_SUMS: 'GROUP_RATIO_FROM_SUMS',
   CROSS_RATE: 'CROSS_RATE',
+  PERIOD_SUM: 'PERIOD_SUM',
+  PERIOD_AVG: 'PERIOD_AVG',
+  PERIOD_SUM_PERCENT_CHANGE: 'PERIOD_SUM_PERCENT_CHANGE',
 });
 
 /** Machine-readable reasons for an unavailable transform result. */
@@ -56,6 +59,8 @@ export const TRANSFORM_NA_REASONS = Object.freeze({
   SIGN_CHANGE: 'sign_change_across_endpoints',
   INVALID_INTERVAL: 'invalid_year_interval',
   EMPTY_INPUT: 'empty_input_set',
+  INCOMPLETE_PERIOD: 'incomplete_period',
+  INVALID_PERIOD: 'invalid_period_interval',
   UNKNOWN_METRIC: 'unknown_metric',
   UNSUPPORTED_TRANSFORMATION: 'unsupported_transformation_for_metric',
 });
@@ -80,6 +85,10 @@ export const TRANSFORM_NA_DESCRIPTIONS = Object.freeze({
     'CAGR requires two distinct years with a positive interval between them.',
   [TRANSFORM_NA_REASONS.EMPTY_INPUT]:
     'No member values were provided, so no group result can be calculated.',
+  [TRANSFORM_NA_REASONS.INCOMPLETE_PERIOD]:
+    'At least one required year in the period has no stored observation, so no complete period statistic can be calculated. Missing years are never treated as zero.',
+  [TRANSFORM_NA_REASONS.INVALID_PERIOD]:
+    'Period boundaries must be integer years with the end year after the start year ([A, B) is empty otherwise).',
   [TRANSFORM_NA_REASONS.UNKNOWN_METRIC]:
     'No measure metadata was provided, so capability cannot be validated.',
   [TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION]:
@@ -97,6 +106,9 @@ export const TRANSFORM_FORMULAS = Object.freeze({
   [TRANSFORMS.GROUP_SUM]: 'sum(members)',
   [TRANSFORMS.GROUP_RATIO_FROM_SUMS]: 'sum(numerators) / sum(denominators)',
   [TRANSFORMS.CROSS_RATE]: 'A_per_USD / B_per_USD',
+  [TRANSFORMS.PERIOD_SUM]: 'sum(values[A..B-1])',
+  [TRANSFORMS.PERIOD_AVG]: 'sum(values[A..B-1]) / N',
+  [TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE]: '((sumB / sumA) - 1) * 100',
 });
 
 function isMissing(value) {
@@ -135,6 +147,20 @@ export function canTransform(metric, transform) {
         metric.quotation?.convention === 'LCU_PER_USD'
         ? { allowed: true, reason: null }
         : { allowed: false, reason: TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION };
+    case TRANSFORMS.PERIOD_SUM:
+      return allowsPeriodAggregation(metric, 'SUM')
+        ? { allowed: true, reason: null }
+        : { allowed: false, reason: TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION };
+    case TRANSFORMS.PERIOD_AVG:
+      return allowsPeriodAggregation(metric, 'AVG')
+        ? { allowed: true, reason: null }
+        : { allowed: false, reason: TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION };
+    case TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE:
+      // A percent change of two period totals derives from period sums, so
+      // it requires the same SUM capability as the sums themselves.
+      return allowsPeriodAggregation(metric, 'SUM')
+        ? { allowed: true, reason: null }
+        : { allowed: false, reason: TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION };
     default: {
       const declared = Array.isArray(metric.validChangeTypes) ? metric.validChangeTypes : [];
       return declared.includes(transform)
@@ -150,6 +176,7 @@ export function outputUnitFor(metric, transform) {
     case TRANSFORMS.PERCENT_CHANGE:
     case TRANSFORMS.YOY:
     case TRANSFORMS.CAGR:
+    case TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE:
       return '%';
     case TRANSFORMS.PERCENTAGE_POINT_CHANGE:
       return 'percentage points';
@@ -158,6 +185,21 @@ export function outputUnitFor(metric, transform) {
     default:
       return metric?.unitLong ?? metric?.unit ?? null;
   }
+}
+
+/**
+ * Whether a metric may use a period aggregation operation over time.
+ * Fail-closed: unknown operations and undeclared metadata refuse. Only
+ * FLOW metrics declare SUM/AVG; levels, rates, ratios, indexes and quoted
+ * rates declare none, so period sums can never leak into them.
+ *
+ * @param {object|null|undefined} metric registry entry
+ * @param {string} operation 'SUM' or 'AVG'
+ */
+export function allowsPeriodAggregation(metric, operation) {
+  if (!metric || typeof metric !== 'object' || !metric.key) return false;
+  if (operation !== 'SUM' && operation !== 'AVG') return false;
+  return Array.isArray(metric.periodAggregation) && metric.periodAggregation.includes(operation);
 }
 
 function unavailable(transform, reason, metric, inputs) {
@@ -366,6 +408,151 @@ export function crossRate({ aPerUsd, bPerUsd } = {}, metric = null) {
 }
 
 /**
+ * AUTHORITATIVE HALF-OPEN PERIOD INTERVAL [startYear, endYear).
+ *
+ * Endpoint operations use exactly {A, B}; period operations use years
+ * A..B-1. 2004 -> 2014 means 2004...2013 (10 annual observations);
+ * 2014 -> 2024 means 2014...2023 (10 observations), so adjacent periods
+ * are disjoint and the boundary year is never double-counted. No caller
+ * may recreate this logic with different inclusive/exclusive behavior.
+ *
+ * @returns {{ startYear:number, endYear:number, years:number[], size:number }}
+ * @throws {Error} with code INVALID_PERIOD for non-integer or empty intervals
+ */
+export function periodYears(startYear, endYear) {
+  if (!Number.isInteger(startYear) || !Number.isInteger(endYear) || !(endYear > startYear)) {
+    const error = new Error(
+      `Period boundaries must be integer years with the end year after the start year ([A, B) is empty otherwise; got ${startYear}, ${endYear}).`,
+    );
+    error.code = TRANSFORM_NA_REASONS.INVALID_PERIOD;
+    throw error;
+  }
+  const years = [];
+  for (let year = startYear; year < endYear; year += 1) years.push(year);
+  return { startYear, endYear, years, size: years.length };
+}
+
+function toPeriodYearMap(values) {
+  const map = new Map();
+  const list = Array.isArray(values) ? values : [];
+  for (const entry of list) {
+    if (entry && Number.isInteger(entry.year)) map.set(entry.year, entry.value);
+  }
+  return map;
+}
+
+function withPeriodMeta(result, period, missingYears) {
+  return { ...result, years: period.years, size: period.size, missingYears };
+}
+
+/**
+ * PERIOD_SUM (pure primitive): sum of annual observations over
+ * [startYear, endYear). STRICT completeness, mirroring groupSum: EVERY
+ * required year must hold a finite value. One missing year makes the
+ * period unavailable with reason INCOMPLETE_PERIOD plus the missing-year
+ * list. Missing is never zero, never interpolated, never silently skipped.
+ *
+ * @param {{ values: Array<{year:number,value:number}>, startYear:number, endYear:number }} inputs
+ */
+export function periodSum({ values, startYear, endYear } = {}, metric = null) {
+  const inputs = { startYear, endYear, observations: Array.isArray(values) ? values.length : 0 };
+  let period;
+  try {
+    period = periodYears(startYear, endYear);
+  } catch {
+    return {
+      ...unavailable(TRANSFORMS.PERIOD_SUM, TRANSFORM_NA_REASONS.INVALID_PERIOD, metric, inputs),
+      years: [],
+      size: 0,
+      missingYears: [],
+    };
+  }
+  const byYear = toPeriodYearMap(values);
+  const missingYears = [];
+  let sum = 0;
+  for (const year of period.years) {
+    const value = byYear.has(year) ? byYear.get(year) : null;
+    if (!isValidNumber(value)) {
+      missingYears.push(year);
+      continue;
+    }
+    sum += value;
+  }
+  if (missingYears.length > 0) {
+    return withPeriodMeta(
+      unavailable(TRANSFORMS.PERIOD_SUM, TRANSFORM_NA_REASONS.INCOMPLETE_PERIOD, metric, inputs),
+      period,
+      missingYears,
+    );
+  }
+  return withPeriodMeta(available(TRANSFORMS.PERIOD_SUM, sum, metric, inputs), period, []);
+}
+
+/**
+ * PERIOD_AVG (pure primitive): period sum / number of included annual
+ * observations. Same strict completeness as the sum — an average over a
+ * gappy period would silently redefine the period.
+ */
+export function periodAverage({ values, startYear, endYear } = {}, metric = null) {
+  const summed = periodSum({ values, startYear, endYear }, metric);
+  if (!summed.computable) {
+    // Same failure, re-issued under the AVG code so provenance never claims
+    // a sum formula for an average result; completeness evidence preserved.
+    const failed = unavailable(TRANSFORMS.PERIOD_AVG, summed.reason, metric, {
+      startYear,
+      endYear,
+      observations: summed.size,
+    });
+    return { ...failed, years: summed.years, size: summed.size, missingYears: summed.missingYears, average: null };
+  }
+  const result = available(TRANSFORMS.PERIOD_AVG, summed.value / summed.size, metric, {
+    startYear,
+    endYear,
+    observations: summed.size,
+  });
+  return {
+    ...result,
+    years: summed.years,
+    size: summed.size,
+    missingYears: [],
+    sum: summed.value,
+    average: result.value,
+  };
+}
+
+/**
+ * PERIOD_SUM_PERCENT_CHANGE (pure primitive): ((sumB / sumA) - 1) * 100
+ * with the same base/sign rules as ordinary percent change. Signed period
+ * sums are summable, but a zero base, a negative base or a sign-changing
+ * total never becomes an ordinary growth percentage.
+ */
+export function periodSumPercentChange({ sumA, sumB } = {}, metric = null) {
+  const inputs = { sumA, sumB };
+  if (isMissing(sumA) && isMissing(sumB)) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.BOTH_MISSING, metric, inputs);
+  }
+  if (isMissing(sumA)) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.MISSING_BASE, metric, inputs);
+  }
+  if (isMissing(sumB)) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.MISSING_CURRENT, metric, inputs);
+  }
+  if (!isValidNumber(sumA) || !isValidNumber(sumB)) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.NON_FINITE_VALUE, metric, inputs);
+  }
+  if (sumA === 0) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.ZERO_BASE, metric, inputs);
+  }
+  if (sumA < 0) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.NEGATIVE_BASE, metric, inputs);
+  }
+  if (sumB < 0) {
+    return unavailable(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, TRANSFORM_NA_REASONS.SIGN_CHANGE, metric, inputs);
+  }
+  return available(TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE, ((sumB / sumA) - 1) * 100, metric, inputs);
+}
+
+/**
  * Central dispatcher: validate capability first, compute second. Unsupported
  * operations return explicit unavailability — never a silent fallback to
  * another transformation.
@@ -402,6 +589,12 @@ export function computeTransform(metric, transform, inputs = {}) {
       return groupRatioFromSums(inputs, metric);
     case TRANSFORMS.CROSS_RATE:
       return crossRate(inputs, metric);
+    case TRANSFORMS.PERIOD_SUM:
+      return periodSum(inputs, metric);
+    case TRANSFORMS.PERIOD_AVG:
+      return periodAverage(inputs, metric);
+    case TRANSFORMS.PERIOD_SUM_PERCENT_CHANGE:
+      return periodSumPercentChange(inputs, metric);
     default:
       return unavailable(transform, TRANSFORM_NA_REASONS.UNSUPPORTED_TRANSFORMATION, metric, { ...(inputs ?? {}) });
   }
@@ -413,6 +606,7 @@ export default {
   TRANSFORM_NA_DESCRIPTIONS,
   TRANSFORM_FORMULAS,
   canTransform,
+  allowsPeriodAggregation,
   outputUnitFor,
   absoluteChange,
   percentChange,
@@ -422,5 +616,9 @@ export default {
   groupSum,
   groupRatioFromSums,
   crossRate,
+  periodYears,
+  periodSum,
+  periodAverage,
+  periodSumPercentChange,
   computeTransform,
 };

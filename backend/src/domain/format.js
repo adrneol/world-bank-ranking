@@ -178,6 +178,7 @@ export function describeMeasure(metric) {
     baseYear: metric.baseYear ?? null,
     displayScale: metric.displayScaleHint ?? null,
     displayDecimals: metric.displayDecimals ?? 0,
+    periodAggregation: [...(metric.periodAggregation ?? [])],
     worldBankPage: metric.worldBankPage,
     ...(metric.verified ? { verified: { ...metric.verified } } : {}),
   };

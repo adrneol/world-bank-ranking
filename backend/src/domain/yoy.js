@@ -12,6 +12,13 @@
  *   - if the previous value is <= 0         -> YoY is null with a reason code
  *     (a non-positive base makes the percentage change undefined or its sign
  *      misleading, so it is reported as not calculable rather than as 0%)
+ *   - if the previous value is > 0 but the current value is < 0 -> YoY is
+ *     null with reason `sign_change_across_endpoints` (a surplus-to-deficit
+ *     or inflow-to-outflow transition is economically meaningful, but an
+ *     ordinary percentage such as -150% misrepresents it, so it is reported
+ *     as not calculable; absolute change remains the valid statistic)
+ *   - a zero current value with a positive base IS valid (-100%)
+ *     (zero is a value, not a sign change)
  *   - an incalculable YoY is NEVER reported as 0: there is no code path in this
  *     module that turns an invalid YoY into a 0% change
  *   - when both years are 0 the percentage is still not reported, because a zero
@@ -30,6 +37,9 @@ export const YOY_NA_REASONS = Object.freeze({
   BOTH_ZERO: 'both_years_zero',
   BOTH_MISSING: 'both_years_missing',
   NON_FINITE_VALUE: 'non_finite_value',
+  // Same code string as the generic transform layer's SIGN_CHANGE so every
+  // route agrees on one vocabulary for sign changes.
+  SIGN_CHANGE: 'sign_change_across_endpoints',
 });
 
 /** Human-readable descriptions, used by the audit panel. */
@@ -46,6 +56,8 @@ export const YOY_NA_DESCRIPTIONS = Object.freeze({
     'Neither year has a stored World Bank observation.',
   [YOY_NA_REASONS.NON_FINITE_VALUE]:
     'At least one of the two stored values was not a finite number, so no percentage can be calculated.',
+  [YOY_NA_REASONS.SIGN_CHANGE]:
+    'The current year value and the previous year value have different signs, so an ordinary percentage change would be misleading.',
 });
 
 /**
@@ -86,6 +98,13 @@ export function computeYoy({ current, previous }) {
   }
 
   if (prev < 0) return notAvailable(YOY_NA_REASONS.PREVIOUS_NON_POSITIVE);
+
+  // Positive base with a negative current value is a sign change
+  // (surplus-to-deficit, inflow-to-outflow): numerically computable but
+  // economically misrepresented as a percentage, so it is refused here —
+  // the same rule the generic percentChange enforces. A zero current value
+  // is not a sign change (-100% is defined).
+  if (cur < 0) return notAvailable(YOY_NA_REASONS.SIGN_CHANGE);
 
   return {
     yoyPercent: ((cur / prev) - 1) * 100,
