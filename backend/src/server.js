@@ -56,6 +56,7 @@ import { buildFullRanking } from './services/fullRanking.js';
 import { buildIndiaYearlyRows } from './services/indiaYearly.js';
 import { runIntegrityChecks } from './services/integrity.js';
 import { buildRankVerification, normalizeNeighborCount } from './services/rankVerification.js';
+import { buildPeriodSummary } from './services/periodService.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
 import {
   ensureDataPresent,
@@ -90,6 +91,7 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/entities',
   '/api/compare',
   '/api/groups/evaluate',
+  '/api/periods/summary',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -561,6 +563,33 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       metricKey,
       ...(yearA !== undefined ? { yearA } : {}),
       ...(yearB !== undefined ? { yearB } : {}),
+    });
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
+  // ---------- period summary (Phase 7C-3 exposure of 7C-1 methodology) ----------
+  // Thin read-only exposure of the frozen period primitives: single-period
+  // SUM/AVG over [startYear, endYear) with strict completeness. No new math
+  // here — buildPeriodSummary owns the contract; the route only validates
+  // request shape (unknown metric/operation/years fail closed with 400).
+  app.get('/api/periods/summary', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator);
+    const startYear = parseYear(req.query.startYear, 'startYear');
+    const endYear = parseYear(req.query.endYear, 'endYear');
+    if (startYear === undefined || endYear === undefined) {
+      throw httpError(400, 'startYear and endYear are required for a period summary.', 'MISSING_YEAR');
+    }
+    const rawOp = req.query.operation;
+    const operation = rawOp === undefined || rawOp === null || String(rawOp).trim() === '' ? 'SUM' : String(rawOp).trim().toUpperCase();
+    if (operation !== 'SUM' && operation !== 'AVG') {
+      throw httpError(400, `Unknown period operation "${req.query.operation}". Expected SUM or AVG.`, 'INVALID_OPERATION');
+    }
+    const result = buildPeriodSummary(handle(), {
+      metricKey,
+      startYear,
+      endYear,
+      operation,
+      focusIso3: parseFocusCountry(handle(), req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));

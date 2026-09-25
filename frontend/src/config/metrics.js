@@ -128,6 +128,19 @@ export let SUBJECTS = STATIC_SUBJECTS;
 export let SUBJECT_KEYS = STATIC_SUBJECT_KEYS;
 
 /**
+ * Monotonic registry generation: 0 for the static fallback, bumped by
+ * every successful hydrateRegistry(). Memoized readers (pickers, option
+ * lists) must include activeRegistryVersion() in their dependency lists
+ * so hydrated titles/units/capabilities replace the fallback instead of
+ * going stale until an unrelated remount. Reads are cheap; correctness
+ * is not memoizable.
+ */
+let registryGeneration = 0;
+export function activeRegistryVersion() {
+  return registryGeneration;
+}
+
+/**
  * Replace the active display registry from a GET /api/indicators payload
  * ({ production: [{ key, label, shortLabel, indicatorCode, unit, subject,
  * ... }], subjects: [{ key, label }] }). Returns true on success; anything
@@ -178,6 +191,9 @@ export function hydrateRegistry(payload) {
         displayDecimals: Number.isInteger(entry.displayDecimals) && entry.displayDecimals >= 0
           ? entry.displayDecimals
           : 0,
+        // Period aggregation over time (Phase 7C-1): SUM/AVG declared for
+        // FLOW metrics only; empty means NONE. Drives Movement period modes.
+        periodAggregation: Object.freeze([...(entry.periodAggregation ?? [])]),
       });
       if (!subjectKeys[entry.subject]) {
         subjectKeys[entry.subject] = [];
@@ -202,6 +218,7 @@ export function hydrateRegistry(payload) {
     METRIC_KEYS = Object.freeze(
       subjects.gdp_per_capita ? [...subjects.gdp_per_capita.metricKeys] : [...subjects[subjectOrder[0]].metricKeys],
     );
+    registryGeneration += 1;
     return true;
   } catch {
     return false;
@@ -258,6 +275,7 @@ export function metricCapabilities(key) {
     comparisonCapability: [...(m.comparisonCapability ?? [])],
     signDomain: m.signDomain ?? null,
     quotation: m.quotation ? { ...m.quotation } : null,
+    periodAggregation: [...(m.periodAggregation ?? [])],
   };
 }
 
@@ -310,21 +328,63 @@ export function operationsWithAvailability(metricKey) {
   }));
 }
 
-/** True when a metric can produce a summed custom-group value. */
-export function supportsGroupSum(metricKey) {
-  const caps = metricCapabilities(metricKey);
-  if (!caps) return false;
-  return caps.aggregation === 'SUM';
-}
-
-/**
- * True when a metric supports custom-group values at all (summed totals
+/** True when a metric supports custom-group values at all (summed totals
  * or weighted ratios). Drives group-mode toggles and group-tab offers.
  */
 export function supportsGroupValues(metricKey) {
   const caps = metricCapabilities(metricKey);
   if (!caps) return false;
   return caps.aggregation === 'SUM' || caps.aggregation === 'WEIGHTED_RATIO';
+}
+
+/**
+ * Movement analysis bases derivable from backend metric capabilities.
+ * Backend remains authoritative (it computes or refuses); this only decides
+ * which analysis modes the UI offers, so terminology always matches the
+ * actual calculation (Rule A/B): consecutive-year growth is Annual YoY,
+ * multi-year endpoint percent is Period endpoint change, flows get
+ * endpoint/period-total/period-average as distinct modes.
+ */
+export function movementBases(metricKey, yearA = null, yearB = null) {
+  const caps = metricCapabilities(metricKey);
+  const subject = subjectOf(metricKey);
+  const isFlow = caps?.observationType === 'FLOW';
+  const declared = Array.isArray(caps?.validChangeTypes) ? caps.validChangeTypes : null;
+  const yoyOffered = declared ? declared.includes('YOY') : true;
+  const period = Array.isArray(caps?.periodAggregation) ? caps.periodAggregation : [];
+  const consecutive = yearA != null && yearB != null && Math.abs(Number(yearB) - Number(yearA)) === 1;
+  const growthLabel = isFlow
+    ? 'Annual flow (endpoint B vs A)'
+    : consecutive
+      ? 'Annual YoY'
+      : 'Period endpoint change';
+  const levelLabel =
+    subject === 'gdp_total'
+      ? 'Total GDP level (value)'
+      : subject === 'gdp_per_capita'
+        ? 'Per-capita level (value)'
+        : 'Level (value)';
+  return Object.freeze([
+    { id: 'level', label: levelLabel, available: true, disabledReason: null },
+    {
+      id: 'growth',
+      label: growthLabel,
+      available: yoyOffered,
+      disabledReason: yoyOffered ? null : 'Growth analysis is not declared for this metric',
+    },
+    {
+      id: 'period_total',
+      label: 'Period total',
+      available: period.includes('SUM'),
+      disabledReason: period.includes('SUM') ? null : 'Period totals are not defined for this metric',
+    },
+    {
+      id: 'period_average',
+      label: 'Period average',
+      available: period.includes('AVG'),
+      disabledReason: period.includes('AVG') ? null : 'Period averages are not defined for this metric',
+    },
+  ]);
 }
 
 /**

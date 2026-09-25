@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
-import { metricTitle } from '../config/metrics.js';
+import { METRICS, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock, Pagination, Field, UnavailableState } from '../components/ui.jsx';
@@ -139,7 +139,7 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
                     Current raw
                   </th>
                   <th scope="col" className="num">
-                    YoY %
+                    {METRICS[metricKey]?.observationType === 'QUOTED_RATE' ? 'Annual movement' : 'YoY %'}
                   </th>
                 </tr>
               </thead>

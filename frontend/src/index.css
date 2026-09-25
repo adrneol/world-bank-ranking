@@ -1324,6 +1324,23 @@ hr.ddivider {
   padding: 0;
 }
 
+/* Selected members stay bounded: the list scrolls internally instead of
+ * stretching the page for large groups. The count line above it always
+ * states the total, so nothing is hidden silently. */
+.group-builder .chip-list {
+  max-height: 9rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+@media (max-width: 40rem) {
+  .group-builder .chip-list {
+    max-height: 7rem;
+  }
+}
+
 .chip {
   display: inline-flex;
   align-items: center;

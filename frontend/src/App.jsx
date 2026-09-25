@@ -230,8 +230,11 @@ export default function App() {
         if (rawMid > lo && rawMid < hi) yearMid = rawMid;
       }
     }
-    // Rank-movement ranking basis: level value (default) or YoY % growth.
-    const basis = filters.basis === 'growth' ? 'growth' : 'level';
+    // Rank-movement analysis basis: level value (default), endpoint
+    // growth, or flow period total/average. Unknown values fall back to
+    // level; unsupported combinations fail closed at the backend with a
+    // reason instead of rendering wrong numbers.
+    const basis = ['growth', 'period_total', 'period_average'].includes(filters.basis) ? filters.basis : 'level';
     // Focus country (Phase 1: generic focus abstraction, IND default).
     // Omitted/invalid URL values resolve to IND; only a valid explicit ISO3
     // selects another country. The display name comes from backend metadata.

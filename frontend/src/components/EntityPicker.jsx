@@ -45,11 +45,19 @@ function GroupPreview({ members, label, metricKey }) {
     );
   }
   if (!data) return null;
+  // Capability in plain words: totals sum member observations, the FDI/GDP
+  // ratio resolves weighted legs, anything else has no group math behind it.
+  const methodText =
+    data.capability?.aggregation === 'SUM'
+      ? 'summed member totals'
+      : data.capability?.aggregation === 'WEIGHTED_RATIO'
+        ? 'weighted ΣFDI / ΣGDP ratio'
+        : null;
   return (
     <p className="footnote" aria-live="polite">
       {data.label} · {data.memberCount} member{data.memberCount === 1 ? '' : 's'} ·{' '}
-      {data.capability?.canComputeGroupValue
-        ? `group values supported (${data.capability.aggregation})`
+      {data.capability?.canComputeGroupValue && methodText
+        ? `group values supported (${methodText})`
         : `group values unavailable (${data.capability?.reason ?? 'unsupported metric'})`}
     </p>
   );

@@ -48,6 +48,8 @@ export function StatusBlock({ loading, error, empty, emptyText, onRetry, section
 
 export function Pagination({ page, pages, total, pageSize, onPage }) {
   if (!pages || pages < 1) return null;
+  // Rows-per-page as segmented buttons (existing design-system pattern):
+  // three fixed options need no dropdown, custom or native.
   return (
     <div className="pagination" role="navigation" aria-label="Ranking pages">
       <button type="button" className="btn btn-secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>
@@ -59,16 +61,19 @@ export function Pagination({ page, pages, total, pageSize, onPage }) {
       <button type="button" className="btn btn-secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>
         Next →
       </button>
-      <label className="pagination-size">
-        Rows
-        <select value={pageSize} onChange={(event) => onPage(1, Number(event.target.value))} aria-label="Rows per page">
-          {[25, 50, 100].map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="segmented" role="group" aria-label="Rows per page">
+        {[25, 50, 100].map((size) => (
+          <button
+            key={size}
+            type="button"
+            aria-pressed={pageSize === size}
+            className={pageSize === size ? 'segmented-tab segmented-tab-active' : 'segmented-tab'}
+            onClick={() => onPage(1, size)}
+          >
+            {size}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

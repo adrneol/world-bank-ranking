@@ -4,12 +4,12 @@
  */
 
 import { api } from '../api/client.js';
-import { metricTitle } from '../config/metrics.js';
+import { METRICS, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-function YoyTable({ focus, above, below }) {
+function YoyTable({ focus, above, below, metricKey }) {
   const rows = [
     ...(above ?? []).map((r) => ({ ...r, focusRow: false })),
     ...(focus
@@ -41,7 +41,7 @@ function YoyTable({ focus, above, below }) {
               Current raw
             </th>
             <th scope="col" className="num">
-              YoY %
+              {METRICS[metricKey]?.observationType === 'QUOTED_RATE' ? 'Annual movement' : 'YoY %'}
             </th>
           </tr>
         </thead>
@@ -120,7 +120,7 @@ export default function YoyVerification({ year, metricKey, neighbors, country = 
               </dd>
             </div>
           </dl>
-          <YoyTable focus={data.focus} above={data.above} below={data.below} />
+          <YoyTable focus={data.focus} above={data.above} below={data.below} metricKey={metricKey} />
         </>
       ) : null}
     </Section>

@@ -116,6 +116,10 @@ export const api = {
     get('/api/compare', { entityA, entityB, labelA, labelB, indicator, yearA, yearB, operation, groupMode }, options),
   groupsEvaluate: ({ members, label, indicator, yearA, yearB } = {}, options) =>
     get('/api/groups/evaluate', { members: Array.isArray(members) ? members.join(',') : members, label, indicator, yearA, yearB }, options),
+  // Phase-7C period summary (7C-1 methodology, read-only exposure): single
+  // strict SUM/AVG over [startYear, endYear) for the focus entity.
+  periodSummary: ({ indicator, startYear, endYear, operation, country } = {}, options) =>
+    get('/api/periods/summary', { indicator, startYear, endYear, operation, country }, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>

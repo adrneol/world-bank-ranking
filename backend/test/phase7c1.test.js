@@ -459,3 +459,55 @@ test('Phase 7C-1.11: GDP period refusal with endpoint comparison and CAGR intact
   assert.ok(Math.abs(cagrRes.value - 10) < 1e-9, 'GDP CAGR formula untouched');
   db.close();
 });
+
+// ---------------------------------------------------------------------------
+// 7C-3 exposure: GET /api/periods/summary (thin route, frozen methodology)
+// ---------------------------------------------------------------------------
+test('Phase 7C-3.0: period summary route serves the 7C-1 contract over HTTP', async () => {
+  const db = await freshDb();
+  await ingestFull(db);
+  const { base, close } = await startApp(db);
+  try {
+    const sum = await (
+      await fetch(`${base}/api/periods/summary?indicator=exports_current&startYear=2024&endYear=2026&operation=SUM&country=IND`)
+    ).json();
+    assert.equal(sum.available, true);
+    assert.equal(sum.operation, 'PERIOD_SUM');
+    assert.deepEqual(sum.period.years, [2024, 2025]);
+    assert.equal(sum.period.size, 2);
+    assert.equal(sum.semantic.code, 'PERIOD_SUM');
+    assert.equal(sum.provenance.kind, 'APP_DERIVED');
+    assert.ok(sum.provenance.formula.includes('sum(values[A..B-1])'));
+    const avg = await (
+      await fetch(`${base}/api/periods/summary?indicator=exports_current&startYear=2024&endYear=2026&operation=AVG&country=IND`)
+    ).json();
+    assert.equal(avg.available, true);
+    assert.equal(avg.operation, 'PERIOD_AVG');
+    assert.ok(Math.abs(avg.average - sum.sum / 2) < 1);
+    // GDP LEVEL: capability refusal, never a summed GDP.
+    const gdp = await (
+      await fetch(`${base}/api/periods/summary?indicator=nominal_current&startYear=2024&endYear=2026&operation=SUM&country=IND`)
+    ).json();
+    assert.equal(gdp.available, false);
+    assert.equal(gdp.reason, 'unsupported_transformation_for_metric');
+    // Incomplete period: unavailable with missing-year evidence.
+    const gappy = await (
+      await fetch(`${base}/api/periods/summary?indicator=exports_current&startYear=2023&endYear=2025&operation=SUM&country=IND`)
+    ).json();
+    assert.equal(gappy.available, false);
+    assert.equal(gappy.reason, 'incomplete_period');
+    // Request-shape failures close with 400 codes.
+    for (const [query, code] of [
+      ['indicator=exports_current&startYear=2024&endYear=2026&operation=MEDIAN', 'INVALID_OPERATION'],
+      ['indicator=exports_current&startYear=2024&operation=SUM', 'MISSING_YEAR'],
+      ['indicator=NOPE&startYear=2024&endYear=2026&operation=SUM', 'INVALID_INDICATOR'],
+    ]) {
+      const res = await fetch(`${base}/api/periods/summary?${query}&country=IND`);
+      assert.equal(res.status, 400, query);
+      assert.equal((await res.json()).error.code, code, query);
+    }
+  } finally {
+    await close();
+  }
+  db.close();
+});

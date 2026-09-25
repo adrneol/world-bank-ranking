@@ -2,9 +2,9 @@
  * Overview: the default first screen.
  *
  * Answers "What is the focus country's position for the selected year?" with
- * four compact cards — one per World Bank indicator. All numbers come from a
- * single GET /api/focus/yearly call for the selected year; cards never combine
- * the four independent series.
+ * one compact card per metric of the active subject — one per World Bank
+ * indicator. All numbers come from a single GET /api/focus/yearly call for
+ * the selected year; cards never combine the independent series.
  */
 
 import { api } from '../api/client.js';

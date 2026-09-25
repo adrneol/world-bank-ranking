@@ -9,9 +9,10 @@
 
 import { Fragment, useCallback, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
-import { METRICS, SUBJECTS, metricKeysForSubject, subjectOf } from '../config/metrics.js';
+import { METRICS, SUBJECTS, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { Field, Section, StatusBlock } from '../components/ui.jsx';
+import { formatDecimal } from '../utils/format.js';
+import { Field, MethodologyPanel, ProvenanceBadge, Section, StatusBlock, UnavailableState } from '../components/ui.jsx';
 import FocusPicker from '../components/FocusPicker.jsx';
 import MetricPicker from '../components/MetricPicker.jsx';
 import { SearchableSelect } from '../components/controls.jsx';
@@ -36,20 +37,19 @@ function signMeaning(n) {
   return 'no change in position number';
 }
 
-const RANKING_BASIS = Object.freeze({ LEVEL: 'level', GROWTH: 'growth' });
+const RANKING_BASIS = Object.freeze({ LEVEL: 'level', GROWTH: 'growth', PERIOD_TOTAL: 'period_total', PERIOD_AVERAGE: 'period_average' });
 
 function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, basis = 'level', country = 'IND', countries = [], onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry, onSwap }) {
   const validMidYears = (availableYears ?? []).filter(
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
   const subject = subjectOf(metricKey);
-  // FLOW growth mode is an annual-endpoint comparison, never growth of an
-  // accumulated stock: label the offer explicitly. Metrics that do not
-  // declare YOY are refused by the backend, so the offer is disabled here
-  // with the reason instead of failing after the click.
-  const caps = METRICS[metricKey] ?? null;
-  const isFlow = caps?.observationType === 'FLOW';
-  const yoyOffered = Array.isArray(caps?.validChangeTypes) ? caps.validChangeTypes.includes('YOY') : true;
+  // Analysis bases come from backend capability metadata (movementBases):
+  // level always; growth only where YOY is declared; period total/average
+  // only where the registry declares SUM/AVG. Labels match the actual
+  // calculation — consecutive-year growth reads Annual YoY, multi-year
+  // endpoint percent reads Period endpoint change (Rule A).
+  const basisOptions = movementBases(metricKey, yearA, yearB);
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
       <FocusPicker countries={countries} value={country} onChange={(v) => onCountry?.(v)} id="mv-country" />
@@ -68,15 +68,12 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
         id="mv-basis"
         label="Basis"
         value={basis}
-        options={[
-          { value: RANKING_BASIS.LEVEL, label: subject === 'gdp_total' ? 'Total GDP level (value)' : subject === 'gdp_per_capita' ? 'Per-capita level (value)' : 'Level (value)' },
-          {
-            value: RANKING_BASIS.GROWTH,
-            label: isFlow ? 'Annual flow (endpoint B vs A)' : 'YoY % growth',
-            disabled: !yoyOffered,
-            disabledReason: yoyOffered ? undefined : 'YoY growth is not declared for this metric',
-          },
-        ]}
+        options={basisOptions.map((b) => ({
+          value: b.id,
+          label: b.label,
+          disabled: !b.available,
+          disabledReason: b.available ? undefined : b.disabledReason,
+        }))}
         onChange={onBasis}
       />
       <SearchableSelect
@@ -1330,21 +1327,22 @@ function ThreeYearResults({ data }) {
                 placeholder="e.g. India, IND, or #12"
               />
             </Field>
-            <Field label="Relation filter" htmlFor="mv3-rel">
-              <select
-                id="mv3-rel"
-                value={relationFilter}
-                onChange={(e) => {
-                  setRelationFilter(e.target.value);
-                  setOutsidePage(1);
-                }}
-              >
-                <option value="all">All</option>
-                <option value="above">Above India</option>
-                <option value="below">Below India</option>
-                <option value="affects">Affects India&apos;s position</option>
-              </select>
-            </Field>
+            <SearchableSelect
+              id="mv3-rel"
+              label="Relation filter"
+              value={relationFilter}
+              searchable={false}
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'above', label: 'Above India' },
+                { value: 'below', label: 'Below India' },
+                { value: 'affects', label: "Affects India's position" },
+              ]}
+              onChange={(v) => {
+                setRelationFilter(v);
+                setOutsidePage(1);
+              }}
+            />
           </form>
           <p className="footnote">Filtering is presentation-only. The decomposition always uses the full universe.</p>
           <EconomyTable
@@ -1419,31 +1417,25 @@ function ThreeYearResults({ data }) {
                 placeholder="e.g. United, USA, or #12"
               />
             </Field>
-            <Field label="Relation to India" htmlFor="mv3-crel">
-              <select
-                id="mv3-crel"
-                value={commonRelation}
-                onChange={(e) => {
-                  setCommonRelation(e.target.value);
-                  setCommonPage(1);
-                }}
-              >
-                {commonRelationOptions(comparisonYears).map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Sort by" htmlFor="mv3-csort">
-              <select id="mv3-csort" value={commonSort} onChange={(e) => setCommonSort(e.target.value)}>
-                {commonSortOptions(comparisonYears).map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <SearchableSelect
+              id="mv3-crel"
+              label="Relation to India"
+              value={commonRelation}
+              searchable={false}
+              options={commonRelationOptions(comparisonYears).map((o) => ({ value: o.value, label: o.label }))}
+              onChange={(v) => {
+                setCommonRelation(v);
+                setCommonPage(1);
+              }}
+            />
+            <SearchableSelect
+              id="mv3-csort"
+              label="Sort by"
+              value={commonSort}
+              searchable={false}
+              options={commonSortOptions(comparisonYears).map((o) => ({ value: o.value, label: o.label }))}
+              onChange={(v) => setCommonSort(v)}
+            />
           </form>
           <p className="footnote">
             Sorting uses backend raw values and ranks. It never changes the comparison summary above.
@@ -2079,6 +2071,9 @@ function GrowthIntervalCard({ iv, metric, isFlow = false }) {
   // Presentation-only wording: backend display strings are reused verbatim
   // except the abbreviated "pp" suffix, which is expanded to the full phrase
   // for readability. No values are recalculated here.
+  // Rule A: only consecutive-year endpoint percent is called YoY;
+  // multi-year endpoint percent is a period endpoint change (not annualized).
+  const isAnnual = iv.endYear != null && iv.startYear != null && iv.endYear - iv.startYear === 1;
   const ppText = (display) =>
     display != null ? display.replace(/ pp$/, ' percentage points') : 'n/a';
   const economiesText = (count) => `${count} ${count === 1 ? 'economy' : 'economies'}`;
@@ -2108,7 +2103,7 @@ function GrowthIntervalCard({ iv, metric, isFlow = false }) {
   }) => (
     <div className="facts-group growth-section" role="group" aria-label={groupLabel}>
       <h4 className="facts-group-title">{heading}</h4>
-      {statBox(`India's growth · ${label}`, iv.indiaGrowthDisplay ?? 'n/a', 'card-rank', 'india')}
+      {statBox(`India's change · ${label}`, iv.indiaGrowthDisplay ?? 'n/a', 'card-rank', 'india')}
       {statBox(`${universeLabel} · ${label}`, economiesText(universeCount), 'card-rank', 'universe')}
       {statBox(`${rankLabel} · ${label}`, rankText, 'card-rank', 'rank')}
       {statBox(
@@ -2123,10 +2118,16 @@ function GrowthIntervalCard({ iv, metric, isFlow = false }) {
   return (
     <div className="card">
       <h3>
-        {isFlow ? `Annual flow ${iv.endYear} vs ${iv.startYear}` : `Growth ${growthIntervalLabel(iv)}`}{' '}
-        <span className="card-unit">{isFlow ? 'annual-flow endpoint comparison' : 'YoY % growth'}</span>
+        {isFlow
+          ? `Annual flow ${iv.endYear} vs ${iv.startYear}`
+          : isAnnual
+            ? `Annual YoY ${growthIntervalLabel(iv)}`
+            : `Period endpoint change ${growthIntervalLabel(iv)}`}{' '}
+        <span className="card-unit">
+          {isFlow ? 'annual-flow endpoint comparison' : isAnnual ? 'Annual YoY' : 'Period endpoint change (not annualized)'}
+        </span>
       </h3>
-      <p className="card-unit">India&apos;s {isFlow ? 'annual-flow change' : 'growth'}</p>
+      <p className="card-unit">India&apos;s {isFlow ? 'annual-flow change' : isAnnual ? 'growth' : 'period change'}</p>
       <p className="card-result-value" aria-label={`India growth ${iv.indiaGrowthDisplay} in ${growthIntervalLabel(iv)}`}>
         {iv.indiaGrowthDisplay ?? 'n/a'}
       </p>
@@ -2145,7 +2146,7 @@ function GrowthIntervalCard({ iv, metric, isFlow = false }) {
         avgLabel: 'Average growth of other economies',
         avgDisplay: iv.peerAvgObservedDisplay,
         avgCount: iv.peerCountObserved,
-        diffLabel: "India's growth vs observed average",
+        diffLabel: "India's change vs observed average",
         diffDisplay: iv.vsPeerObservedDisplay,
         groupLabel: `Observed comparison for ${growthIntervalLabel(iv)}`,
       })}
@@ -2159,7 +2160,7 @@ function GrowthIntervalCard({ iv, metric, isFlow = false }) {
         avgLabel: 'Average growth of other economies in the like-for-like universe',
         avgDisplay: iv.peerAvgCommonDisplay,
         avgCount: iv.peerCountCommon,
-        diffLabel: "India's growth vs like-for-like average",
+        diffLabel: "India's change vs like-for-like average",
         diffDisplay: iv.vsPeerCommonDisplay,
         groupLabel: `Like-for-like comparison for ${growthIntervalLabel(iv)}`,
       })}
@@ -2314,6 +2315,10 @@ function GrowthResults({ data }) {
   // describeMetric carries no observation type; resolve FLOW from the
   // hydrated registry so flow intervals read as endpoint comparisons.
   const isFlow = (METRICS[metric?.key] ?? null)?.observationType === 'FLOW';
+  // Rule A: the section title matches the calculation — only consecutive-year
+  // endpoint percent is Annual YoY; anything wider is a period endpoint
+  // change (same backend numbers, honest name).
+  const allAnnual = intervals.length > 0 && intervals.every(({ block }) => block && block.endYear - block.startYear === 1);
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
@@ -2397,12 +2402,18 @@ function GrowthResults({ data }) {
   return (
     <>
       <h3 className="subhead">
-        {isFlow ? "What happened to India's annual flow?" : "What happened to India's growth?"}
+        {isFlow ? "What happened to India's annual flow?" : allAnnual ? "What happened to India's growth?" : "What happened to India's value over the period?"}
       </h3>
       {isFlow ? (
         <p className="section-sub">
           Each interval compares the annual flow observed in the end year with the annual flow in the start
           year (“Annual flow: B vs A”) — never a sum over the span.
+        </p>
+      ) : null}
+      {!isFlow && !allAnnual ? (
+        <p className="section-sub">
+          Each interval compares the end-year value with the start-year value (period endpoint change).
+          Multi-year percentages are not annualized and are never called YoY.
         </p>
       ) : null}
       <div className="cards" role="region" aria-label="India growth by interval">
@@ -2485,21 +2496,22 @@ function GrowthResults({ data }) {
                 placeholder="e.g. India, IND, or #12"
               />
             </Field>
-            <Field label="Relation filter" htmlFor="mv-grel">
-              <select
-                id="mv-grel"
-                value={relationFilter}
-                onChange={(e) => {
-                  setRelationFilter(e.target.value);
-                  setListPage(1);
-                }}
-              >
-                <option value="all">All</option>
-                <option value="above">Above India</option>
-                <option value="below">Below India</option>
-                <option value="affects">Affects India&apos;s position</option>
-              </select>
-            </Field>
+            <SearchableSelect
+              id="mv-grel"
+              label="Relation filter"
+              value={relationFilter}
+              searchable={false}
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'above', label: 'Above India' },
+                { value: 'below', label: 'Below India' },
+                { value: 'affects', label: "Affects India's position" },
+              ]}
+              onChange={(v) => {
+                setRelationFilter(v);
+                setListPage(1);
+              }}
+            />
           </form>
           <p className="footnote">Filtering is presentation-only. The decomposition always uses the full universe.</p>
           <GrowthEconomyTable
@@ -2570,31 +2582,25 @@ function GrowthResults({ data }) {
                 placeholder="e.g. United, USA, or #12"
               />
             </Field>
-            <Field label="Relation to India" htmlFor="mv-gcrel">
-              <select
-                id="mv-gcrel"
-                value={commonRelation}
-                onChange={(e) => {
-                  setCommonRelation(e.target.value);
-                  setCommonPage(1);
-                }}
-              >
-                {growthRelationOptions(intervals).map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Sort by" htmlFor="mv-gcsort">
-              <select id="mv-gcsort" value={commonSort} onChange={(e) => setCommonSort(e.target.value)}>
-                {growthSortOptions(intervals).map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <SearchableSelect
+              id="mv-gcrel"
+              label="Relation to India"
+              value={commonRelation}
+              searchable={false}
+              options={growthRelationOptions(intervals).map((o) => ({ value: o.value, label: o.label }))}
+              onChange={(v) => {
+                setCommonRelation(v);
+                setCommonPage(1);
+              }}
+            />
+            <SearchableSelect
+              id="mv-gcsort"
+              label="Sort by"
+              value={commonSort}
+              searchable={false}
+              options={growthSortOptions(intervals).map((o) => ({ value: o.value, label: o.label }))}
+              onChange={(v) => setCommonSort(v)}
+            />
           </form>
           <p className="footnote">
             Sorting uses backend growth values and growth ranks. Absolute change is labeled explicitly and never
@@ -2703,6 +2709,85 @@ function GrowthResults({ data }) {
   );
 }
 
+/**
+ * Focus period-total / period-average panel (Phase 7C-3 exposure of the
+ * frozen 7C-1 period methodology). Reads one GET /api/periods/summary for
+ * the selected half-open span [A, B): sum or average of the focus
+ * entity's stored annual observations with strict completeness. No ranks
+ * are shown — periods are not ranked — and no value is ever recalculated
+ * here: display strings, years, counts, coverage and provenance render
+ * backend payloads verbatim.
+ */
+function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation }) {
+  const startYear = yearA != null && yearB != null ? Math.min(yearA, yearB) : null;
+  const endYear = yearA != null && yearB != null ? Math.max(yearA, yearB) : null;
+  const isAvg = operation === 'AVG';
+  const depsKey = `period:${metricKey}:${startYear ?? ''}:${endYear ?? ''}:${operation}:${country ?? ''}`;
+  const { data, loading, error, retry } = useApi(
+    (signal) =>
+      api.periodSummary(
+        { indicator: metricKey, startYear, endYear, operation, country },
+        { signal },
+      ),
+    depsKey,
+    { enabled: startYear != null && endYear != null && metricKey != null },
+  );
+  const title = isAvg ? 'Period average' : 'Period total';
+  return (
+    <div className="result-cards">
+      <article className="card card-result">
+        <h3>
+          {title} <ProvenanceBadge kind="APP_DERIVED" />
+        </h3>
+        <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="period summary" />
+        {!loading && !error && data ? (
+          data.available ? (
+            <>
+              <p className="card-result-value">
+                {isAvg
+                  ? (data.averageDisplay ?? formatDecimal(data.average, metricDecimals(metricKey)))
+                  : (data.sumDisplay ?? formatDecimal(data.sum, metricDecimals(metricKey)))}{' '}
+                <span className="result-unit">{data.unit}</span>
+              </p>
+              <p className="card-unit">
+                {focusName} · {data.period.startYear}–{data.period.years?.at?.(-1) ?? data.period.endYear} ·{' '}
+                {data.period.size} annual observation{data.period.size === 1 ? '' : 's'}
+              </p>
+              <p className="footnote">
+                {data.semantic?.label ?? title} ({data.semantic?.formula ?? 'sum over [A, B)'}) —{' '}
+                {isAvg
+                  ? 'typical annual flow during the period; distinct from the period total.'
+                  : 'sum of the annual flows in the period; distinct from endpoint comparison.'}{' '}
+                Every required year was present; missing years are never treated as zero.
+              </p>
+              <MethodologyPanel
+                indicatorCode={data.metric?.indicatorCode}
+                derived={isAvg ? 'Period average via generic PERIOD_AVG' : 'Period total via generic PERIOD_SUM'}
+                formula={data.semantic?.formula ?? data.provenance?.formula ?? null}
+              >
+                <p className="footnote">
+                  {data.provenance?.transform} · {data.metric?.key} · {focusName}. Source: World Bank World
+                  Development Indicators. Calculated by this application, not published by the World Bank.
+                </p>
+              </MethodologyPanel>
+            </>
+          ) : (
+            <UnavailableState
+              reason={data.reason}
+              code={data.reason}
+              hint={
+                (data.missingYears ?? []).length > 0
+                  ? `Missing annual observations: ${(data.missingYears ?? []).join(', ')}. A period total needs every year in the span.`
+                  : 'The backend methodology does not support this period analysis.'
+              }
+            />
+          )
+        ) : null}
+      </article>
+    </div>
+  );
+}
+
 export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis = 'level', country = 'IND', countries = [], focusName = 'India', onYearA, onYearB, onYearMid = null, onMetric, onBasis, onCountry }) {
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
@@ -2717,8 +2802,12 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
 
   const breakerActive = yearMid != null && yearA != null && yearB != null && yearMid > Math.min(yearA, yearB) && yearMid < Math.max(yearA, yearB);
   const growthActive = basis === RANKING_BASIS.GROWTH;
-  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null;
-  const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${growthActive ? 'growth' : 'level'}:${country}`;
+  // Period modes fetch strict SUM/AVG summaries instead of rank movement:
+  // periods are not ranked, so the comparison engine stays out of the way.
+  const periodActive = basis === RANKING_BASIS.PERIOD_TOTAL || basis === RANKING_BASIS.PERIOD_AVERAGE;
+  const periodOperation = basis === RANKING_BASIS.PERIOD_AVERAGE ? 'AVG' : 'SUM';
+  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive;
+  const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${basis}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
       api.comparisonLevel(
@@ -2857,7 +2946,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
           setTab('all');
           onMetric(v);
         }}
-        basis={growthActive ? RANKING_BASIS.GROWTH : RANKING_BASIS.LEVEL}
+        basis={basis}
         onBasis={(v) => {
           setTab('all');
           setListPage(1);
@@ -2875,7 +2964,17 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
         </div>
       ) : null}
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="rank movement" />
-      {!loading && !error && !sameYear && data ? (
+      {periodActive && !sameYear ? (
+        <PeriodSummary
+          metricKey={metricKey}
+          yearA={yearA}
+          yearB={yearB}
+          country={country}
+          focusName={focusName}
+          operation={periodOperation}
+        />
+      ) : null}
+      {!loading && !error && !sameYear && !periodActive && data ? (
         data.comparison?.available ? (
           isGrowth ? (
             <GrowthResults data={data} />
@@ -3150,17 +3249,22 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                   placeholder="e.g. India, IND, or #12"
                 />
               </Field>
-              <Field label="Relation filter" htmlFor="mv-rel">
-                <select id="mv-rel" value={relationFilter} onChange={(e) => {
-                  setRelationFilter(e.target.value);
+              <SearchableSelect
+                id="mv-rel"
+                label="Relation filter"
+                value={relationFilter}
+                searchable={false}
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'above', label: 'Above India' },
+                  { value: 'below', label: 'Below India' },
+                  { value: 'affects', label: "Affects India's position" },
+                ]}
+                onChange={(v) => {
+                  setRelationFilter(v);
                   setListPage(1);
-                }}>
-                  <option value="all">All</option>
-                  <option value="above">Above India</option>
-                  <option value="below">Below India</option>
-                  <option value="affects">Affects India&apos;s position</option>
-                </select>
-              </Field>
+                }}
+              />
             </form>
             <p className="footnote">
               Filtering is presentation-only. The decomposition always uses the full universe.
@@ -3231,35 +3335,25 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                       placeholder="e.g. United, USA, or #12"
                     />
                   </Field>
-                  <Field label="Relation to India" htmlFor="mv-crel">
-                    <select
-                      id="mv-crel"
-                      value={commonRelation}
-                      onChange={(e) => {
-                        setCommonRelation(e.target.value);
-                        setCommonPage(1);
-                      }}
-                    >
-                      {commonRelationOptions([data.years.a, data.years.b]).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Sort by" htmlFor="mv-csort">
-                    <select
-                      id="mv-csort"
-                      value={commonSort}
-                      onChange={(e) => setCommonSort(e.target.value)}
-                    >
-                      {commonSortOptions([data.years.a, data.years.b]).map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                  <SearchableSelect
+                    id="mv-crel"
+                    label="Relation to India"
+                    value={commonRelation}
+                    searchable={false}
+                    options={commonRelationOptions([data.years.a, data.years.b]).map((o) => ({ value: o.value, label: o.label }))}
+                    onChange={(v) => {
+                      setCommonRelation(v);
+                      setCommonPage(1);
+                    }}
+                  />
+                  <SearchableSelect
+                    id="mv-csort"
+                    label="Sort by"
+                    value={commonSort}
+                    searchable={false}
+                    options={commonSortOptions([data.years.a, data.years.b]).map((o) => ({ value: o.value, label: o.label }))}
+                    onChange={(v) => setCommonSort(v)}
+                  />
                 </form>
                 <p className="footnote">
                   Sorting uses backend raw values and ranks. It never changes the comparison summary above.

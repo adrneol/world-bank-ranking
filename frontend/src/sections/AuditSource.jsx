@@ -32,6 +32,18 @@ export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita
   const cell = data?.yearly?.rows?.[0]?.[metricKey] ?? null;
   const methodology = data?.metadata?.methodology ?? data?.observation?.methodology ?? null;
   const displayName = data?.yearly?.focus?.name ?? data?.observation?.country?.name ?? focusName;
+  // Metric-aware change formula: rates move in percentage points, indexes
+  // in index points, quoted rates as annual movement; only levels/flows
+  // use the relative YoY formula. Backend-computed values, frontend labels.
+  const obsType = meta?.observationType ?? null;
+  const changeFormula =
+    obsType === 'RATE' || obsType === 'RATIO'
+      ? { term: 'Rate change', formula: 'B − A (percentage points)' }
+      : obsType === 'INDEX'
+        ? { term: 'Index change', formula: 'B − A (index points)' }
+        : obsType === 'QUOTED_RATE'
+          ? { term: 'Annual movement', formula: '((currentRaw / previousRaw) − 1) × 100' }
+          : { term: 'YoY formula', formula: '((currentRaw / previousRaw) − 1) × 100' };
 
   return (
     <Section
@@ -87,8 +99,8 @@ export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita
             <dd className="mono">{cell?.previousYearValue ?? '—'}</dd>
           </div>
           <div>
-            <dt>YoY formula</dt>
-            <dd className="mono">((currentRaw / previousRaw) − 1) × 100</dd>
+            <dt>{changeFormula.term}</dt>
+            <dd className="mono">{changeFormula.formula}</dd>
           </div>
           <div>
             <dt>YoY</dt>
