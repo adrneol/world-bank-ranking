@@ -59,6 +59,8 @@ import { buildRankVerification, normalizeNeighborCount } from './services/rankVe
 import { buildPeriodSummary } from './services/periodService.js';
 import { buildPricesMovement, listPriceCountryGroups, PRICES_ERROR_CODES } from './services/pricesMovementService.js';
 import { isPricesMetric, basesForMetric, PRICES_BASIS_INFO as PRICES_BASIS_INFO_REF } from './domain/pricesMovement.js';
+import { buildTradeMovement, listTradeCountryGroups, TRADE_ERROR_CODES } from './services/tradeMovementService.js';
+import { isTradeMetric, tradeBasesForMetric, TRADE_BASIS_INFO as TRADE_BASIS_INFO_REF } from './domain/tradeMovement.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
 import {
   ensureDataPresent,
@@ -96,6 +98,8 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/periods/summary',
   '/api/movement/prices',
   '/api/prices/country-groups',
+  '/api/movement/trade',
+  '/api/trade/country-groups',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -113,6 +117,8 @@ export function methodologyBlock() {
     universeRule: describeUniverseRule(),
     pricesMovement:
       'Prices-only canonical methodology (prices/method-cpiindex.txt, prices/cpiInflationmethodology.txt, prices/gdpDeflator.txt): CPI Index 2 bases (annual raw, no rank; period endpoint change (E/S-1)*100, ASC competition rank); CPI Inflation 3 bases (annual raw; average S+1..E; cumulative prod(S+1..E)(1+r/100)-1, all ASC competition); GDP-deflator 3 bases (same structure). Observed/Like-for-like are universes, identical formulas. Benchmark=mean(other eligible), PP=benchmark-focus, focus excluded. Full precision; competition ranking (1,1,3). Missing required years invalidate the period (never zero-filled/interpolated). Country groups are dynamic WB classifications (income/region/lending); Developed/Developing/Underdeveloped labels are not in the authoritative data and are not exposed.',
+    tradeMovement:
+      'Trade-only canonical methodology (trade/tademethod.txt): annual value (raw, DESC competition rank, USD gap); CAGR ((E/S)^(1/(E-S))-1, DESC, pp gap, start>0 required, end=0 valid as -100%); inclusive period total S..E (11/11/21 obs, DESC, USD gap); inclusive period average total/(E-S+1) (DESC, USD/year gap). Observed/Like-for-like are universes, identical formulas. Benchmark=mean(other eligible), gap=benchmark-focus, focus excluded. Full precision; competition ranking (1,1,3). Missing required years exclude the economy (never zero-filled/interpolated). Current-US$ values are nominal (quantities, prices, exchange rates, composition), not real-volume growth.',
   };
 }
 
@@ -662,6 +668,67 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
+  // ---------- Trade movement (canonical 4+4-basis methodology) ----------
+  // Trade-only: annual value, CAGR, inclusive period total (S..E),
+  // inclusive period average. Never the generic [S,E) flow interval and
+  // never the Prices S+1..E inflation interval. GDP/Prices paths untouched.
+  app.get('/api/movement/trade', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
+    if (!isTradeMetric(metricKey)) {
+      throw httpError(
+        400,
+        `Metric "${metricKey}" is not a Trade metric. Valid Trade keys: exports_current, imports_current.`,
+        'INVALID_METRIC',
+      );
+    }
+    const yearA = parseYear(req.query.yearA, 'yearA');
+    const yearB = parseYear(req.query.yearB, 'yearB');
+    if (yearA === undefined || yearB === undefined) {
+      throw httpError(400, 'Both yearA and yearB are required for a Trade movement comparison.', 'MISSING_YEAR');
+    }
+    const rawMid = req.query.yearMid ?? req.query.breaker ?? req.query.pointBreaker ?? req.query.mid;
+    let yearMid;
+    if (rawMid === undefined || rawMid === null || String(rawMid).trim() === '' || String(rawMid).trim().toLowerCase() === 'none') {
+      yearMid = undefined;
+    } else {
+      yearMid = parseYear(rawMid, 'yearMid');
+    }
+    const rawBasis = req.query.basis;
+    const basis = rawBasis === undefined || rawBasis === null || String(rawBasis).trim() === '' ? undefined : String(rawBasis).trim();
+    if (basis !== undefined && !tradeBasesForMetric(metricKey).includes(basis)) {
+      throw httpError(
+        400,
+        `Unknown Trade basis "${rawBasis}" for ${metricKey}. Valid: ${tradeBasesForMetric(metricKey).join(', ')}.`,
+        'INVALID_BASIS',
+      );
+    }
+    const groupType = req.query.groupType ?? req.query.group_type ?? null;
+    const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
+    try {
+      const result = buildTradeMovement(handle(), {
+        metricKey,
+        ...(basis !== undefined ? { basis } : {}),
+        yearA,
+        yearB,
+        ...(yearMid !== undefined ? { yearMid } : {}),
+        focusIso3: parseFocusCountry(handle(), req.query.country),
+        ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
+      });
+      res.json({ ...result, methodology: methodologyBlock() });
+    } catch (e) {
+      if (e && e.code && Object.values(TRADE_ERROR_CODES).includes(e.code)) {
+        throw httpError(e.httpStatus ?? 400, e.message, e.code);
+      }
+      throw e;
+    }
+  }));
+
+  // ---------- Trade country-group discovery (dynamic, no hardcoding) ----------
+  app.get('/api/trade/country-groups', ah(async (req, res) => {
+    const result = listTradeCountryGroups(handle());
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
   // ---------- coverage (+ changing-totals explanation) ----------
   app.get('/api/coverage', ah(async (req, res) => {
     const h = handle();
@@ -825,6 +892,8 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       ingested: isIngested(key),
       // Additive Prices basis catalog (does not alter frozen fields above).
       ...(isPricesMetric(key) ? { pricesBases: basesForMetric(key).map((b) => ({ ...PRICES_BASIS_INFO_REF[b] })) } : {}),
+      // Additive Trade basis catalog (does not alter frozen fields above).
+      ...(isTradeMetric(key) ? { tradeBases: tradeBasesForMetric(key).map((b) => ({ ...TRADE_BASIS_INFO_REF[b] })) } : {}),
     }));
     const defined = FUTURE_METRIC_KEYS.map((key) => ({
       ...describeMeasure(getDefinedMetric(key)),

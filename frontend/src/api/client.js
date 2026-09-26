@@ -137,6 +137,23 @@ export const api = {
       options,
     ),
   priceGroups: (options) => get('/api/prices/country-groups', {}, options),
+  // Canonical Trade movement (4+4 metric-specific bases; backend-authoritative).
+  tradeMovement: ({ indicator, metric, basis, yearA, yearB, yearMid, country, groupType, group } = {}, options) =>
+    get(
+      '/api/movement/trade',
+      {
+        indicator: indicator ?? metric,
+        basis,
+        yearA,
+        yearB,
+        ...(yearMid !== undefined && yearMid !== null && String(yearMid).toLowerCase() !== 'none' ? { yearMid } : {}),
+        country,
+        ...(groupType ? { groupType } : {}),
+        ...(group ? { group } : {}),
+      },
+      options,
+    ),
+  tradeGroups: (options) => get('/api/trade/country-groups', {}, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>

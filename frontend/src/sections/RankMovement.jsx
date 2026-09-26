@@ -12,8 +12,9 @@ import { api } from '../api/client.js';
 import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import SlopeChart from '../components/charts/SlopeChart.jsx';
-import { METRICS, SUBJECTS, isPricesMetricKey, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
+import { METRICS, SUBJECTS, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
 import PricesMovement from './PricesMovement.jsx';
+import TradeMovement from './TradeMovement.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
 import { Field, MethodologyPanel, ProvenanceBadge, Section, StatusBlock, UnavailableState } from '../components/ui.jsx';
@@ -2854,7 +2855,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   // periods are not ranked, so the comparison engine stays out of the way.
   const periodActive = basis === RANKING_BASIS.PERIOD_TOTAL || basis === RANKING_BASIS.PERIOD_AVERAGE;
   const periodOperation = basis === RANKING_BASIS.PERIOD_AVERAGE ? 'AVG' : 'SUM';
-  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive && !isPricesMetricKey(metricKey);
+  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive && !isPricesMetricKey(metricKey) && !isTradeMetricKey(metricKey);
   const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${basis}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
@@ -2952,6 +2953,35 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
 
   const meta = data?.metric ?? METRICS[metricKey];
 
+  // Trade metrics use the canonical 4+4-basis methodology (separate engine).
+  // GDP/flow/Prices paths below are untouched.
+  if (isTradeMetricKey(metricKey)) {
+    return (
+      <Section
+        id="rank-movement"
+        title="Trade movement comparison"
+        subtitle={`How did ${focusName}'s nominal trade values compare across the same economies? Canonical Trade methodology with Observed and Like-for-like universes.`}
+      >
+        <TradeMovement
+          availableYears={availableYears}
+          yearA={yearA}
+          yearB={yearB}
+          yearMid={yearMid}
+          metricKey={metricKey}
+          basis={basis}
+          country={country}
+          countries={countries}
+          focusName={focusName}
+          onYearA={onYearA}
+          onYearB={onYearB}
+          onYearMid={onYearMid}
+          onMetric={onMetric}
+          onBasis={onBasis}
+          onCountry={onCountry}
+        />
+      </Section>
+    );
+  }
   // Prices metrics use the canonical 8-basis methodology (separate engine).
   // All hooks above run unconditionally; GDP/flow paths below are untouched.
   if (isPricesMetricKey(metricKey)) {

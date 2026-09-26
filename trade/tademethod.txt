@@ -1,0 +1,1243 @@
+TRADE ANALYSIS — FINAL METHODOLOGY SPECIFICATION
+1. Analysis family
+
+Analysis family: Trade
+
+Metrics
+Exports
+
+World Bank indicator: NE.EXP.GNFS.CD
+Name: Exports of goods and services (current US$)
+
+Imports
+
+World Bank indicator: NE.IMP.GNFS.CD
+Name: Imports of goods and services (current US$)
+
+The World Bank defines exports as the value of goods and other market services provided to the rest of the world, while imports represent goods and services obtained from non-residents. Both selected indicators are expressed in current U.S. dollars, meaning they are measured at current prices rather than constant prices.
+
+2. Critical economic interpretation
+
+These metrics measure the monetary value of trade flows, not physical quantities.
+
+Therefore:
+
+$$ Exports_{i,t} $$
+
+means the value of goods and services exported by economy \(i\) during year \(t\), expressed in current U.S. dollars.
+
+Likewise:
+
+$$ Imports_{i,t} $$
+
+means the value of goods and services imported by economy \(i\) during year \(t\), expressed in current U.S. dollars.
+
+Because the indicators are in current US$, their changes can reflect several components, including:
+
+changes in quantities traded;
+changes in prices;
+exchange-rate movements when domestic values are expressed in U.S. dollars;
+changes in the composition of goods and services traded.
+
+Therefore:
+
+\boxed{\text{Current-US$ trade growth is nominal trade-value growth}}
+
+It must not be presented as pure real-volume growth.
+
+The World Bank separately publishes constant-price trade series and annual percentage growth series, which confirms that the current-US$ series and constant-price growth measures are distinct concepts.
+
+3. Approved trade bases
+
+Use the same four bases for both exports and imports.
+
+Basis 1 — Annual trade value
+
+How large was the country's export/import flow in a particular year?
+
+Basis 2 — Period trade growth (CAGR)
+
+At what average annual rate did the country's nominal trade value grow from the selected start year to the selected end year?
+
+Basis 3 — Period total trade flow
+
+What was the total nominal value of exports/imports across all years in the selected period?
+
+Basis 4 — Period average annual trade flow
+
+What was the average annual nominal value of exports/imports during the selected period?
+
+These bases measure different aspects of trade and should not be treated as substitutes.
+
+4. Basis 1 — Annual trade value
+Definition
+
+For country \(i\), year \(t\):
+
+$$ \boxed{ T_{i,t}=TradeValue_{i,t} } $$
+
+where \(T\) is either:
+
+$$ Export_{i,t} $$
+
+or:
+
+$$ Import_{i,t} $$
+
+No transformation is required.
+
+Example — Exports
+
+Suppose:
+
+Economy	2014 exports
+A	$50B
+B	$100B
+India	$450B
+C	$700B
+D	$1.2T
+
+India's annual export value is:
+
+$$ \boxed{\$450\text{ billion}} $$
+Example — Imports
+
+Suppose India imports:
+
+$$ \boxed{\$500\text{ billion}} $$
+
+in 2014.
+
+That is simply India's 2014 annual import flow.
+
+5. Basis 1 — Cross-sectional ranking
+
+For a selected year \(t\), construct:
+
+$$ U_t= \{i:T_{i,t}\text{ is valid}\} $$
+
+Then calculate the annual trade value for every eligible economy.
+
+Rank by:
+
+$$ \boxed{\text{descending trade value}} $$
+
+Therefore:
+
+Larger annual trade value → smaller rank number.
+
+Export example
+Economy	Exports	Rank
+D	$1.2T	#1
+C	$700B	#2
+India	$450B	#3
+B	$100B	#4
+A	$50B	#5
+
+This rank means:
+
+India had the 3rd-largest export value among the eligible economies.
+
+It does not mean India had the third-best economy.
+
+A large economy will naturally tend to have a larger absolute trade value.
+
+6. Basis 1 — Cross-sectional benchmark
+
+For a USD level, the benchmark should not be called a percentage-point benchmark.
+
+Percentage points are appropriate for percentages such as CPI inflation or CAGR.
+
+For a monetary level, calculate:
+
+$$ \boxed{ B_i= \frac{\sum_{j\ne i}T_j}{N-1} } $$
+
+Then:
+
+$$ \boxed{ Gap_i=B_i-T_i } $$
+
+The gap is measured in USD, not percentage points.
+
+Example
+
+Suppose:
+
+India exports = $450B
+Other-economy average = $300B
+
+Then:
+
+$$ Gap=300-450 $$ $$ \boxed{-\$150B} $$
+
+Interpretation:
+
+India's annual exports were $150 billion above the average export value of the other eligible economies.
+
+The negative sign occurs because the benchmark formula is:
+
+$$ OtherAverage-Country $$
+
+For a metric where higher values are simply larger scale, this gap should be interpreted descriptively rather than as "better/worse."
+
+7. Basis 2 — Period trade growth
+
+For a monetary flow such as exports or imports, the cleanest period-growth measure is CAGR — compound annual growth rate.
+
+This is preferable to simply calculating an unannualized endpoint percentage change because the CAGR expresses the change as an average annual rate and remains comparable if users select different interval lengths.
+
+For country \(i\):
+
+$$ \boxed{ CAGR_i= \left( \frac{T_{i,E}}{T_{i,S}} \right)^{\frac{1}{E-S}} -1 } $$
+
+Expressed as a percentage:
+
+$$ \boxed{ CAGR_i= \left[ \left( \frac{T_{i,E}}{T_{i,S}} \right)^{\frac{1}{E-S}} -1 \right]\times100 } $$
+
+where:
+
+\(S\) = start year
+\(E\) = end year
+\(T_{i,S}\) = trade value in start year
+\(T_{i,E}\) = trade value in end year
+8. Example — Export CAGR
+
+Suppose India exports:
+
+$$ 2004=\$100B $$ $$ 2014=\$300B $$
+
+Then:
+
+$$ CAGR= \left( \frac{300}{100} \right)^{1/10}-1 $$ $$ =3^{0.1}-1 $$ $$ \approx0.1161 $$
+
+Therefore:
+
+$$ \boxed{11.61\%\text{ per year}} $$
+
+Interpretation:
+
+India's nominal export value grew at a compound annual rate of approximately 11.61% between 2004 and 2014.
+
+This does not mean exports literally increased by exactly 11.61% every year.
+
+It is the annualized rate that mathematically produces the observed endpoint change when compounded over the 10-year interval.
+
+9. Current-US$ caveat for Basis 2
+
+This must be explicit.
+
+Because the underlying series is:
+
+$$ \text{current US\$} $$
+
+the CAGR is:
+
+$$ \boxed{\text{Nominal trade-value CAGR}} $$
+
+not:
+
+$$ \text{real export-volume CAGR} $$
+
+A rise in exports from $100B to $300B can reflect a combination of quantity, prices, exchange-rate effects and changes in traded composition.
+
+Do not label this merely:
+
+"Real export growth"
+
+or:
+
+"Export volume growth."
+
+The World Bank separately provides constant-price export/import series precisely because current-price and constant-price concepts are different.
+
+10. Basis 2 — Cross-sectional ranking
+
+First calculate the CAGR independently for every eligible economy.
+
+For each country:
+
+$$ CAGR_i= \left[ \left( \frac{T_{i,E}}{T_{i,S}} \right)^{1/(E-S)} -1 \right]\times100 $$
+
+Then rank:
+
+$$ \boxed{\text{descending CAGR}} $$
+
+Therefore:
+
+Higher nominal trade-value CAGR → smaller rank number.
+
+Example
+Economy	Export CAGR 2004→2014	Rank
+A	3%	#5
+B	7%	#4
+India	11.61%	#2
+C	12%	#1
+D	5%	#3
+
+The rank is obtained from the full cross-section of individually calculated country CAGRs.
+
+Do not rank India by comparing it only with a world-average CAGR.
+
+11. Basis 2 — Percentage-point benchmark
+
+For CAGR, PP is appropriate because CAGR is itself a percentage rate.
+
+For every economy \(i\):
+
+$$ \overline{CAGR}_{-i} = \frac{\sum_{j\ne i}CAGR_j}{N-1} $$
+
+Then:
+
+$$ \boxed{ PP_i= \overline{CAGR}_{-i}-CAGR_i } $$
+Example
+
+India:
+
+$$ CAGR_{India}=11.61\% $$
+
+Other-economy average:
+
+$$ \overline{CAGR}_{-India}=8.00\% $$
+
+Therefore:
+
+$$ PP=8.00-11.61 $$ $$ \boxed{-3.61\text{ percentage points}} $$
+
+Interpretation:
+
+India's nominal export CAGR was 3.61 percentage points higher than the average CAGR of the other eligible economies.
+
+Again, the PP is a cross-sectional benchmark, not:
+
+$$ Export_{2014}-Export_{2004} $$
+
+and not:
+
+$$ ExportGrowth_{India,2014}-ExportGrowth_{India,2004} $$
+12. Zero-value rule for CAGR
+
+CAGR requires a meaningful positive starting value.
+
+If:
+
+$$ T_{i,S}=0 $$
+
+then:
+
+$$ \frac{T_{i,E}}{T_{i,S}} $$
+
+is undefined.
+
+Therefore:
+
+$$ \boxed{\text{Start value must be strictly greater than zero for CAGR}} $$
+
+If the start value is zero, the economy should be excluded from the CAGR ranking for that period rather than assigning an artificial growth rate.
+
+If:
+
+$$ T_{i,E}=0 $$
+
+while:
+
+$$ T_{i,S}>0 $$
+
+then:
+
+$$ CAGR=-100\% $$
+
+is mathematically valid.
+
+13. Basis 3 — Period total trade flow
+
+Exports and imports are flows, so summing annual observations is economically meaningful.
+
+For a period:
+
+$$ S\rightarrow E $$
+
+use every annual flow observation from:
+
+$$ S,S+1,\ldots,E $$
+
+Therefore:
+
+$$ \boxed{ Total_i= \sum_{t=S}^{E}T_{i,t} } $$
+
+Notice the difference from CPI inflation.
+
+For trade, the start year is included, because exports/imports are flows occurring during each individual calendar year.
+
+14. Example — Period total
+
+Suppose India's exports are:
+
+Year	Exports
+2004	$100B
+2005	$110B
+2006	$120B
+2007	$130B
+
+For 2004→2007:
+
+$$ Total= 100+110+120+130 $$ $$ \boxed{\$460B} $$
+
+Interpretation:
+
+India exported goods and services worth a cumulative $460 billion across the four calendar years 2004–2007.
+
+This is a flow accumulation, not a stock.
+
+15. Basis 3 — Cross-sectional ranking
+
+Calculate:
+
+$$ Total_i= \sum_{t=S}^{E}T_{i,t} $$
+
+for every eligible economy.
+
+Then:
+
+$$ \boxed{\text{descending total}} $$
+
+Higher total trade value → smaller rank number.
+
+Example:
+
+Economy	Total exports 2004–2007	Rank
+A	$200B	#4
+B	$300B	#3
+India	$460B	#2
+C	$600B	#1
+
+Again, the rank is based on each country's independently calculated period total.
+
+16. Basis 3 — USD benchmark gap
+
+Because this is a monetary quantity, use a monetary gap:
+
+$$ \overline{Total}_{-i} = \frac{\sum_{j\ne i}Total_j}{N-1} $$
+
+Then:
+
+$$ \boxed{ Gap_i= \overline{Total}_{-i}-Total_i } $$
+Example
+
+India:
+
+$$ Total_{India}=\$460B $$
+
+Other-economy average:
+
+$$ \$300B $$
+
+Then:
+
+$$ Gap=300-460 $$ $$ \boxed{-\$160B} $$
+
+Interpretation:
+
+India's cumulative export value was $160 billion above the average cumulative export value of the other eligible economies.
+
+Do not call this −160 percentage points.
+
+17. Basis 4 — Period average annual trade flow
+
+This asks:
+
+What was the average annual trade value during the selected period?
+
+For:
+
+$$ S\rightarrow E $$
+
+there are:
+
+$$ n=E-S+1 $$
+
+annual flow observations.
+
+Therefore:
+
+$$ \boxed{ Average_i= \frac{ \sum_{t=S}^{E}T_{i,t} }{ E-S+1 } } $$
+
+This is simply the period total divided by the number of calendar years included.
+
+18. Example — Period average
+
+Using:
+
+Year	Exports
+2004	$100B
+2005	$110B
+2006	$120B
+2007	$130B
+
+Total:
+
+$$ \$460B $$
+
+Number of years:
+
+$$ 4 $$
+
+Therefore:
+
+$$ Average= \frac{460}{4} $$ $$ \boxed{\$115B\text{ per year}} $$
+
+Interpretation:
+
+India's average annual export flow was $115 billion across 2004–2007.
+
+19. Basis 4 — Cross-sectional ranking
+
+Calculate:
+
+$$ Average_i= \frac{ \sum_{t=S}^{E}T_{i,t} }{ E-S+1 } $$
+
+for every eligible economy.
+
+Then:
+
+$$ \boxed{\text{descending average}} $$
+
+Higher average annual trade value gets the smaller rank number.
+
+Example
+Economy	Average exports	Rank
+A	$40B	#4
+B	$75B	#3
+India	$115B	#2
+C	$140B	#1
+20. Basis 4 — USD benchmark gap
+
+For each economy:
+
+$$ \overline{Average}_{-i} = \frac{ \sum_{j\ne i}Average_j }{ N-1 } $$
+
+Then:
+
+$$ \boxed{ Gap_i= \overline{Average}_{-i}-Average_i } $$
+Example
+
+India:
+
+$$ Average=\$115B $$
+
+Other-economy average:
+
+$$ \$90B $$
+
+Therefore:
+
+$$ Gap=90-115 $$ $$ \boxed{-\$25B} $$
+
+Interpretation:
+
+India's average annual export flow was $25 billion above the average of the other eligible economies.
+
+21. Ranking architecture — common to all four bases
+
+This is the important part for your backend.
+
+For every selected metric and basis, perform the following sequence.
+
+Step 1 — Determine the eligible universe
+
+Identify every economy with the data required by that basis.
+
+Step 2 — Calculate the basis-specific value for every economy
+
+Never calculate only India's value.
+
+Every economy receives its own value.
+
+Step 3 — Perform the cross-sectional ranking
+
+Rank the complete set of economy-level calculated values.
+
+Step 4 — Calculate the focus-country benchmark
+
+Exclude the focus country.
+
+Step 5 — Calculate the relative gap
+
+The gap uses the same basis-specific unit.
+
+So:
+
+Basis	Country value	Benchmark gap
+Annual value	USD	USD
+CAGR	%	percentage points
+Period total	USD	USD
+Period average	USD	USD
+
+This is economically much cleaner than forcing "percentage points" onto dollar-valued trade metrics.
+
+22. Direction of ranking
+
+All four trade bases naturally rank from largest to smallest if the question is trade scale or nominal trade growth.
+
+Annual value
+$$ Higher\ exports/imports\rightarrow Rank\ 1 $$
+CAGR
+$$ Higher\ nominal\ trade\ growth\rightarrow Rank\ 1 $$
+Period total
+$$ Higher\ cumulative\ trade\ flow\rightarrow Rank\ 1 $$
+Period average
+$$ Higher\ average\ annual\ trade\ flow\rightarrow Rank\ 1 $$
+
+But the UI should not say that Rank 1 means the economy is "better."
+
+For imports especially, a larger import value is not automatically economically preferable.
+
+Use wording such as:
+
+Ranked by largest annual export value
+
+or:
+
+Ranked by highest nominal export CAGR
+
+rather than:
+
+Best exporting economy.
+
+23. Observed universe
+
+The observed universe depends on the basis.
+
+Basis 1 — Annual value
+
+For year \(t\):
+
+$$ \boxed{ U_t= \{i:T_{i,t}\text{ valid}\} } $$
+
+Only the selected year's observation is required.
+
+Therefore:
+
+$$ N_{2004} $$
+
+can differ from:
+
+$$ N_{2014} $$
+
+which can differ from:
+
+$$ N_{2024} $$
+Basis 2 — CAGR
+
+For:
+
+$$ S\rightarrow E $$
+
+the only required observations are:
+
+$$ T_{i,S} $$
+
+and:
+
+$$ T_{i,E} $$
+
+with:
+
+$$ T_{i,S}>0 $$
+
+Therefore:
+
+$$ \boxed{ U^{CAGR}_{S,E} = \{i:T_{i,S}>0,\ T_{i,E}\text{ valid}\} } $$
+
+Intermediate annual values are not required for CAGR.
+
+This is an important difference from period total and period average.
+
+Basis 3 — Period total
+
+Every annual observation from \(S\) through \(E\) must exist:
+
+$$ \boxed{ U^{Total}_{S,E} = \{i:T_{i,t}\text{ valid for all }t=S,...,E\} } $$
+Basis 4 — Period average
+
+Exactly the same data requirement:
+
+$$ \boxed{ U^{Average}_{S,E} = \{i:T_{i,t}\text{ valid for all }t=S,...,E\} } $$
+24. Like-for-like universe
+
+Like-for-like does not change the trade formulas.
+
+It changes the set of economies participating in each comparison.
+
+Basis 1 — Annual value
+
+For:
+
+$$ 2004,\ 2014,\ 2024 $$
+
+take:
+
+$$ \boxed{ L^{Annual} = U_{2004} \cap U_{2014} \cap U_{2024} } $$
+
+Then use the same economies to calculate:
+
+2004 rank
+2014 rank
+2024 rank
+25. Like-for-like — CAGR
+
+For 2004→2014, CAGR requires:
+
+$$ 2004,\ 2014 $$
+
+For 2014→2024:
+
+$$ 2014,\ 2024 $$
+
+Therefore, to compare both intervals with the same universe:
+
+$$ \boxed{ L^{CAGR} = Valid_{2004} \cap Valid_{2014} \cap Valid_{2024} } $$
+
+with the additional requirement that the 2004 starting value is positive for the 2004→2014 CAGR and the 2014 starting value is positive for the 2014→2024 CAGR.
+
+Thus, for the two-decade like-for-like comparison, the country must have positive trade values at the relevant starting years.
+
+26. Like-for-like — Period total and average
+
+These bases use every annual flow in the period.
+
+For:
+
+$$ 2004\rightarrow2014 $$
+
+the period contains:
+
+$$ 2004,2005,...,2014 $$
+
+For:
+
+$$ 2014\rightarrow2024 $$
+
+the period contains:
+
+$$ 2014,2015,...,2024 $$
+
+To use exactly the same country universe across both periods, countries need valid annual trade-flow observations across the full required span.
+
+Therefore, for the complete 2004→2024 comparison:
+
+$$ \boxed{ L^{Flow} = \text{countries with valid annual trade data for every year 2004–2024} } $$
+
+This is intentionally stricter than the annual-value and CAGR universes.
+
+27. Start / Middle / End architecture
+
+With:
+
+$$ Start=2004 $$ $$ Middle=2014 $$ $$ End=2024 $$
+
+the system produces:
+
+$$ 2004\rightarrow2014 $$ $$ 2014\rightarrow2024 $$ $$ 2004\rightarrow2024 $$
+
+But the interpretation depends on the basis.
+
+28. Basis 1 across Start / Middle / End
+
+Annual-value basis simply produces three annual snapshots:
+
+$$ Trade_{2004} $$ $$ Trade_{2014} $$ $$ Trade_{2024} $$
+
+No intermediate years are involved.
+
+29. Basis 2 across Start / Middle / End
+2004→2014
+$$ \boxed{ CAGR= \left( \frac{T_{2014}}{T_{2004}} \right)^{1/10}-1 } $$
+2014→2024
+$$ \boxed{ CAGR= \left( \frac{T_{2024}}{T_{2014}} \right)^{1/10}-1 } $$
+2004→2024
+$$ \boxed{ CAGR= \left( \frac{T_{2024}}{T_{2004}} \right)^{1/20}-1 } $$
+
+This gives an apples-to-apples annualized nominal trade-value growth rate.
+
+30. Basis 3 across Start / Middle / End
+2004→2014
+$$ \boxed{ Total= \sum_{t=2004}^{2014}T_t } $$
+2014→2024
+$$ \boxed{ Total= \sum_{t=2014}^{2024}T_t } $$
+2004→2024
+$$ \boxed{ Total= \sum_{t=2004}^{2024}T_t } $$
+
+The years are inclusive.
+
+31. Basis 4 across Start / Middle / End
+2004→2014
+
+There are:
+
+$$ 2014-2004+1=11 $$
+
+annual observations.
+
+Therefore:
+
+$$ \boxed{ Average= \frac{\sum_{t=2004}^{2014}T_t}{11} } $$
+2014→2024
+$$ \boxed{ Average= \frac{\sum_{t=2014}^{2024}T_t}{11} } $$
+2004→2024
+$$ \boxed{ Average= \frac{\sum_{t=2004}^{2024}T_t}{21} } $$
+32. Important distinction — trade flow vs inflation
+
+This is one of the biggest differences from the CPI/GDP-deflator methodologies.
+
+For inflation:
+
+$$ S\rightarrow E $$
+
+uses inflation observations:
+
+$$ S+1,...,E $$
+
+because inflation in year \(t\) is the change from \(t-1\) to \(t\).
+
+But exports/imports are annual flows.
+
+So:
+
+$$ S\rightarrow E $$
+
+for a period total or average includes:
+
+$$ \boxed{S,S+1,...,E} $$
+
+because each year represents an actual annual trade flow.
+
+This distinction must be explicitly encoded in the backend.
+
+33. Relationship between period total and period average
+
+For the same country and period:
+
+$$ Average_i= \frac{Total_i}{N_{years}} $$
+
+Therefore, when every country is measured over exactly the same number of calendar years:
+
+$$ \boxed{\text{Period total ranking and period-average ranking are identical}} $$
+
+because dividing every country's total by the same constant does not change the ordering.
+
+However, both bases can still exist because they answer different questions:
+
+Period total
+
+How much trade occurred in total?
+
+Period average
+
+What was the typical annual trade flow?
+
+The numbers have different units/interpretations even though their rankings are mathematically identical for the same period.
+
+34. Cumulative endpoint change vs CAGR
+
+You may also want to display:
+
+$$ EndpointChange= \left( \frac{T_E}{T_S}-1 \right)\times100 $$
+
+as a supporting statistic.
+
+For example:
+
+$$ 100B\rightarrow300B $$
+
+gives:
+
+$$ \frac{300-100}{100}\times100 =200\% $$
+
+while CAGR over 10 years is:
+
+$$ 11.61\% $$
+
+These are not contradictory.
+
+They answer different questions:
+
++200%
+
+Total endpoint increase over the entire period.
+
+11.61% CAGR
+
+Equivalent compounded annual growth rate over the period.
+
+I would use CAGR for the ranking basis, because it expresses growth on a common annualized scale.
+
+The endpoint percentage change can be shown as an additional descriptive statistic if desired.
+
+35. PP / benchmark rules by basis
+
+This should be hard-coded as a basis-specific unit rule.
+
+Annual value
+$$ Gap= OtherAverageUSD-CountryUSD $$
+
+Unit:
+
+$$ \boxed{\$} $$
+CAGR
+$$ Gap= OtherAverageCAGR-CountryCAGR $$
+
+Unit:
+
+$$ \boxed{\text{percentage points}} $$
+Period total
+$$ Gap= OtherAverageTotalUSD-CountryTotalUSD $$
+
+Unit:
+
+$$ \boxed{\$} $$
+Period average
+$$ Gap= OtherAveragePeriodAverageUSD-CountryPeriodAverageUSD $$
+
+Unit:
+
+$$ \boxed{\$} $$
+
+Do not label monetary gaps as "percentage points."
+
+36. Example — complete export analysis
+
+Suppose the focus country has:
+
+Annual
+
+2014:
+
+$$ \$450B $$
+CAGR
+
+2004:
+
+$$ \$100B $$
+
+2014:
+
+$$ \$300B $$
+
+so:
+
+$$ CAGR=11.61\% $$
+Period total
+
+2004–2014:
+
+$$ \$2.4T $$
+Period average
+$$ \$2.4T/11 = \$218.18B $$
+
+Suppose the relevant cross-sectional averages excluding the focus country are:
+
+2014 annual exports = $300B
+2004→2014 CAGR = 8%
+Period total = $1.9T
+Period average = $172.73B
+
+Then:
+
+Annual-value gap
+$$ 300-450=-150B $$ $$ \boxed{-\$150B} $$
+CAGR gap
+$$ 8-11.61=-3.61 $$ $$ \boxed{-3.61\text{ pp}} $$
+Total gap
+$$ 1.9T-2.4T = \boxed{-\$0.5T} $$
+Average-flow gap
+$$ 172.73-218.18 = \boxed{-\$45.45B} $$
+
+Each gap has the appropriate unit.
+
+37. Example — complete import analysis
+
+Exactly the same methodology applies to imports.
+
+Suppose:
+
+$$ Imports_{2004}=\$120B $$ $$ Imports_{2014}=\$480B $$
+
+Then:
+
+$$ CAGR= \left( \frac{480}{120} \right)^{1/10}-1 $$ $$ =4^{0.1}-1 $$ $$ \boxed{14.87\%} $$
+
+The economy's nominal import value grew at a compound annual rate of approximately 14.87% over the decade.
+
+Then calculate that value for every eligible economy, rank all economies by CAGR, and calculate the focus country's leave-one-out benchmark.
+
+The formulas do not change merely because the metric changes from exports to imports.
+
+38. What this methodology does NOT claim
+
+The trade ranking must not imply:
+
+higher exports = better economy
+
+or:
+
+lower imports = better economy
+
+or:
+
+higher imports = worse economy.
+
+Trade flows have different economic interpretations depending on context.
+
+For example, imports can reflect demand for:
+
+consumption goods;
+capital goods;
+intermediate inputs;
+energy;
+technology;
+other productive inputs.
+
+Exports can reflect:
+
+external demand;
+production specialization;
+commodity prices;
+services;
+manufacturing;
+resource exports;
+exchange-rate effects.
+
+Therefore the Movement system should rank the trade metric itself, not make a general welfare or economic-performance judgment.
+
+39. Missing-data rules
+Annual value
+
+Missing selected-year value:
+
+$$ \boxed{\text{exclude}} $$
+CAGR
+
+Missing start or end value:
+
+$$ \boxed{\text{exclude}} $$
+
+Start value:
+
+$$ \leq0 $$
+
+for an export/import flow:
+
+$$ \boxed{\text{CAGR unavailable}} $$
+Total
+
+Missing any required annual observation:
+
+$$ \boxed{\text{exclude}} $$
+Average
+
+Missing any required annual observation:
+
+$$ \boxed{\text{exclude}} $$
+
+No interpolation.
+
+No artificial zero substitution.
+
+No partial-period averaging.
+
+40. Precision and ranking
+
+All calculations must use unrounded backend values.
+
+For example:
+
+$$ CAGR_A=7.431827\% $$
+
+and:
+
+$$ CAGR_B=7.432102\% $$
+
+may both display as:
+
+$$ 7.43\% $$
+
+but they must remain distinct internally.
+
+Ranking must use:
+
+$$ 7.431827 $$
+
+and:
+
+$$ 7.432102 $$
+
+not their displayed rounded values.
+
+41. Tie rule
+
+Use competition ranking.
+
+Example:
+
+Value	Rank
+$100B	#1
+$100B	#1
+$90B	#3
+$80B	#4
+
+For CAGR:
+
+CAGR	Rank
+12%	#1
+12%	#1
+10%	#3
+8%	#4
+42. Country-group filter
+
+If the project has an existing country-group classification registry:
+
+apply the selected group restriction;
+apply the basis-specific validity requirement;
+calculate the basis for every remaining economy;
+rank the resulting cross-section;
+calculate the focus country's benchmark against the other economies in that same restricted universe.
+
+Do not call the benchmark "world average" when the country-group filter is active.
+
+Use:
+
+Average of other eligible economies in selected group
+
+43. Benchmark calculation
+
+For every basis:
+
+$$ \boxed{ Benchmark_i= \frac{ \sum_{j\in U,j\ne i}X_j }{ N-1 } } $$
+
+where \(X_j\) is the basis-specific calculated value.
+
+This means:
+
+Annual value
+
+Use each country's annual USD value.
+
+CAGR
+
+Use each country's CAGR.
+
+Period total
+
+Use each country's total USD flow.
+
+Period average
+
+Use each country's average USD flow.
+
+Do not benchmark one basis using another basis.
+
+44. Final methodology table
+Component	Annual value	Period CAGR	Period total	Period average
+Question	How large was the annual flow?	How fast did nominal trade value grow annually?	How much trade occurred in total?	What was the typical annual flow?
+Input	\(T_t\)	\(T_S,T_E\)	\(T_S...T_E\)	\(T_S...T_E\)
+Formula	\(T_t\)	\((T_E/T_S)^{1/(E-S)}-1\)	\(\sum T_t\)	\(\sum T_t/(E-S+1)\)
+Intermediate years needed	No	No	Yes	Yes
+Rank direction	Highest first	Highest first	Highest first	Highest first
+Value unit	USD	%	USD	USD/year
+Benchmark unit	USD	pp	USD	USD/year
+Observed validity	Selected year	Start + end, start > 0	All years	All years
+Like-for-like	Common selected-year universe	Common endpoint universe	Common complete-flow universe	Common complete-flow universe
+Current-US$ caveat	Nominal	Nominal	Nominal	Nominal
+Physical-volume interpretation	Not valid	Not valid	Not valid	Not valid
+45. Final frozen specification
+Export metric
+$$ \boxed{NE.EXP.GNFS.CD} $$
+
+Exports of goods and services (current US$).
+
+Import metric
+$$ \boxed{NE.IMP.GNFS.CD} $$
+
+Imports of goods and services (current US$).
+
+Approved bases
+1. Annual trade value
+$$ \boxed{T_{i,t}} $$
+
+Rank highest first.
+
+2. Period trade growth — CAGR
+$$ \boxed{ \left[ \left(\frac{T_{i,E}}{T_{i,S}}\right)^{1/(E-S)}-1 \right]\times100 } $$
+
+Rank highest first.
+
+3. Period total trade flow
+$$ \boxed{ \sum_{t=S}^{E}T_{i,t} } $$
+
+Rank highest first.
+
+4. Period average annual trade flow
+$$ \boxed{ \frac{\sum_{t=S}^{E}T_{i,t}}{E-S+1} } $$
+
+Rank highest first.
+
+Cross-sectional ranking
+
+For every basis:
+
+$$ \boxed{ \text{Calculate every country's basis value first} \rightarrow \text{rank the complete cross-section} } $$
+Benchmark
+
+For each country:
+
+$$ \boxed{ Benchmark_i= \frac{\sum_{j\ne i}X_j}{N-1} } $$
+Gap
+
+For USD bases:
+
+$$ \boxed{ Gap_i=Benchmark_i-X_i } $$
+
+For CAGR:
+
+$$ \boxed{ Gap_i=Benchmark_i-CAGR_i } $$
+
+with the CAGR gap expressed in percentage points.
+
+Observed
+
+Use the minimum data required by the basis.
+
+Like-for-like
+
+Use the intersection/common universe required to make the compared periods contain the same economies.
+
+Missing data
+
+Exclude rather than interpolate or partially calculate.
+
+Current-US$ interpretation
+
+All four bases describe nominal trade values measured in current U.S. dollars. They do not isolate real trade-volume changes.
+
+One change I strongly recommend relative to your current implementation
+
+Your existing Trade methodology file shows "Annual flow" as one of the available bases. I would redefine that basis internally as "Period trade growth — CAGR", rather than the current unannualized endpoint percentage change.
+
+For example, your current-style calculation:
+
+$$ \frac{300-100}{100}\times100=200\% $$
+
+says:
+
+the endpoint value was 200% higher.
+
+CAGR says:
+
+$$ \left(\frac{300}{100}\right)^{1/10}-1=11.61\% $$
+
+the equivalent compounded annual growth rate was 11.61%.
+
+Both are mathematically valid, but CAGR is much cleaner as the cross-country period-growth ranking metric, particularly because your interface allows arbitrary Start/Middle/End selections. The endpoint change can remain a secondary displayed statistic rather than the ranking basis.
+
+That gives your Trade family a clean and internally consistent architecture:
+
+Annual scale → CAGR growth → cumulative flow → typical annual flow, with the country-level calculation performed first for every economy, then cross-sectional ranking, then the leave-one-out benchmark.

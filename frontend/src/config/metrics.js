@@ -367,9 +367,31 @@ export function isPricesMetricKey(metricKey) {
   return Object.prototype.hasOwnProperty.call(PRICES_BASES, metricKey);
 }
 
+/** Canonical Trade bases (metric-specific, never a shared list of 8). */
+export const TRADE_BASES = Object.freeze({
+  exports_current: Object.freeze([
+    Object.freeze({ id: 'exp_annual_value', label: 'Annual export value', available: true, disabledReason: null }),
+    Object.freeze({ id: 'exp_period_cagr', label: 'Period export growth — CAGR', available: true, disabledReason: null }),
+    Object.freeze({ id: 'exp_period_total', label: 'Period total export flow', available: true, disabledReason: null }),
+    Object.freeze({ id: 'exp_period_average', label: 'Period average annual export flow', available: true, disabledReason: null }),
+  ]),
+  imports_current: Object.freeze([
+    Object.freeze({ id: 'imp_annual_value', label: 'Annual import value', available: true, disabledReason: null }),
+    Object.freeze({ id: 'imp_period_cagr', label: 'Period import growth — CAGR', available: true, disabledReason: null }),
+    Object.freeze({ id: 'imp_period_total', label: 'Period total import flow', available: true, disabledReason: null }),
+    Object.freeze({ id: 'imp_period_average', label: 'Period average annual import flow', available: true, disabledReason: null }),
+  ]),
+});
+
+export function isTradeMetricKey(metricKey) {
+  return Object.prototype.hasOwnProperty.call(TRADE_BASES, metricKey);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
   // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
   if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];
+  // Trade metrics expose ONLY their own approved subset (4 / 4).
+  if (isTradeMetricKey(metricKey)) return TRADE_BASES[metricKey];
   const caps = metricCapabilities(metricKey);
   const subject = subjectOf(metricKey);
   const isFlow = caps?.observationType === 'FLOW';
