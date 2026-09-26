@@ -1180,6 +1180,11 @@ hr.ddivider {
   border-color: #c4c9d1;
 }
 
+.combo-button[aria-expanded="true"] {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 1px var(--navy);
+}
+
 .combo-button:focus-visible {
   outline: 2px solid var(--focus-line);
   outline-offset: 1px;

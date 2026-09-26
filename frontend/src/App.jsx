@@ -462,6 +462,7 @@ export default function App() {
                 label="Metric"
                 value={effective.metric}
                 onChange={(v) => setFilter('metric', v)}
+                subject={effective.subject}
               />
               <Field label="Neighbors" htmlFor="f-neighbors">
                 <input
