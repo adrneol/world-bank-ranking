@@ -12,10 +12,11 @@ import { api } from '../api/client.js';
 import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import SlopeChart from '../components/charts/SlopeChart.jsx';
-import { METRICS, SUBJECTS, isCapitalMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
+import { METRICS, SUBJECTS, isCapitalMetricKey, isFxMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
 import PricesMovement from './PricesMovement.jsx';
 import TradeMovement from './TradeMovement.jsx';
 import CapitalMovement from './CapitalMovement.jsx';
+import FxMovement from './FxMovement.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
 import { Field, MethodologyPanel, ProvenanceBadge, Section, StatusBlock, UnavailableState } from '../components/ui.jsx';
@@ -2856,7 +2857,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   // periods are not ranked, so the comparison engine stays out of the way.
   const periodActive = basis === RANKING_BASIS.PERIOD_TOTAL || basis === RANKING_BASIS.PERIOD_AVERAGE;
   const periodOperation = basis === RANKING_BASIS.PERIOD_AVERAGE ? 'AVG' : 'SUM';
-  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive && !isPricesMetricKey(metricKey) && !isTradeMetricKey(metricKey) && !isCapitalMetricKey(metricKey);
+  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive && !isPricesMetricKey(metricKey) && !isTradeMetricKey(metricKey) && !isCapitalMetricKey(metricKey) && !isFxMetricKey(metricKey);
   const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${basis}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
@@ -2954,6 +2955,35 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
 
   const meta = data?.metric ?? METRICS[metricKey];
 
+  // Exchange Rate uses the canonical 3-basis methodology (separate engine).
+  // GDP/flow/Prices/Trade/Capital paths below are untouched.
+  if (isFxMetricKey(metricKey)) {
+    return (
+      <Section
+        id="rank-movement"
+        title="Exchange Rate movement comparison"
+        subtitle={`How did ${focusName}'s official nominal exchange rate move against the USD across the same economies? Canonical Exchange Rate methodology with Observed and Like-for-like universes.`}
+      >
+        <FxMovement
+          availableYears={availableYears}
+          yearA={yearA}
+          yearB={yearB}
+          yearMid={yearMid}
+          metricKey={metricKey}
+          basis={basis}
+          country={country}
+          countries={countries}
+          focusName={focusName}
+          onYearA={onYearA}
+          onYearB={onYearB}
+          onYearMid={onYearMid}
+          onMetric={onMetric}
+          onBasis={onBasis}
+          onCountry={onCountry}
+        />
+      </Section>
+    );
+  }
   // Capital Flow metrics use the canonical 3+3-basis methodology (separate engine).
   // GDP/flow/Prices/Trade paths below are untouched.
   if (isCapitalMetricKey(metricKey)) {

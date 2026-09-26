@@ -409,6 +409,22 @@ export function isCapitalMetricKey(metricKey) {
   return Object.prototype.hasOwnProperty.call(CAPITAL_BASES, metricKey);
 }
 
+/**
+ * Canonical Exchange Rate bases (3 user-facing; CAGR is display-only and
+ * intentionally NOT listed). Basis A is descriptive-only (never ranked).
+ */
+export const FX_BASES = Object.freeze({
+  fx_official: Object.freeze([
+    Object.freeze({ id: 'fx_annual_rate', label: 'Annual Official FX Rate', available: true, disabledReason: null }),
+    Object.freeze({ id: 'fx_annual_change', label: 'Annual Nominal FX Change', available: true, disabledReason: null }),
+    Object.freeze({ id: 'fx_period_change', label: 'Period Nominal FX Change', available: true, disabledReason: null }),
+  ]),
+});
+
+export function isFxMetricKey(metricKey) {
+  return Object.prototype.hasOwnProperty.call(FX_BASES, metricKey);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
   // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
   if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];
@@ -416,6 +432,8 @@ export function movementBases(metricKey, yearA = null, yearB = null) {
   if (isTradeMetricKey(metricKey)) return TRADE_BASES[metricKey];
   // Capital Flow metrics expose ONLY their own approved subset (3 / 3 ranked).
   if (isCapitalMetricKey(metricKey)) return CAPITAL_BASES[metricKey];
+  // Exchange Rate exposes ONLY its 3 canonical bases (CAGR never listed).
+  if (isFxMetricKey(metricKey)) return FX_BASES[metricKey];
   const caps = metricCapabilities(metricKey);
   const subject = subjectOf(metricKey);
   const isFlow = caps?.observationType === 'FLOW';

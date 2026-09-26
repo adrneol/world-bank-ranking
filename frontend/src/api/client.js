@@ -171,6 +171,23 @@ export const api = {
       options,
     ),
   capitalGroups: (options) => get('/api/capital/country-groups', {}, options),
+  // Canonical Exchange Rate movement (3 bases; backend-authoritative).
+  fxMovement: ({ indicator, metric, basis, yearA, yearB, yearMid, country, groupType, group } = {}, options) =>
+    get(
+      '/api/movement/fx',
+      {
+        indicator: indicator ?? metric,
+        basis,
+        yearA,
+        yearB,
+        ...(yearMid !== undefined && yearMid !== null && String(yearMid).toLowerCase() !== 'none' ? { yearMid } : {}),
+        country,
+        ...(groupType ? { groupType } : {}),
+        ...(group ? { group } : {}),
+      },
+      options,
+    ),
+  fxGroups: (options) => get('/api/fx/country-groups', {}, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>
