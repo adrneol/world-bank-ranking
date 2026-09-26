@@ -1,0 +1,813 @@
+For External Sector, I would not force the exact same mathematical treatment onto all three metrics, because they are economically different:
+
+Current account = an annual balance/flow
+Reserves ex-gold = a stock
+Remittances received = an annual flow
+
+That distinction is essential. The World Bank defines the current-account balance as the balance of current transactions between residents and non-residents; reserves excluding gold are external reserve assets held at a point in time; and personal remittances received are annual transfers/compensation flows in current US dollars.
+
+I would freeze the family as follows.
+
+External Sector
+Metric	Canonical bases
+Current account	3
+Reserves ex-gold	3
+Remittances received	4
+
+The important part is that the three metrics do not get identical bases just for symmetry. Their bases follow their economics.
+
+1. Current Account
+Source concept
+
+World Bank's BN.CAB.XOKA.CD is Current account balance (BoP, current US$). It represents the balance of current transactions, including goods/services, earned income and transfers. World Bank also provides the directly normalized BN.CAB.XOKA.GD.ZS, current-account balance as a percentage of GDP.
+
+For cross-country comparison, I strongly recommend that the ranking bases use the % of GDP form, not raw US dollars.
+
+Why?
+
+A $50B surplus in a huge economy and a $10B surplus in a small economy do not represent the same external position relative to domestic economic size.
+
+So raw US$ can be shown as a scale measure, but I would not use raw US$ as the canonical cross-country performance ranking.
+
+Basis A — Annual Current Account Balance (% of GDP)
+Formula
+
+Use:
+
+$$ CA^{GDP}_{i,t} = \frac{CA_{i,t}}{GDP_{i,t}}\times100 $$
+
+or, preferably, the World Bank's directly published BN.CAB.XOKA.GD.ZS.
+
+Example
+
+Suppose:
+
+India
+
+$$ CA=-2\%GDP $$
+
+Country B
+
+$$ CA=+4\%GDP $$
+
+Then the numerical ordering is:
+
+Country B: +4%
+India: −2%
+
+The ranking is a ranking of the current-account balance position, not a ranking of "best economy."
+
+Direction
+
+Higher numerical value → rank 1.
+
+Therefore:
+
++6% ranks above +2%
++2% ranks above 0%
+0% ranks above −3%
+−3% ranks above −8%
+Important interpretation
+
+Do not write:
+
+"Country B has a better economy."
+
+Instead:
+
+"Country B has a higher current-account balance relative to GDP."
+
+A surplus is not automatically economically superior in every circumstance; a current-account balance reflects saving, investment, trade and income relationships.
+
+Basis B — Average Annual Current Account Balance (% of GDP)
+
+For a period:
+
+$$ S\rightarrow E $$
+
+use the annual observations:
+
+$$ S+1,\ldots,E $$
+
+and calculate:
+
+$$ AverageCA_i= \frac{1}{E-S} \sum_{t=S+1}^{E}CA^{GDP}_{i,t} $$
+Example
+
+Suppose India's annual current-account balances relative to GDP over five years are:
+
+Year	CA/GDP
+2021	−1%
+2022	−2%
+2023	−1%
+2024	+1%
+2025	+2%
+
+Then:
+
+$$ \frac{-1-2-1+1+2}{5} = -0.2\% $$
+
+So:
+
+Average annual current-account balance = −0.20% of GDP
+
+Meaning
+
+This answers:
+
+What was the country's typical annual external current-account position relative to GDP during the period?
+
+Ranking
+
+Higher average balance/GDP → higher numerical rank.
+
+Again, don't call it "best."
+
+Basis C — Cumulative Current Account Relative to Cumulative GDP
+
+This is the most important period-level basis.
+
+Do not simply sum the annual percentages:
+
+$$ CA_1/GDP_1 + CA_2/GDP_2+\cdots $$
+
+That would be wrong.
+
+Instead:
+
+$$ CumulativeCAIntensity_i = \frac{ \sum_{t=S+1}^{E}CA_{i,t} }{ \sum_{t=S+1}^{E}GDP_{i,t} } \times100 $$
+Example
+
+Suppose:
+
+Year	Current account	GDP
+2021	+$5B	$100B
+2022	−$4B	$200B
+2023	+$6B	$250B
+
+Then:
+
+$$ \sum CA=5-4+6=7B $$ $$ \sum GDP=100+200+250=550B $$
+
+Therefore:
+
+$$ \frac{7}{550}\times100 = 1.27\% $$
+
+So:
+
+Cumulative current-account balance = +1.27% of cumulative GDP
+
+This is mathematically superior to simply averaging the ratios when the purpose is to describe the country's aggregate external balance relative to the aggregate size of the economy over the period.
+
+Why this differs from Basis B
+
+Average annual CA/GDP gives every year equal weight.
+
+Cumulative CA / cumulative GDP gives larger-GDP years greater weight.
+
+That distinction is economically legitimate.
+
+Current Account: observed universe
+Annual Basis A
+
+Country must have valid:
+
+current-account balance
+GDP
+
+for the selected year.
+
+Basis B
+
+Country must have valid annual observations for every required year S+1...E.
+
+Basis C
+
+Country must have valid:
+
+current-account balance
+GDP
+
+for every year S+1...E.
+
+No silently dropping missing years.
+
+No treating missing as zero.
+
+Current Account: like-for-like
+
+Suppose:
+
+Period 1: 2004→2014
+
+requires:
+
+2005–2014
+
+and:
+
+Period 2: 2014→2024
+
+requires:
+
+2015–2024
+
+Then the like-for-like universe is countries with complete:
+
+2005–2024
+
+current-account + GDP data.
+
+Both periods are then recalculated on exactly the same countries.
+
+2. Reserves Ex-Gold
+
+This one needs very different treatment.
+
+World Bank's FI.RES.XGLD.CD is Total reserves, excluding gold (current US$). It represents external assets readily available to monetary authorities for balance-of-payments financing, exchange-market intervention and related purposes. It is a reserve asset stock, not an annual flow.
+
+So:
+
+Never sum reserves across years.
+
+That would be economically wrong.
+
+If a country has:
+
+Year	Reserves
+2021	$500B
+2022	$550B
+2023	$600B
+
+you do not say:
+
+cumulative reserves = $1.65T.
+
+Those are stock levels at different points in time.
+
+Basis A — Annual Reserve Stock
+$$ Reserve_{i,t} $$
+
+Unit:
+
+current US$
+
+Example
+Country	2024 reserves ex-gold
+India	$650B
+Country B	$80B
+Country C	$1.2T
+
+Here it is perfectly legitimate to say:
+
+Country C has a larger nominal reserve stock than India.
+
+But this is not:
+
+"Country C has better reserve adequacy."
+
+Absolute reserve size is heavily affected by country size and external financing needs.
+
+Ranking
+
+You may rank the raw stock, but the label must be:
+
+Reserve stock size
+
+or
+
+Reserves ex-gold — nominal stock
+
+not:
+
+Reserve strength
+
+or:
+
+Reserve adequacy
+
+This is a very important UI distinction.
+
+Basis B — Period Change in Reserve Stock (%)
+
+Because reserves are a stock, period change is an endpoint stock comparison.
+
+$$ ReserveChange_i = \left( \frac{R_{i,E}}{R_{i,S}}-1 \right)\times100 $$
+Example
+
+Suppose:
+
+$$ R_{2004}=100B $$ $$ R_{2014}=150B $$
+
+Then:
+
+$$ \frac{150}{100}-1 = 50\% $$
+
+So:
+
+Reserve stock increased 50% between 2004 and 2014.
+
+Another country:
+
+$$ R_{2004}=500B $$ $$ R_{2014}=400B $$
+
+gives:
+
+$$ -20\% $$
+
+So:
+
+Reserve stock decreased 20%.
+
+Ranking
+
+Higher percentage change → higher numerical rank.
+
+But again, do not call this:
+
+"better reserve management."
+
+It only measures the nominal change in the reserve stock.
+
+Reserve values in US dollars can also be affected by valuation and exchange-rate effects, so this is not the same thing as cumulative reserve purchases or the balance-of-payments contribution to reserves.
+
+Basis C — Reserve Coverage in Months of Imports, Ex-Gold
+
+This is the economically important normalized basis.
+
+The World Bank's standard reserve-coverage concept expresses reserves in months of imports, using:
+
+$$ \frac{Reserves}{Imports/12} $$
+
+or equivalently:
+
+$$ ReserveCoverage = \frac{Reserves}{Imports}\times12 $$
+
+The World Bank publishes this concept for total reserves; for this family, we can calculate the same concept specifically using reserves excluding gold.
+
+So:
+
+$$ Coverage^{XG}_{i,t} = \frac{ ReservesExGold_{i,t} }{ ImportsGoodsServices_{i,t} } \times12 $$
+Example
+
+Suppose:
+
+reserves ex-gold = $60B
+annual goods + services imports = $120B
+
+Then:
+
+$$ \frac{60}{120}\times12 = 6 $$
+
+Therefore:
+
+6 months of import coverage
+
+Another country:
+
+reserves = $100B
+imports = $600B
+$$ \frac{100}{600}\times12 = 2 $$
+
+So despite having a larger dollar reserve stock, the second country has only 2 months of import coverage.
+
+This is exactly why raw reserve-dollar ranking alone can mislead.
+
+Ranking
+
+Higher months of import coverage → higher numerical rank.
+
+But label it:
+
+Ex-gold reserve import coverage
+
+not:
+
+Reserve strength
+
+because adequacy depends on more than import coverage, including capital-flow structure, external debt, exchange-rate regime and access to financing.
+
+Reserves: observed universe
+Basis A
+
+Valid reserve-stock observation in year \(t\).
+
+Basis B
+
+Valid reserve observations at both:
+
+$$ S $$
+
+and
+
+$$ E $$
+
+because it is an endpoint stock-change calculation.
+
+Intermediate years are not required mathematically.
+
+Basis C
+
+Need valid:
+
+reserves ex-gold
+imports
+
+for the selected year.
+
+Reserves: like-for-like
+
+For Basis B:
+
+2004→2014 requires valid reserves in 2004 and 2014.
+
+2014→2024 requires valid reserves in 2014 and 2024.
+
+Therefore the common universe needs:
+
+2004 + 2014 + 2024
+
+for both periods.
+
+For Basis C, if comparing period averages of annual coverage, use complete annual reserve/import observations over the specified interval.
+
+3. Remittances Received
+
+World Bank's BX.TRF.PWKR.CD.DT is Personal remittances, received (current US$). It includes personal transfers and compensation of employees received by resident households, and is an annual flow.
+
+Therefore this behaves much more like FDI than reserves.
+
+Critical rule:
+
+Remittances are a flow.
+
+Therefore a decade's remittance amount can legitimately be summed.
+
+Basis A — Annual Remittances Received
+$$ Remit_{i,t} $$
+
+Unit:
+
+current US$
+
+Example
+
+India:
+
+$$ 2024=\$130B $$
+
+Country B:
+
+$$ 2024=\$20B $$
+
+Then India has the larger nominal remittance inflow.
+
+Ranking
+
+Higher annual amount → higher numerical rank.
+
+But again:
+
+larger remittances do not automatically mean a better economy.
+
+The amount is strongly affected by population, migrant stock and country size.
+
+So call the ranking:
+
+Annual remittances received
+
+rather than:
+
+Remittance performance.
+
+Basis B — Cumulative Remittances Received
+
+For a period:
+
+$$ CumulativeRemit_i = \sum_{t=S+1}^{E}Remit_{i,t} $$
+Example
+
+Suppose:
+
+Year	Remittances
+2022	$20B
+2023	$22B
+2024	$24B
+
+Then:
+
+$$ 20+22+24=66B $$
+
+So:
+
+Cumulative remittances received = $66B
+
+Meaning
+
+This answers:
+
+How much personal remittance flow was received over the entire period?
+
+Ranking
+
+Higher cumulative received → higher numerical rank.
+
+This is a legitimate flow aggregation.
+
+Basis C — Average Annual Remittances Received
+$$ AverageRemit_i = \frac{ \sum_{t=S+1}^{E}Remit_{i,t} }{ E-S } $$
+Example
+
+If 10 years produced:
+
+$$ \$20B+\cdots+\$30B = \$250B $$
+
+then:
+
+$$ 250/10 = \$25B/year $$
+
+So:
+
+Average annual remittances = $25B/year
+
+Why have both B and C?
+
+Because:
+
+Cumulative answers total received across the interval.
+Average annual answers the typical annual scale.
+
+For two countries and a fixed period length, their ranking is mathematically identical:
+
+$$ Average=\frac{Cumulative}{N} $$
+
+but their meanings are different.
+
+Basis D — Cumulative Remittance Intensity (% of cumulative GDP)
+
+This is the crucial cross-country normalization.
+
+World Bank also publishes personal remittances received (% of GDP), confirming that remittance intensity relative to domestic economic output is an established measure.
+
+For the period, I would calculate:
+
+$$ CumulativeRemittanceIntensity_i = \frac{ \sum_{t=S+1}^{E}Remit_{i,t} }{ \sum_{t=S+1}^{E}GDP_{i,t} } \times100 $$
+Example
+
+Suppose:
+
+Year	Remittances	GDP
+2022	$10B	$100B
+2023	$12B	$120B
+2024	$14B	$140B
+
+Then:
+
+$$ \sum Remit=36B $$ $$ \sum GDP=360B $$
+
+Therefore:
+
+$$ \frac{36}{360}\times100 = 10\% $$
+
+So:
+
+Cumulative remittance inflows = 10% of cumulative GDP
+
+This is much more meaningful for cross-country structural comparison than saying:
+
+"Country A received more dollars."
+
+Why I would NOT simply sum annual remittance/GDP percentages
+
+Suppose:
+
+Year 1 = 10%
+Year 2 = 5%
+Year 3 = 15%
+
+You must not say:
+
+$$ 10+5+15=30\% $$
+
+That is not a meaningful cumulative share.
+
+Instead:
+
+$$ \frac{\sum Remittances}{\sum GDP}\times100 $$
+
+uses the actual dollar flows and dollar GDP denominators consistently.
+
+Remittances: observed universe
+Basis A
+
+Valid remittance observation for selected year.
+
+Basis B
+
+Valid remittance observations for:
+
+$$ S+1,\ldots,E $$
+
+every year.
+
+Basis C
+
+Same as Basis B.
+
+Basis D
+
+Need complete:
+
+remittances
+GDP
+
+for every year S+1...E.
+
+Remittances: like-for-like
+
+For:
+
+2004→2014
+
+require:
+
+2005–2014
+
+For:
+
+2014→2024
+
+require:
+
+2015–2024
+
+Like-for-like therefore requires:
+
+2005–2024
+
+complete remittance data, plus GDP for Basis D.
+
+Cross-global ranking framework
+
+This part should be uniform across the whole External Sector family.
+
+Current Account
+
+Rank on:
+
+$$ CA/GDP $$
+
+not raw US$ when the question is cross-country external position.
+
+Higher numerical value = rank 1.
+
+Reserves
+Raw reserve stock
+
+Rank by:
+
+$$ R $$
+
+but label it stock size, not adequacy.
+
+Reserve coverage
+
+Rank by:
+
+$$ \frac{R_{ex-gold}}{Imports}\times12 $$
+
+Higher coverage = higher numerical rank.
+
+Reserve change
+
+Rank by:
+
+$$ \frac{R_E}{R_S}-1 $$
+
+Higher percentage change = higher numerical rank.
+
+Remittances
+Nominal annual/cumulative/average
+
+Rank by the amount received.
+
+Normalized period intensity
+
+Rank by:
+
+$$ \frac{\sum Remit}{\sum GDP} $$
+
+Higher = higher numerical rank.
+
+Benchmark methodology
+
+For all ranked bases, I would use a leave-one-out benchmark.
+
+For a value \(X_i\):
+
+$$ Benchmark_i= mean(X_j,\;j\ne i) $$
+
+However, because some external-sector distributions can contain very large outliers, I would make the benchmark median for the highly skewed raw-value/change bases where appropriate, and explicitly label it.
+
+For example, remittances in current US$ can be enormously skewed by population and migrant scale.
+
+So for a normalized ratio such as:
+
+$$ Remittance/GDP $$
+
+a mean is defensible when the distribution is reasonably behaved, but a median can provide a more robust "typical economy" reference.
+
+The crucial thing is:
+
+Never change the benchmark statistic silently between cards.
+
+The methodology registry should specify it per basis.
+
+What I would NOT implement
+Current account
+
+❌ Raw US$ ranking as "external performance."
+
+❌ Absolute value of current account:
+
+$$ |CA| $$
+
+because that would treat a large deficit and large surplus as equally "large."
+
+❌ Adding annual CA/GDP percentages to create a cumulative percentage.
+
+Reserves
+
+❌ Sum reserves across years.
+
+$$ R_{2020}+R_{2021}+R_{2022} $$
+
+is not cumulative reserves.
+
+❌ Call a larger nominal reserve stock "better reserve adequacy."
+
+❌ Treat reserve-stock change as cumulative reserve accumulation.
+
+❌ Use total-reserve-with-gold data when the metric specifically says ex-gold.
+
+The World Bank's ex-gold series explicitly excludes monetary gold.
+
+Remittances
+
+❌ Endpoint percentage growth as the principal decade metric.
+
+$$ \frac{R_E-R_S}{R_S} $$
+
+It ignores all intermediate flows.
+
+For example:
+
+$$ 10\rightarrow20B $$
+
+looks like +100%, but says nothing about whether the country received $1B, $10B, $20B, etc. during the intervening years.
+
+❌ Sum annual remittance/GDP percentages.
+
+❌ Treat total nominal remittances as "dependency."
+
+High remittance receipts can reflect different combinations of migration, labor-market conditions, exchange rates, household behavior and country size. The metric alone doesn't establish dependence.
+
+Final frozen External Sector specification
+Metric	Basis	Formula	Cross-country rank?
+Current Account	A. Annual CA/GDP	\(CA_t/GDP_t\times100\)	✅
+	B. Average annual CA/GDP	\(\frac{\sum CA_t/GDP_t}{N}\)	✅
+	C. Cumulative CA / cumulative GDP	\(\frac{\sum CA_t}{\sum GDP_t}\times100\)	✅
+Reserves ex-gold	A. Annual reserve stock	\(R_t\)	✅, stock-size only
+	B. Period reserve-stock change	\((R_E/R_S-1)\times100\)	✅
+	C. Ex-gold reserve coverage	\(R_t/Imports_t\times12\)	✅
+Remittances received	A. Annual remittances	\(Remit_t\)	✅
+	B. Cumulative remittances	\(\sum Remit_t\)	✅
+	C. Average annual remittances	\(\sum Remit_t/N\)	✅
+	D. Cumulative remittance intensity	\(\frac{\sum Remit_t}{\sum GDP_t}\times100\)	✅
+Period convention
+
+For flow/balance metrics:
+
+$$ S+1\rightarrow E $$
+
+For example:
+
+2004→2014 = 2005–2014
+
+For the reserve stock, endpoint change uses:
+
+$$ S\rightarrow E $$
+
+because you are comparing two stock positions.
+
+Like-for-like
+
+A comparison of 2004→2014 vs 2014→2024 uses the same underlying eligible countries across the two periods:
+
+flow bases → complete 2005–2024 data as required;
+reserve endpoint bases → valid 2004, 2014 and 2024 observations;
+derived bases → all required numerator and denominator data must exist.
+
+That distinction is the key to keeping the External Sector family economically sound rather than applying one generic "growth formula" to everything. The World Bank's underlying definitions themselves distinguish current-account balances, reserve-asset stocks, and remittance flows.
+
+One implementation decision I would make very firmly: keep raw Current Account US$ and raw Reserves US$ as displayable scale values, but don't let either be presented as a cross-country "economic performance" ranking. For the global analytical comparison, use CA/GDP and reserve-import coverage, respectively. That prevents the family from turning country size into a misleading ranking.

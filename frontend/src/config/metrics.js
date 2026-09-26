@@ -425,6 +425,34 @@ export function isFxMetricKey(metricKey) {
   return Object.prototype.hasOwnProperty.call(FX_BASES, metricKey);
 }
 
+/**
+ * Canonical External Sector bases (metric-specific, 3 / 3 / 4 — never
+ * forced symmetric). Benchmark statistic frozen per basis (median for
+ * raw-scale bases, mean for normalized ratios).
+ */
+export const EXTERNAL_BASES = Object.freeze({
+  current_account: Object.freeze([
+    Object.freeze({ id: 'ca_annual_gdp', label: 'Annual CA / GDP', available: true, disabledReason: null }),
+    Object.freeze({ id: 'ca_average_gdp', label: 'Average Annual CA / GDP', available: true, disabledReason: null }),
+    Object.freeze({ id: 'ca_cumulative_share', label: 'Cumulative CA / Cumulative GDP', available: true, disabledReason: null }),
+  ]),
+  reserves_ex_gold: Object.freeze([
+    Object.freeze({ id: 'res_annual_stock', label: 'Annual Reserve Stock', available: true, disabledReason: null }),
+    Object.freeze({ id: 'res_period_change', label: 'Period Reserve-Stock Change', available: true, disabledReason: null }),
+    Object.freeze({ id: 'res_import_coverage', label: 'Ex-Gold Reserve Import Coverage', available: true, disabledReason: null }),
+  ]),
+  remittances_received: Object.freeze([
+    Object.freeze({ id: 'remit_annual_value', label: 'Annual Remittances Received', available: true, disabledReason: null }),
+    Object.freeze({ id: 'remit_period_cumulative', label: 'Cumulative Remittances Received', available: true, disabledReason: null }),
+    Object.freeze({ id: 'remit_period_average', label: 'Average Annual Remittances', available: true, disabledReason: null }),
+    Object.freeze({ id: 'remit_cumulative_intensity', label: 'Cumulative Remittance Intensity', available: true, disabledReason: null }),
+  ]),
+});
+
+export function isExternalMetricKey(metricKey) {
+  return Object.prototype.hasOwnProperty.call(EXTERNAL_BASES, metricKey);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
   // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
   if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];
@@ -434,6 +462,8 @@ export function movementBases(metricKey, yearA = null, yearB = null) {
   if (isCapitalMetricKey(metricKey)) return CAPITAL_BASES[metricKey];
   // Exchange Rate exposes ONLY its 3 canonical bases (CAGR never listed).
   if (isFxMetricKey(metricKey)) return FX_BASES[metricKey];
+  // External Sector exposes ONLY its canonical subsets (3 / 3 / 4).
+  if (isExternalMetricKey(metricKey)) return EXTERNAL_BASES[metricKey];
   const caps = metricCapabilities(metricKey);
   const subject = subjectOf(metricKey);
   const isFlow = caps?.observationType === 'FLOW';

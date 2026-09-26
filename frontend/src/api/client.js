@@ -188,6 +188,23 @@ export const api = {
       options,
     ),
   fxGroups: (options) => get('/api/fx/country-groups', {}, options),
+  // Canonical External Sector movement (3/3/4 bases; backend-authoritative).
+  externalMovement: ({ indicator, metric, basis, yearA, yearB, yearMid, country, groupType, group } = {}, options) =>
+    get(
+      '/api/movement/external',
+      {
+        indicator: indicator ?? metric,
+        basis,
+        yearA,
+        yearB,
+        ...(yearMid !== undefined && yearMid !== null && String(yearMid).toLowerCase() !== 'none' ? { yearMid } : {}),
+        country,
+        ...(groupType ? { groupType } : {}),
+        ...(group ? { group } : {}),
+      },
+      options,
+    ),
+  externalGroups: (options) => get('/api/external/country-groups', {}, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>

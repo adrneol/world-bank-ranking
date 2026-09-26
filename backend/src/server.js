@@ -65,6 +65,8 @@ import { buildCapitalMovement, listCapitalCountryGroups, CAPITAL_ERROR_CODES } f
 import { isCapitalMetric, capitalBasesForMetric, CAPITAL_BASIS_INFO as CAPITAL_BASIS_INFO_REF } from './domain/capitalMovement.js';
 import { buildFxMovement, listFxCountryGroups, FX_ERROR_CODES } from './services/fxMovementService.js';
 import { isFxMetric, fxBasesForMetric, FX_BASIS_INFO as FX_BASIS_INFO_REF } from './domain/fxMovement.js';
+import { buildExternalMovement, listExternalCountryGroups, EXTERNAL_ERROR_CODES } from './services/externalMovementService.js';
+import { isExternalMetric, externalBasesForMetric, EXTERNAL_BASIS_INFO as EXTERNAL_BASIS_INFO_REF } from './domain/externalMovement.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
 import {
   ensureDataPresent,
@@ -108,6 +110,8 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/capital/country-groups',
   '/api/movement/fx',
   '/api/fx/country-groups',
+  '/api/movement/external',
+  '/api/external/country-groups',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -131,6 +135,8 @@ export function methodologyBlock() {
       'Capital-only canonical methodology (capitalflow/capitalflowmethod.txt): FDI annual raw, cumulative sum S+1..E, average sum/(E-S) (all DESC, USD gaps); FDI/GDP annual raw WDI ratio, average ratio S+1..E, cumulative FDI/cumulative GDP (all DESC, pp gaps); unranked endpoint diagnostics only; no % growth basis. Gap = country-focus minus other-eligible mean (positive = above). Negative/zero flows are data. Full precision; competition ranking (1,1,3). Missing required years (incl. GDP legs) exclude the economy. Cumulative FDI is summed flows, never a stock.',
     fxMovement:
       'FX-only canonical methodology (ExchangeRate/exchangerate.txt): annual level raw LCU per US$ (never ranked/benchmarked); annual change ((t/t-1)-1, DESC competition, frozen direction); period change ((E/S)-1 endpoints-only, DESC competition); CAGR display-only secondary. Benchmark = leave-one-out MEDIAN eligible-economy change; gap = country − median (pp). Positive = depreciation vs USD. Full precision. Missing t-1/t or S/E excludes. Nominal official bilateral vs USD only; no continuity metadata stored (no fabricated detectors).',
+    externalMovement:
+      'External-only canonical methodology (ExternalSector/externalsector.txt): CA annual/average/cumulative CA/GDP from CA+GDP legs (S+1..E, pp); reserves annual stock (USD, size-only), endpoint % change S/E (pp), annual import coverage R/Imports*12 (months); remittances annual/cumulative/average S+1..E (USD) + cumulative intensity ΣRemit/ΣGDP (pp). All DESC competition; per-basis frozen mean/median LOO benchmark (median: reserves stock/change, remittance levels; mean: ratios/coverage); gap = country − benchmark. Negative/zero are data. Full precision; strict completeness.',
   };
 }
 
@@ -863,6 +869,67 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
+  // ---------- External Sector movement (canonical 3/3/4-basis methodology) ----------
+  // External-only: CA/GDP ratios from CA+GDP legs, reserves stock/endpoints/
+  // coverage, remittance flows + intensity. S+1..E for flow sequences,
+  // endpoints for reserve change. Other families untouched.
+  app.get('/api/movement/external', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
+    if (!isExternalMetric(metricKey)) {
+      throw httpError(
+        400,
+        `Metric "${metricKey}" is not an External Sector metric. Valid External keys: current_account, reserves_ex_gold, remittances_received.`,
+        'INVALID_METRIC',
+      );
+    }
+    const yearA = parseYear(req.query.yearA, 'yearA');
+    const yearB = parseYear(req.query.yearB, 'yearB');
+    if (yearA === undefined || yearB === undefined) {
+      throw httpError(400, 'Both yearA and yearB are required for an External Sector movement comparison.', 'MISSING_YEAR');
+    }
+    const rawMid = req.query.yearMid ?? req.query.breaker ?? req.query.pointBreaker ?? req.query.mid;
+    let yearMid;
+    if (rawMid === undefined || rawMid === null || String(rawMid).trim() === '' || String(rawMid).trim().toLowerCase() === 'none') {
+      yearMid = undefined;
+    } else {
+      yearMid = parseYear(rawMid, 'yearMid');
+    }
+    const rawBasis = req.query.basis;
+    const basis = rawBasis === undefined || rawBasis === null || String(rawBasis).trim() === '' ? undefined : String(rawBasis).trim();
+    if (basis !== undefined && !externalBasesForMetric(metricKey).includes(basis)) {
+      throw httpError(
+        400,
+        `Unknown External Sector basis "${rawBasis}" for ${metricKey}. Valid: ${externalBasesForMetric(metricKey).join(', ')}.`,
+        'INVALID_BASIS',
+      );
+    }
+    const groupType = req.query.groupType ?? req.query.group_type ?? null;
+    const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
+    try {
+      const result = buildExternalMovement(handle(), {
+        metricKey,
+        ...(basis !== undefined ? { basis } : {}),
+        yearA,
+        yearB,
+        ...(yearMid !== undefined ? { yearMid } : {}),
+        focusIso3: parseFocusCountry(handle(), req.query.country),
+        ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
+      });
+      res.json({ ...result, methodology: methodologyBlock() });
+    } catch (e) {
+      if (e && e.code && Object.values(EXTERNAL_ERROR_CODES).includes(e.code)) {
+        throw httpError(e.httpStatus ?? 400, e.message, e.code);
+      }
+      throw e;
+    }
+  }));
+
+  // ---------- External Sector country-group discovery (dynamic, no hardcoding) ----------
+  app.get('/api/external/country-groups', ah(async (req, res) => {
+    const result = listExternalCountryGroups(handle());
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
   // ---------- coverage (+ changing-totals explanation) ----------
   app.get('/api/coverage', ah(async (req, res) => {
     const h = handle();
@@ -1032,6 +1099,8 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       ...(isCapitalMetric(key) ? { capitalBases: capitalBasesForMetric(key).map((b) => ({ ...CAPITAL_BASIS_INFO_REF[b] })) } : {}),
       // Additive Exchange Rate basis catalog (does not alter frozen fields above).
       ...(isFxMetric(key) ? { fxBases: fxBasesForMetric(key).map((b) => ({ ...FX_BASIS_INFO_REF[b] })) } : {}),
+      // Additive External Sector basis catalog (does not alter frozen fields above).
+      ...(isExternalMetric(key) ? { externalBases: externalBasesForMetric(key).map((b) => ({ ...EXTERNAL_BASIS_INFO_REF[b] })) } : {}),
     }));
     const defined = FUTURE_METRIC_KEYS.map((key) => ({
       ...describeMeasure(getDefinedMetric(key)),
