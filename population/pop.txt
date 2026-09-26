@@ -1,0 +1,568 @@
+Population is much more straightforward than FDI, exchange rates, or external-sector flows, but there are still a few traps. The biggest one is accidentally treating population like a flow.
+
+For the World Bank SP.POP.TOTL series, total population is an annual mid-year estimate based on the de facto population concept.
+
+So I would keep the Population family to 3 canonical bases, with one optional annualized representation inside Basis C.
+
+Population family
+Metric
+
+Population, total
+
+$$ P_{i,t} $$
+
+where \(P\) is the country's estimated population at the reference point of year \(t\).
+
+Because the World Bank series is a mid-year population estimate, the values are stocks at a point in time, not annual flows.
+
+That determines the methodology.
+
+Basis A — Annual Population
+Formula
+
+Simply use the World Bank value:
+
+$$ AnnualPopulation_{i,t}=P_{i,t} $$
+Example
+
+Suppose in 2025:
+
+Country	Population
+India	1.46B
+China	1.41B
+USA	347M
+
+These are valid cross-country comparisons of population size.
+
+Ranking
+
+Largest population → rank 1.
+
+So:
+
+$$ Rank_i=rank_{\downarrow}(P_{i,t}) $$
+But the UI must be explicit
+
+This is a ranking of:
+
+Population size
+
+not:
+
+population growth, development, demographic performance, economic importance, or living standards.
+
+A larger population is not inherently "better."
+
+Benchmark
+
+You can provide the leave-one-out peer average:
+
+$$ Benchmark_i= \frac{\sum_{j\ne i}P_j}{n-1} $$
+
+and:
+
+$$ Gap_i=P_i-Benchmark_i $$
+
+Unit:
+
+people
+
+Example:
+
+India = 1.46B
+Peer average = 180M
+
+$$ Gap=+1.28B $$
+
+Meaning:
+
+India's population is 1.28 billion above the eligible-economy average.
+
+That is descriptive, not a performance judgment.
+
+Basis B — Period Population Change
+
+Population is a stock, so the correct period change is an endpoint difference.
+
+For Start \(S\) and End \(E\):
+
+$$ \Delta P_i=P_{i,E}-P_{i,S} $$
+Example
+
+Suppose:
+
+$$ P_{2004}=1.10B $$ $$ P_{2014}=1.30B $$
+
+Then:
+
+$$ \Delta P=1.30-1.10=0.20B $$
+
+So:
+
+Population increased by 200 million people.
+
+Ranking
+
+Largest absolute population increase → rank 1:
+
+$$ rank_{\downarrow}(\Delta P) $$
+
+Example:
+
+Country	Population change
+A	+200M
+B	+50M
+C	+5M
+D	−2M
+
+Ranking:
+
+A
+B
+C
+D
+Important limitation
+
+This ranking is size-sensitive.
+
+A very large country can add many people even if its population grows relatively slowly.
+
+For example:
+
+Country A: +100M people, +8%
+Country B: +20M people, +25%
+
+A has the greater absolute increase.
+
+B has the greater relative growth.
+
+Neither should be presented as "better."
+
+That is exactly why Basis B and Basis C both exist.
+
+Basis C — Period Population Growth (%)
+
+For a stock, the scale-neutral comparison is:
+
+$$ PopulationGrowth_i= \left( \frac{P_{i,E}}{P_{i,S}}-1 \right)\times100 $$
+Example
+
+Suppose:
+
+$$ P_{2004}=100M $$ $$ P_{2014}=125M $$
+
+Then:
+
+$$ \left(\frac{125}{100}-1\right)\times100 = 25\% $$
+
+So:
+
+Population increased 25% between 2004 and 2014.
+
+This is the most appropriate basis for scale-neutral cross-country comparison.
+
+Ranking for Basis C
+
+Higher population growth → rank 1.
+
+$$ rank_{\downarrow} \left( \frac{P_E}{P_S}-1 \right) $$
+
+Example:
+
+Country	Population growth
+A	+25%
+B	+12%
+C	+3%
+D	−4%
+
+Ranking:
+
+A
+B
+C
+D
+
+This is mathematically comparable across countries because it is a percentage rather than a count.
+
+Annualized population growth
+
+For long periods, I would show an annualized equivalent alongside Basis C:
+
+$$ CAGR_i= \left( \frac{P_E}{P_S} \right)^{1/(E-S)}-1 $$
+Example
+
+Population:
+
+$$ 100M\rightarrow125M $$
+
+over 10 years.
+
+Cumulative:
+
+$$ +25\% $$
+
+Annualized:
+
+$$ (1.25)^{1/10}-1 \approx2.25\% $$
+
+So the UI can say:
+
+Population growth: +25.00%
+Annualized: +2.25%/year
+
+Is this another basis?
+
+No.
+
+I would keep it as a secondary representation of Basis C, because for a fixed period:
+
+$$ CAGR=f(\text{period growth}) $$
+
+and the transformation is monotonic.
+
+Therefore they produce exactly the same ranking.
+
+Adding both as separate bases would create an artificial extra methodology without adding a different analytical question.
+
+Why I would NOT create a "cumulative population" basis
+
+This is the biggest population mistake to avoid.
+
+Do not calculate:
+
+$$ P_{2005}+P_{2006}+\cdots+P_{2014} $$
+
+and call it:
+
+cumulative population
+
+That would be the sum of annual population snapshots, not the number of people.
+
+Population is a stock.
+
+So:
+
+$$ P_{2024} $$
+
+is meaningful.
+
+But:
+
+$$ \sum P_t $$
+
+is not "population accumulated."
+
+You could technically interpret it as population-years, but that is a completely different demographic exposure measure and has no reason to exist in your general Population family.
+
+Do we need "average population" as a basis?
+
+I would not make it a canonical basis.
+
+You could mathematically calculate:
+
+$$ AveragePopulation= \frac{\sum P_t}{N} $$
+
+but for your site's purpose it does not answer a fundamentally different population question from annual size.
+
+It would also tempt users to interpret it as "population during the period" when it is actually the arithmetic average of annual mid-year estimates.
+
+So I would leave it out.
+
+Observed comparison
+
+For annual population:
+
+Selected year \(t\)
+
+Require:
+
+$$ P_t $$
+
+If valid, country enters the annual universe.
+
+Observed period comparison
+
+For Basis B and C:
+
+Require only:
+
+$$ P_S $$
+
+and
+
+$$ P_E $$
+
+because both are endpoint stock calculations.
+
+For example:
+
+2004 → 2014
+
+requires:
+
+2004 population
+2014 population
+
+It does not mathematically require 2005, 2006, ..., 2013.
+
+That is fundamentally different from FDI, remittances, or average inflation where intermediate years are part of the formula.
+
+Like-for-like comparison
+
+Suppose:
+
+Period 1
+
+2004 → 2014
+
+requires:
+
+$$ P_{2004},P_{2014} $$
+Period 2
+
+2014 → 2024
+
+requires:
+
+$$ P_{2014},P_{2024} $$
+
+Therefore the common like-for-like universe is:
+
+$$ Valid(P_{2004}) \cap Valid(P_{2014}) \cap Valid(P_{2024}) $$
+
+So both decades are ranked using exactly the same countries.
+
+Example of the like-for-like logic
+
+Suppose:
+
+Country	2004	2014	2024
+A	✓	✓	✓
+B	✓	✓	✗
+C	✓	✓	✓
+D	✗	✓	✓
+2004→2014 observed
+
+A, B, C, D? No.
+
+Need 2004 and 2014:
+
+A, B, C
+
+2014→2024 observed
+
+Need 2014 and 2024:
+
+A, B? no, C, D
+
+So:
+
+A, C, D
+
+Like-for-like
+
+Intersection:
+
+A, C
+
+Both periods are recalculated using:
+
+A + C
+
+This prevents universe changes from contaminating the comparison.
+
+Country-group filtering
+
+Keep your established sequence:
+
+$$ CountryGroup \rightarrow DataEligibility \rightarrow Calculation \rightarrow Ranking $$
+
+For example, if the selected group is South Asia:
+
+select documented South Asian economies;
+apply population-data eligibility;
+calculate the population basis;
+rank within that universe.
+
+Don't calculate global ranks and then filter them to the region.
+
+Benchmark
+
+Population benchmark should simply be descriptive.
+
+For annual population:
+
+$$ Benchmark_i=mean(P_j) $$
+
+For absolute change:
+
+$$ Benchmark_i=mean(\Delta P_j) $$
+
+For percentage growth:
+
+$$ Benchmark_i=mean(Growth_j) $$
+
+with the focus country excluded.
+
+Then:
+
+Basis A
+$$ Gap=P_i-Benchmark $$
+
+unit = people.
+
+Basis B
+$$ Gap=\Delta P_i-Benchmark $$
+
+unit = people.
+
+Basis C
+$$ Gap=Growth_i-Benchmark $$
+
+unit = percentage points.
+
+Example:
+
+India:
+
+$$ +18\% $$
+
+Peer average:
+
+$$ +10\% $$
+
+Gap:
+
+$$ +8\text{ percentage points} $$
+
+Meaning:
+
+India's population grew 8 percentage points more than the eligible-economy average over the period.
+
+Not:
+
+"India performed 8% better."
+
+Ranking direction
+Basis	Ranking	What it actually ranks
+A. Annual population	Largest → #1	Population size
+B. Absolute population change	Largest increase → #1	Number of people added/lost
+C. Population growth %	Highest growth → #1	Relative population growth
+
+For population, there is no economically universal "better/worse" direction.
+
+Higher growth can have very different implications depending on age structure, employment, fertility, migration, resources, etc.
+
+So your UI should not say:
+
+"Higher is better."
+
+It should say:
+
+Higher = larger population / larger increase / faster relative growth.
+
+One subtle issue: migration, fertility and mortality
+
+Population change is the result of demographic components including:
+
+births/fertility,
+deaths/mortality,
+migration.
+
+The World Bank metadata explicitly notes these components and that population estimates are dependent on them.
+
+Therefore:
+
+$$ P_E-P_S $$
+
+should not be labeled:
+
+"births"
+
+or:
+
+"natural population increase."
+
+It is simply:
+
+net population change
+
+because the change incorporates all demographic components.
+
+Another important issue: estimates vs exact census counts
+
+The World Bank series consists of population estimates, and its metadata notes that such estimates can involve demographic modeling and associated uncertainty.
+
+So the UI should preferably say:
+
+Population
+
+or
+
+Estimated population
+
+rather than implying that every annual figure is an exact headcount.
+
+Final frozen methodology
+Population — 3 canonical bases
+Basis A — Annual Population
+$$ P_t $$
+
+Example:
+India 2025 = 1.46B.
+
+Rank: largest population first.
+
+Purpose: size.
+
+Basis B — Period Population Change
+$$ P_E-P_S $$
+
+Example:
+1.10B → 1.30B:
+
+$$ +200M $$
+
+Rank: largest absolute increase first.
+
+Purpose: how many people were added/lost.
+
+Basis C — Period Population Growth
+$$ \left(\frac{P_E}{P_S}-1\right)\times100 $$
+
+Example:
+100M → 125M:
+
+$$ +25\% $$
+
+Rank: highest percentage growth first.
+
+Purpose: scale-neutral population growth comparison.
+
+Secondary display:
+
+$$ CAGR= \left(\frac{P_E}{P_S}\right)^{1/(E-S)}-1 $$
+
+Example: +25% over 10 years → ~2.25%/year.
+
+Period convention
+
+Because Population is a stock:
+
+Annual: selected year.
+
+Period change: Start → End.
+
+Period % growth: Start → End.
+
+So:
+
+2004 → 2014 uses 2004 and 2014, not 2005–2014.
+
+That is the correct contrast with your flow families.
+
+In one sentence
+
+Population gets 3 bases: annual size, absolute Start→End change, and relative Start→End growth; CAGR is a display form of the third, not a fourth basis.
+
+That keeps Population simple while still preventing the two major methodological errors: summing population across years as though it were a flow, and confusing absolute demographic change with relative population growth.

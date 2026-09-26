@@ -67,6 +67,8 @@ import { buildFxMovement, listFxCountryGroups, FX_ERROR_CODES } from './services
 import { isFxMetric, fxBasesForMetric, FX_BASIS_INFO as FX_BASIS_INFO_REF } from './domain/fxMovement.js';
 import { buildExternalMovement, listExternalCountryGroups, EXTERNAL_ERROR_CODES } from './services/externalMovementService.js';
 import { isExternalMetric, externalBasesForMetric, EXTERNAL_BASIS_INFO as EXTERNAL_BASIS_INFO_REF } from './domain/externalMovement.js';
+import { buildPopulationMovement, listPopulationCountryGroups, POPULATION_ERROR_CODES } from './services/populationMovementService.js';
+import { isPopulationMetric, populationBasesForMetric, POPULATION_BASIS_INFO as POPULATION_BASIS_INFO_REF } from './domain/populationMovement.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
 import {
   ensureDataPresent,
@@ -112,6 +114,8 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/fx/country-groups',
   '/api/movement/external',
   '/api/external/country-groups',
+  '/api/movement/population',
+  '/api/population/country-groups',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -137,6 +141,8 @@ export function methodologyBlock() {
       'FX-only canonical methodology (ExchangeRate/exchangerate.txt): annual level raw LCU per US$ (never ranked/benchmarked); annual change ((t/t-1)-1, DESC competition, frozen direction); period change ((E/S)-1 endpoints-only, DESC competition); CAGR display-only secondary. Benchmark = leave-one-out MEDIAN eligible-economy change; gap = country − median (pp). Positive = depreciation vs USD. Full precision. Missing t-1/t or S/E excludes. Nominal official bilateral vs USD only; no continuity metadata stored (no fabricated detectors).',
     externalMovement:
       'External-only canonical methodology (ExternalSector/externalsector.txt): CA annual/average/cumulative CA/GDP from CA+GDP legs (S+1..E, pp); reserves annual stock (USD, size-only), endpoint % change S/E (pp), annual import coverage R/Imports*12 (months); remittances annual/cumulative/average S+1..E (USD) + cumulative intensity ΣRemit/ΣGDP (pp). All DESC competition; per-basis frozen mean/median LOO benchmark (median: reserves stock/change, remittance levels; mean: ratios/coverage); gap = country − benchmark. Negative/zero are data. Full precision; strict completeness.',
+    populationMovement:
+      'Population-only canonical methodology (population/pop.txt): annual stock (raw, DESC, mean gap, people); endpoint absolute change E−S (DESC, mean gap, people); endpoint % growth (DESC, mean gap, pp) with display-only CAGR. Stock semantics: never summed/averaged/sequenced. Gap = country − mean (positive = above). Full precision; competition ranking (1,1,3). Missing endpoints exclude. Estimates, not headcounts; no welfare claims.',
   };
 }
 
@@ -930,6 +936,67 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
+  // ---------- Population movement (canonical 3-basis methodology) ----------
+  // Population-only: annual stock, endpoint absolute change, endpoint %
+  // growth with display-only CAGR. Stock semantics: never summed/averaged.
+  // Other families untouched.
+  app.get('/api/movement/population', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
+    if (!isPopulationMetric(metricKey)) {
+      throw httpError(
+        400,
+        `Metric "${metricKey}" is not a Population metric. Valid Population keys: population_total.`,
+        'INVALID_METRIC',
+      );
+    }
+    const yearA = parseYear(req.query.yearA, 'yearA');
+    const yearB = parseYear(req.query.yearB, 'yearB');
+    if (yearA === undefined || yearB === undefined) {
+      throw httpError(400, 'Both yearA and yearB are required for a Population movement comparison.', 'MISSING_YEAR');
+    }
+    const rawMid = req.query.yearMid ?? req.query.breaker ?? req.query.pointBreaker ?? req.query.mid;
+    let yearMid;
+    if (rawMid === undefined || rawMid === null || String(rawMid).trim() === '' || String(rawMid).trim().toLowerCase() === 'none') {
+      yearMid = undefined;
+    } else {
+      yearMid = parseYear(rawMid, 'yearMid');
+    }
+    const rawBasis = req.query.basis;
+    const basis = rawBasis === undefined || rawBasis === null || String(rawBasis).trim() === '' ? undefined : String(rawBasis).trim();
+    if (basis !== undefined && !populationBasesForMetric(metricKey).includes(basis)) {
+      throw httpError(
+        400,
+        `Unknown Population basis "${rawBasis}" for ${metricKey}. Valid: ${populationBasesForMetric(metricKey).join(', ')}.`,
+        'INVALID_BASIS',
+      );
+    }
+    const groupType = req.query.groupType ?? req.query.group_type ?? null;
+    const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
+    try {
+      const result = buildPopulationMovement(handle(), {
+        metricKey,
+        ...(basis !== undefined ? { basis } : {}),
+        yearA,
+        yearB,
+        ...(yearMid !== undefined ? { yearMid } : {}),
+        focusIso3: parseFocusCountry(handle(), req.query.country),
+        ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
+      });
+      res.json({ ...result, methodology: methodologyBlock() });
+    } catch (e) {
+      if (e && e.code && Object.values(POPULATION_ERROR_CODES).includes(e.code)) {
+        throw httpError(e.httpStatus ?? 400, e.message, e.code);
+      }
+      throw e;
+    }
+  }));
+
+  // ---------- Population country-group discovery (dynamic, no hardcoding) ----------
+  app.get('/api/population/country-groups', ah(async (req, res) => {
+    const result = listPopulationCountryGroups(handle());
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
   // ---------- coverage (+ changing-totals explanation) ----------
   app.get('/api/coverage', ah(async (req, res) => {
     const h = handle();
@@ -1101,6 +1168,8 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       ...(isFxMetric(key) ? { fxBases: fxBasesForMetric(key).map((b) => ({ ...FX_BASIS_INFO_REF[b] })) } : {}),
       // Additive External Sector basis catalog (does not alter frozen fields above).
       ...(isExternalMetric(key) ? { externalBases: externalBasesForMetric(key).map((b) => ({ ...EXTERNAL_BASIS_INFO_REF[b] })) } : {}),
+      // Additive Population basis catalog (does not alter frozen fields above).
+      ...(isPopulationMetric(key) ? { populationBases: populationBasesForMetric(key).map((b) => ({ ...POPULATION_BASIS_INFO_REF[b] })) } : {}),
     }));
     const defined = FUTURE_METRIC_KEYS.map((key) => ({
       ...describeMeasure(getDefinedMetric(key)),

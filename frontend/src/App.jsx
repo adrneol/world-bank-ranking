@@ -253,7 +253,8 @@ export default function App() {
       'res_annual_stock', 'res_period_change', 'res_import_coverage',
       'remit_annual_value', 'remit_period_cumulative', 'remit_period_average', 'remit_cumulative_intensity',
     ];
-    const basis = ['growth', 'period_total', 'period_average', ...PRICES_BASIS_IDS, ...TRADE_BASIS_IDS, ...CAPITAL_BASIS_IDS, ...FX_BASIS_IDS, ...EXTERNAL_BASIS_IDS].includes(filters.basis)
+    const POPULATION_BASIS_IDS = ['pop_annual_value', 'pop_period_change', 'pop_period_growth'];
+    const basis = ['growth', 'period_total', 'period_average', ...PRICES_BASIS_IDS, ...TRADE_BASIS_IDS, ...CAPITAL_BASIS_IDS, ...FX_BASIS_IDS, ...EXTERNAL_BASIS_IDS, ...POPULATION_BASIS_IDS].includes(filters.basis)
       ? filters.basis
       : 'level';
     // Focus country (Phase 1: generic focus abstraction, IND default).

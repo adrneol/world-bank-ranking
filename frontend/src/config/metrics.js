@@ -453,6 +453,22 @@ export function isExternalMetricKey(metricKey) {
   return Object.prototype.hasOwnProperty.call(EXTERNAL_BASES, metricKey);
 }
 
+/**
+ * Canonical Population bases (exactly 3; CAGR is display-only and
+ * intentionally NOT listed; no cumulative/average bases exist).
+ */
+export const POPULATION_BASES = Object.freeze({
+  population_total: Object.freeze([
+    Object.freeze({ id: 'pop_annual_value', label: 'Annual Population', available: true, disabledReason: null }),
+    Object.freeze({ id: 'pop_period_change', label: 'Period Population Change', available: true, disabledReason: null }),
+    Object.freeze({ id: 'pop_period_growth', label: 'Period Population Growth', available: true, disabledReason: null }),
+  ]),
+});
+
+export function isPopulationMetricKey(metricKey) {
+  return Object.prototype.hasOwnProperty.call(POPULATION_BASES, metricKey);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
   // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
   if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];
@@ -464,6 +480,8 @@ export function movementBases(metricKey, yearA = null, yearB = null) {
   if (isFxMetricKey(metricKey)) return FX_BASES[metricKey];
   // External Sector exposes ONLY its canonical subsets (3 / 3 / 4).
   if (isExternalMetricKey(metricKey)) return EXTERNAL_BASES[metricKey];
+  // Population exposes ONLY its 3 canonical bases (CAGR never listed).
+  if (isPopulationMetricKey(metricKey)) return POPULATION_BASES[metricKey];
   const caps = metricCapabilities(metricKey);
   const subject = subjectOf(metricKey);
   const isFlow = caps?.observationType === 'FLOW';
