@@ -57,6 +57,8 @@ import { buildIndiaYearlyRows } from './services/indiaYearly.js';
 import { runIntegrityChecks } from './services/integrity.js';
 import { buildRankVerification, normalizeNeighborCount } from './services/rankVerification.js';
 import { buildPeriodSummary } from './services/periodService.js';
+import { buildPricesMovement, listPriceCountryGroups, PRICES_ERROR_CODES } from './services/pricesMovementService.js';
+import { isPricesMetric, basesForMetric, PRICES_BASIS_INFO as PRICES_BASIS_INFO_REF } from './domain/pricesMovement.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
 import {
   ensureDataPresent,
@@ -92,6 +94,8 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/compare',
   '/api/groups/evaluate',
   '/api/periods/summary',
+  '/api/movement/prices',
+  '/api/prices/country-groups',
 ]);
 
 /** Shared methodology block for auditability (§20). */
@@ -107,6 +111,8 @@ export function methodologyBlock() {
     numericalRepresentation:
       'Observations are stored as SQLite REAL (IEEE-754 double, used for all comparisons and arithmetic — deterministic for a fixed snapshot) alongside value_raw TEXT (canonical decimal string, audit only). Nothing is rounded before calculation; formatting is presentation-only.',
     universeRule: describeUniverseRule(),
+    pricesMovement:
+      'Prices-only canonical methodology (prices/method-cpiindex.txt, prices/cpiInflationmethodology.txt, prices/gdpDeflator.txt): CPI Index 2 bases (annual raw, no rank; period endpoint change (E/S-1)*100, ASC competition rank); CPI Inflation 3 bases (annual raw; average S+1..E; cumulative prod(S+1..E)(1+r/100)-1, all ASC competition); GDP-deflator 3 bases (same structure). Observed/Like-for-like are universes, identical formulas. Benchmark=mean(other eligible), PP=benchmark-focus, focus excluded. Full precision; competition ranking (1,1,3). Missing required years invalidate the period (never zero-filled/interpolated). Country groups are dynamic WB classifications (income/region/lending); Developed/Developing/Underdeveloped labels are not in the authoritative data and are not exposed.',
   };
 }
 
@@ -594,6 +600,68 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
+  // ---------- Prices movement (canonical 8-basis methodology) ----------
+  // Prices-only: CPI Index (2 bases), CPI Inflation (3), GDP-deflator (3).
+  // Uses S+1..E for inflation/deflator average+cumulative and endpoint-only
+  // for CPI period change — never the generic [S,E) flow interval.
+  // GDP/GDP-per-capita paths are untouched.
+  app.get('/api/movement/prices', ah(async (req, res) => {
+    const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
+    if (!isPricesMetric(metricKey)) {
+      throw httpError(
+        400,
+        `Metric "${metricKey}" is not a Prices metric. Valid Prices keys: inflation_cpi_index, inflation_cpi, inflation_deflator.`,
+        'INVALID_METRIC',
+      );
+    }
+    const yearA = parseYear(req.query.yearA, 'yearA');
+    const yearB = parseYear(req.query.yearB, 'yearB');
+    if (yearA === undefined || yearB === undefined) {
+      throw httpError(400, 'Both yearA and yearB are required for a Prices movement comparison.', 'MISSING_YEAR');
+    }
+    const rawMid = req.query.yearMid ?? req.query.breaker ?? req.query.pointBreaker ?? req.query.mid;
+    let yearMid;
+    if (rawMid === undefined || rawMid === null || String(rawMid).trim() === '' || String(rawMid).trim().toLowerCase() === 'none') {
+      yearMid = undefined;
+    } else {
+      yearMid = parseYear(rawMid, 'yearMid');
+    }
+    const rawBasis = req.query.basis;
+    const basis = rawBasis === undefined || rawBasis === null || String(rawBasis).trim() === '' ? undefined : String(rawBasis).trim();
+    if (basis !== undefined && !basesForMetric(metricKey).includes(basis)) {
+      throw httpError(
+        400,
+        `Unknown Prices basis "${rawBasis}" for ${metricKey}. Valid: ${basesForMetric(metricKey).join(', ')}.`,
+        'INVALID_BASIS',
+      );
+    }
+    const groupType = req.query.groupType ?? req.query.group_type ?? null;
+    const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
+    try {
+      const result = buildPricesMovement(handle(), {
+        metricKey,
+        ...(basis !== undefined ? { basis } : {}),
+        yearA,
+        yearB,
+        ...(yearMid !== undefined ? { yearMid } : {}),
+        focusIso3: parseFocusCountry(handle(), req.query.country),
+        ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
+      });
+      res.json({ ...result, methodology: methodologyBlock() });
+    } catch (e) {
+      if (e && e.code && Object.values(PRICES_ERROR_CODES).includes(e.code)) {
+        throw httpError(e.httpStatus ?? 400, e.message, e.code);
+      }
+      throw e;
+    }
+  }));
+
+  // ---------- Prices country-group discovery (dynamic, no hardcoding) ----------
+  app.get('/api/prices/country-groups', ah(async (req, res) => {
+    const result = listPriceCountryGroups(handle());
+    res.json({ ...result, methodology: methodologyBlock() });
+  }));
+
   // ---------- coverage (+ changing-totals explanation) ----------
   app.get('/api/coverage', ah(async (req, res) => {
     const h = handle();
@@ -755,6 +823,8 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       lifecycle: 'PRODUCTION',
       productionEnabled: true,
       ingested: isIngested(key),
+      // Additive Prices basis catalog (does not alter frozen fields above).
+      ...(isPricesMetric(key) ? { pricesBases: basesForMetric(key).map((b) => ({ ...PRICES_BASIS_INFO_REF[b] })) } : {}),
     }));
     const defined = FUTURE_METRIC_KEYS.map((key) => ({
       ...describeMeasure(getDefinedMetric(key)),

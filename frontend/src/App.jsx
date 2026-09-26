@@ -230,11 +230,18 @@ export default function App() {
         if (rawMid > lo && rawMid < hi) yearMid = rawMid;
       }
     }
-    // Rank-movement analysis basis: level value (default), endpoint
-    // growth, or flow period total/average. Unknown values fall back to
-    // level; unsupported combinations fail closed at the backend with a
-    // reason instead of rendering wrong numbers.
-    const basis = ['growth', 'period_total', 'period_average'].includes(filters.basis) ? filters.basis : 'level';
+    // Rank-movement analysis basis: generic level/growth/period for GDP
+    // and flows; canonical Prices bases (2+3+3 metric-specific) for Prices.
+    // Unknown values fall back to level; unsupported combinations fail
+    // closed at the backend with a reason instead of wrong numbers.
+    const PRICES_BASIS_IDS = [
+      'cpi_index_annual', 'cpi_index_period_change',
+      'cpi_inflation_annual', 'cpi_inflation_average', 'cpi_inflation_cumulative',
+      'deflator_annual', 'deflator_average', 'deflator_cumulative',
+    ];
+    const basis = ['growth', 'period_total', 'period_average', ...PRICES_BASIS_IDS].includes(filters.basis)
+      ? filters.basis
+      : 'level';
     // Focus country (Phase 1: generic focus abstraction, IND default).
     // Omitted/invalid URL values resolve to IND; only a valid explicit ISO3
     // selects another country. The display name comes from backend metadata.

@@ -120,6 +120,23 @@ export const api = {
   // strict SUM/AVG over [startYear, endYear) for the focus entity.
   periodSummary: ({ indicator, startYear, endYear, operation, country } = {}, options) =>
     get('/api/periods/summary', { indicator, startYear, endYear, operation, country }, options),
+  // Canonical Prices movement (8 metric-specific bases; backend-authoritative).
+  pricesMovement: ({ indicator, metric, basis, yearA, yearB, yearMid, country, groupType, group } = {}, options) =>
+    get(
+      '/api/movement/prices',
+      {
+        indicator: indicator ?? metric,
+        basis,
+        yearA,
+        yearB,
+        ...(yearMid !== undefined && yearMid !== null && String(yearMid).toLowerCase() !== 'none' ? { yearMid } : {}),
+        country,
+        ...(groupType ? { groupType } : {}),
+        ...(group ? { group } : {}),
+      },
+      options,
+    ),
+  priceGroups: (options) => get('/api/prices/country-groups', {}, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>

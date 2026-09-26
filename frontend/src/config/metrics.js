@@ -345,7 +345,31 @@ export function supportsGroupValues(metricKey) {
  * multi-year endpoint percent is Period endpoint change, flows get
  * endpoint/period-total/period-average as distinct modes.
  */
+/** Canonical Prices bases (metric-specific, never a shared list of 8). */
+export const PRICES_BASES = Object.freeze({
+  inflation_cpi_index: Object.freeze([
+    Object.freeze({ id: 'cpi_index_annual', label: 'Annual CPI index', available: true, disabledReason: null }),
+    Object.freeze({ id: 'cpi_index_period_change', label: 'Period CPI change (%)', available: true, disabledReason: null }),
+  ]),
+  inflation_cpi: Object.freeze([
+    Object.freeze({ id: 'cpi_inflation_annual', label: 'Annual CPI inflation (%)', available: true, disabledReason: null }),
+    Object.freeze({ id: 'cpi_inflation_average', label: 'Average annual CPI inflation (%)', available: true, disabledReason: null }),
+    Object.freeze({ id: 'cpi_inflation_cumulative', label: 'Cumulative CPI inflation (%)', available: true, disabledReason: null }),
+  ]),
+  inflation_deflator: Object.freeze([
+    Object.freeze({ id: 'deflator_annual', label: 'Annual GDP-deflator inflation (%)', available: true, disabledReason: null }),
+    Object.freeze({ id: 'deflator_average', label: 'Average annual GDP-deflator inflation (%)', available: true, disabledReason: null }),
+    Object.freeze({ id: 'deflator_cumulative', label: 'Cumulative GDP-deflator inflation (%)', available: true, disabledReason: null }),
+  ]),
+});
+
+export function isPricesMetricKey(metricKey) {
+  return Object.prototype.hasOwnProperty.call(PRICES_BASES, metricKey);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
+  // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
+  if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];
   const caps = metricCapabilities(metricKey);
   const subject = subjectOf(metricKey);
   const isFlow = caps?.observationType === 'FLOW';

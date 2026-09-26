@@ -1,0 +1,760 @@
+CPI Index — Final Methodology Specification
+1. Metric
+
+World Bank indicator
+
+FP.CPI.TOTL
+
+Name
+
+Consumer price index (2010 = 100)
+
+Unit
+
+Index, 2010 = 100
+
+Frequency
+
+Annual
+
+Important interpretation
+
+The CPI index is not a currency amount and not "the price of something."
+
+It is an index of the prices of consumer goods and services relative to the reference period 2010 = 100. The WDI metadata states that the data are annual and that the CPI observations are period averages.
+
+Therefore:
+
+India 2004 = 63.4
+
+means:
+
+India's consumer-price index in 2004 was 63.4 on the index scale whose 2010 reference point is 100.
+
+It does not mean prices were ₹63.4.
+
+Similarly:
+
+India 2014 = 139.9
+India 2024 = 227.6
+
+means the consumer-price level was much higher relative to India's 2010 reference level.
+
+The index can go down. If a country's CPI index falls from 227 to 220, its measured consumer-price level fell between those annual observations.
+
+2. Critical methodological distinction
+
+There are two very different things:
+
+CPI index level
+
+"What is the country's CPI index in this year?"
+
+CPI period change
+
+"By how much did the country's CPI index increase or decrease between these two years?"
+
+Only the second one should be used for the cross-country performance ranking.
+
+Do not rank countries by raw CPI-index level.
+
+This is because CPI is primarily a time-series measure within each country, and the World Bank cautions that CPI indexes are less useful for direct cross-country comparison.
+
+So your CPI Index metric should have exactly two primary bases.
+
+3. Basis 1 — Annual CPI Index Level
+User-facing name
+
+Annual CPI index
+
+Description
+
+Consumer price index for the selected year, with 2010 = 100. Higher values indicate a higher consumer-price level relative to the country's 2010 reference period.
+
+But I would make the description even more explicit:
+
+This is an index level, not a currency amount. It is intended primarily for observing change within a country over time, not for ranking countries by the raw index level.
+
+Calculation
+
+No transformation.
+
+For selected year \(t\):
+
+$$ CPILevel_{i,t}=CPI_{i,t} $$
+
+where \(i\) is the country.
+
+If Start + Middle + End are selected
+
+Show the raw values separately.
+
+For India:
+
+2004   63.4
+2014   139.9
+2024   227.6
+
+Do not calculate a "level rank."
+
+Do not calculate "India vs world CPI level."
+
+Do not average raw CPI index levels across countries and call that a world CPI.
+
+Absolute change should still be shown
+
+Although there is no cross-country rank for the level itself, absolute index-point movement is valid as a descriptive statistic.
+
+2004 → 2014
+$$ 139.9-63.4=+76.5 $$
+
+Display:
+
+Index change: +76.5 points
+
+2014 → 2024
+$$ 227.6-139.9=+87.7 $$
+2004 → 2024
+$$ 227.6-63.4=+164.2 $$
+
+I recommend calling this "Index-point change", not just "absolute change," because users could otherwise think it is a monetary amount.
+
+4. Why there is no rank for Basis 1
+
+This should be explicit in the UI.
+
+Something like:
+
+Cross-country ranking unavailable for this basis. CPI index levels are designed primarily to measure price changes within a country and are not suitable as a direct cross-country price-level ranking.
+
+That is methodologically stronger than inventing a rank merely because the frontend normally expects one.
+
+The World Bank itself says CPI indexes are useful for measuring consumer-price inflation within a country but are of less value for comparing countries.
+
+So:
+
+Annual CPI index
+      ↓
+Raw values
+      ↓
+Index-point changes
+      ↓
+NO cross-country rank
+5. Basis 2 — Period CPI Change (%)
+
+This is the main analytical and ranking basis.
+
+User-facing name
+
+Period CPI change (%)
+
+Alternative:
+
+Consumer-price change (%)
+
+I prefer:
+
+Period CPI change (%)
+
+because users immediately see that this is calculated over the selected period.
+
+Description
+
+Percentage change in the country's CPI index between the beginning and ending years. Lower values mean a smaller increase in consumer prices over the period.
+
+6. Formula
+
+For country \(i\), from start year \(S\) to end year \(E\):
+
+$$ CPIChange_i = \frac{CPI_{i,E}-CPI_{i,S}} {CPI_{i,S}} \times100 $$
+
+Equivalent:
+
+$$ CPIChange_i = \left( \frac{CPI_{i,E}} {CPI_{i,S}}-1 \right)\times100 $$
+
+This is the percentage increase/decrease in that country's CPI index between the two selected annual observations.
+
+7. Example using your India data
+
+From your screenshot:
+
+2004 = 63.4
+2014 = 139.9
+2024 = 227.6
+2004 → 2014
+$$ \frac{139.9-63.4}{63.4}\times100 $$
+
+≈ +120.66%
+
+2014 → 2024
+$$ \frac{227.6-139.9}{139.9}\times100 $$
+
+≈ +62.62%
+
+2004 → 2024
+$$ \frac{227.6-63.4}{63.4}\times100 $$
+
+≈ +258.99%
+
+These are cumulative CPI-index changes over the respective endpoint intervals. They are not annualized.
+
+That distinction should be visible in the UI:
+
+Period change — not annualized
+
+8. Start / Middle / End behavior
+
+Your three-year architecture remains exactly as you designed it.
+
+With:
+
+Start = 2004
+Middle = 2014
+End = 2024
+
+the system creates three analytical intervals:
+
+2004 → 2014
+2014 → 2024
+2004 → 2024
+
+The first two are the two decade comparisons.
+
+The third is the full selected span and is useful as additional context.
+
+For CPI change:
+
+Period 1 = CPI(2014) / CPI(2004) - 1
+
+Period 2 = CPI(2024) / CPI(2014) - 1
+
+Full period = CPI(2024) / CPI(2004) - 1
+
+No annualization.
+
+No averaging of the endpoint values.
+
+9. Observed universe
+
+This follows your definition exactly.
+
+Observed 2004 → 2014
+
+Eligible countries are those with valid CPI observations in:
+
+2004
+AND
+2014
+
+Suppose:
+
+208 economies
+
+Then calculate the period CPI change independently for every one of those 208 economies.
+
+Observed 2014 → 2024
+
+Eligible countries are those with valid CPI observations in:
+
+2014
+AND
+2024
+
+Suppose:
+
+200 economies
+
+Then calculate the period CPI change independently for those 200.
+
+The two observed universes do not have to contain the same countries.
+
+That is exactly the reason you have an Observed comparison category.
+
+10. Like-for-like universe
+
+For three selected years:
+
+2004
+2014
+2024
+
+take:
+
+$$ Eligible = Valid_{2004} \cap Valid_{2014} \cap Valid_{2024} $$
+
+Suppose this produces:
+
+197 economies
+
+Then:
+
+Like-for-like 2004 → 2014
+
+Use the same 197.
+
+Like-for-like 2014 → 2024
+
+Use the same 197.
+
+Like-for-like 2004 → 2024
+
+Also the same 197.
+
+This makes the two decade comparisons directly comparable with the same country universe.
+
+11. Country-group filter
+
+I think your idea here is useful, but it needs to be implemented carefully.
+
+Your filter should work like:
+
+All economies
+Candidate pool = all eligible economies
+Same group as focus country
+Candidate pool =
+economies belonging to the same
+documented country group as focus country
+
+Then after applying the group restriction, apply the period-validity rule.
+
+So for India:
+
+Focus country = India
+Group = whatever classification your site defines
+
+Observed 2004→2014:
+same-group countries
+        +
+valid CPI in 2004
+        +
+valid CPI in 2014
+
+And for 2014→2024:
+
+same-group countries
+        +
+valid CPI in 2014
+        +
+valid CPI in 2024
+
+For like-for-like:
+
+same-group countries
+        +
+valid CPI in 2004
+        +
+valid CPI in 2014
+        +
+valid CPI in 2024
+Important
+
+Do not create your own economic classification logic inside this methodology.
+
+Use the project's existing country-classification registry if one already exists.
+
+And don't call the resulting benchmark "world" when the filter is active.
+
+Use:
+
+Other economies in selected country group
+
+12. The benchmark
+
+Now we get to the special part of your methodology.
+
+Suppose your observed 2004→2014 universe contains:
+
+Country A = 2%
+Country B = 3%
+Country C = 6%
+India     = 5%
+Country E = 7%
+
+For India, exclude India itself.
+
+So:
+
+$$ OtherAverage = \frac{2+3+6+7}{4} =4.5\% $$
+
+India:
+
+$$ 5\% $$
+
+Therefore:
+
+$$ RelativeGap = 4.5-5 = -0.5 $$
+
+So India had:
+
+0.50 percentage points higher CPI growth than the average of the other eligible economies.
+
+If India had 4%:
+
+$$ 4.5-4=+0.5 $$
+
+Then:
+
+0.50 percentage points lower CPI growth than the average of the other eligible economies.
+
+That is the benchmark you are describing.
+
+13. Name the benchmark correctly
+
+Don't display:
+
+World inflation = 4.5%
+
+because that would imply an actual global CPI aggregation.
+
+Instead:
+
+All-economy mode
+
+Average CPI change of other eligible economies
+
+Country-group mode
+
+Average CPI change of other eligible economies in the selected group
+
+Then:
+
+India vs other-economy average: −0.50 percentage points
+
+This is precise.
+
+14. Ranking methodology
+
+For every eligible country, calculate its own period CPI change:
+
+$$ g_i= \frac{CPI_{i,E}}{CPI_{i,S}}-1 $$
+
+Then calculate its leave-one-out benchmark:
+
+$$ B_i = \frac{\sum_{j\neq i}g_j}{N-1} $$
+
+Then calculate the country's relative position:
+
+$$ Score_i=B_i-g_i $$
+
+Interpretation:
+
+Positive score = country's CPI increased less than the other-economy average.
+Zero = country's CPI change equals the other-economy average.
+Negative score = country's CPI increased more than the other-economy average.
+15. Rank direction
+
+For this metric:
+
+Lower CPI growth is the better position on this specific price-stability measure.
+
+Therefore:
+
+$$ Rank\ 1 = \text{lowest CPI period change} $$
+
+and not highest.
+
+So if:
+
+Country A = 0%
+Country B = 2%
+Country C = 4%
+Country D = 5%
+Country E = 7%
+
+then:
+
+A → #1
+B → #2
+C → #3
+D → #4
+E → #5
+
+Use wording such as:
+
+Ranked by lower cumulative consumer-price increase
+
+rather than:
+
+"best economy."
+
+That keeps the metric from making a broader economic judgment.
+
+16. Important mathematical fact about your ranking design
+
+There is a useful property here.
+
+If:
+
+$$ B_i= \frac{\sum_{j\neq i}g_j}{N-1} $$
+
+then:
+
+$$ Score_i=B_i-g_i $$
+
+is mathematically monotonic with \(-g_i\).
+
+That means:
+
+Ranking by the highest positive leave-one-out gap produces the same ordering as ranking countries by the lowest CPI period change.
+
+So your proposed methodology is internally consistent.
+
+The benchmark provides context:
+
+"India was 1.0 percentage point below the other-economy average."
+
+The actual ranking tells you:
+
+"India was #40/200."
+
+You don't need two different ranking algorithms.
+
+17. Rank calculation should use unrounded values
+
+Very important for implementation.
+
+Suppose the UI shows:
+
+India = 5.43%
+Country B = 5.44%
+
+but the underlying values are:
+
+India = 5.431827...
+Country B = 5.431912...
+
+Rank using the full backend numerical value, not the displayed rounded value.
+
+Only round for presentation.
+
+Otherwise you can generate artificial ties or inconsistent ranks.
+
+18. Tie handling
+
+I recommend:
+
+Competition ranking
+
+Example:
+
+0.00% → #1
+0.00% → #1
+0.50% → #3
+1.00% → #4
+
+Denominator remains total eligible economies.
+
+Do not break economically identical results using country names just to force unique ranks.
+
+The UI can say:
+
+#1 / 200
+
+for tied countries.
+
+19. Focus-country benchmark
+
+For India specifically:
+
+Suppose 200 observed economies qualify.
+
+India = 5%
+
+Other 199 average = 6%
+
+Then:
+
+India: 5.00%
+
+Other-economy average: 6.00%
+
+Relative gap: +1.00 percentage point
+
+Observed rank: #40 / 200
+
+The benchmark calculation must exclude India itself.
+
+This is important because otherwise India's own result slightly contaminates the benchmark.
+
+For like-for-like, if there are 180 economies:
+
+India: 5%
+
+Other 179 average: 5.8%
+
+Gap: +0.8 pp
+
+Rank: #35 / 180
+
+20. Do the same independently for each period
+
+Do not calculate one combined ranking for the two decades.
+
+You need:
+
+Observed
+2004 → 2014
+Universe = valid 2004 & 2014
+Rank India within that universe
+
+
+2014 → 2024
+Universe = valid 2014 & 2024
+Rank India within that universe
+Like-for-like
+2004 → 2014
+Universe = valid 2004 & 2014 & 2024
+Rank India within that same universe
+
+
+2014 → 2024
+Universe = valid 2004 & 2014 & 2024
+Rank India within that same universe
+
+This gives precisely the comparison you described.
+
+21. Your three comparison results
+
+For the selected:
+
+2004 / 2014 / 2024
+
+the UI can therefore produce:
+
+2004 → 2014
+India's CPI change
+Other-economy average
+India vs average
+Observed rank
+Observed N
+
+Like-for-like India change
+Like-for-like average
+India vs average
+Like-for-like rank
+Like-for-like N
+2014 → 2024
+
+Same structure.
+
+2004 → 2024
+
+Same structure.
+
+The 2004→2024 result is useful as the full-span context, but the two decade results are the primary comparison.
+
+22. What should NOT be calculated
+
+For CPI Index, explicitly prohibit:
+
+❌ Cross-country ranking by raw CPI level
+
+Example:
+
+India CPI = 139.9, rank #50
+
+Don't do it.
+
+❌ Global average of raw CPI index values
+
+Don't calculate:
+
+$$ mean(CPI_{India}, CPI_{China}, CPI_{US},...) $$
+
+and call that world CPI.
+
+❌ Period total
+
+Don't calculate:
+
+$$ CPI_{2004}+CPI_{2005}+...+CPI_{2014} $$
+
+CPI is an index/level, not a flow.
+
+❌ Period average as the main comparative basis
+
+You could mathematically calculate an average CPI index over the decade, but that isn't the useful research question for this Movement system.
+
+❌ Annualizing the period change
+
+Do not turn:
+
++120.66%
+
+into an annualized number for this basis.
+
+Your purpose here is specifically:
+
+2004→2014 vs 2014→2024
+
+so keep the endpoint period change non-annualized.
+
+23. One thing I would change in your wording
+
+Your current frontend appears to use generic terms such as:
+
+"Period endpoint change"
+
+For CPI index, use a metric-specific label:
+
+Basis
+
+Period CPI change (%)
+
+Description
+
+Percentage change in the consumer price index between the selected start and end years; not annualized.
+
+For the benchmark:
+
+Relative gap vs other economies
+
+Difference between the focus country's period CPI change and the average period CPI change of all other eligible economies.
+
+And because lower CPI growth represents smaller consumer-price increases:
+
+Positive gap = lower CPI increase than the benchmark.
+
+That is much easier for a researcher to understand.
+
+24. Final CPI Index specification
+
+This is the version I would freeze before touching code:
+
+Component	Method
+Raw metric	World Bank FP.CPI.TOTL
+Metric meaning	Consumer-price index, 2010=100
+Frequency	Annual
+Basis 1	Annual CPI index
+Basis 1 calculation	Raw WDI value
+Basis 1 absolute change	CPI_end − CPI_start
+Basis 1 cross-country rank	None
+Basis 2	Period CPI change (%)
+Basis 2 formula	(CPI_end / CPI_start − 1) × 100
+Direction	Lower period change = better position on this metric
+Ranking	Lowest period CPI change gets rank 1
+Observed 1	Valid start + middle observations
+Observed 2	Valid middle + end observations
+Like-for-like	Valid start + middle + end
+Country filter	All economies or focus-country's documented group
+Benchmark	Mean period CPI change of other eligible economies
+Benchmark exclusion	Focus country excluded
+Relative gap	other-economy average − focus-country change
+Rank basis	Leave-one-out benchmark gap, mathematically equivalent to lowest CPI change ordering
+Rank denominator	Number of eligible economies in that exact universe
+Rounding for rank	Never; use full precision
+Tie rule	Competition ranking
+Period total	Not valid
+Period average CPI	Not a primary Movement basis
+Annualized change	Not used
+One final methodological point
+
+Your country-group filter is useful, but don't describe it as solving the fundamental cross-country comparability issue of CPI. It solves a different problem: it lets the researcher ask a narrower question such as:
+
+"How did India's consumer-price growth compare with economies in the same selected group?"
+
+That's a valid analytical extension.
+
+The underlying CPI comparison is still based on each country's within-country period change, which is much more defensible than comparing raw CPI index levels. The World Bank's own metadata supports this distinction.
+
+So for CPI Index, I would now consider the methodology sufficiently defined to give to the coding agent. The next metric, CPI inflation, should be designed separately rather than automatically inheriting this basis, because the World Bank defines that series itself as an annual percentage change in consumer prices.
