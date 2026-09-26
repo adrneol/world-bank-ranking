@@ -469,6 +469,24 @@ export function isPopulationMetricKey(metricKey) {
   return Object.prototype.hasOwnProperty.call(POPULATION_BASES, metricKey);
 }
 
+/**
+ * Selectable Movement bases for one metric: ONLY the bases the backend
+ * capability metadata declares as available. Unsupported options are never
+ * rendered (no disabled placeholders, no "not defined" rows) — an invalid
+ * combination can still arrive via URL/deep-link, and the backend remains
+ * authoritative by failing closed with a reason. Data-driven: option
+ * availability derives from the hydrated backend registry, never from
+ * per-component conditionals.
+ */
+export function movementBasisOptions(metricKey, yearA = null, yearB = null) {
+  return movementBases(metricKey, yearA, yearB).filter((b) => b.available);
+}
+
+/** True when `basis` is a selectable Movement basis for `metricKey`. */
+export function isMovementBasisAvailable(metricKey, basis, yearA = null, yearB = null) {
+  return movementBasisOptions(metricKey, yearA, yearB).some((b) => b.id === basis);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
   // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
   if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];

@@ -53,15 +53,19 @@ export function SearchableSelect({
   const buttonRef = useRef(null);
   const inputRef = useRef(null);
   const listId = useId();
+  // Flatten once per options identity: option arrays are rebuilt by callers,
+  // so every derived list below reads this single memoized flattening
+  // instead of re-walking the tree on each render.
+  const flat = useMemo(() => flattenOptions(options), [options]);
   const selected = useMemo(
-    () => flattenOptions(options).map((r) => r.item).find((item) => item && item.value === value) ?? null,
-    [options, value],
+    () => flat.map((r) => r.item).find((item) => item && item.value === value) ?? null,
+    [flat, value],
   );
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return flattenOptions(options).filter((row) => row.header !== undefined || matchesQuery(row.item, q));
-  }, [options, query]);
+    return flat.filter((row) => row.header !== undefined || matchesQuery(row.item, q));
+  }, [flat, query]);
   const navigable = useMemo(() => rows.filter((row) => row.item && !row.item.disabled), [rows]);
   // Clamp navigation into the visible list during render (no reset effect):
   // the active index always resolves to a visible option.
@@ -82,7 +86,7 @@ export function SearchableSelect({
     if (open) inputRef.current?.focus();
   }, [open ]);
 
-  const showFilter = searchable && flattenOptions(options).filter((r) => r.item).length > minFilter;
+  const showFilter = searchable && flat.filter((r) => r.item).length > minFilter;
 
   function commit(item) {
     if (!item || item.disabled) return;
@@ -208,13 +212,18 @@ export function SearchableSelect({
                   }
                   const navIndex = navigable.indexOf(item);
                   const active = navIndex === safeIndex;
+                  const selectedRow = item.value === value;
                   return (
                     <li
                       key={item.value}
                       id={`${listId}-opt-${navIndex}`}
-                      className={active ? 'combo-option combo-option-active' : 'combo-option'}
+                      className={[
+                        'combo-option',
+                        active ? 'combo-option-active' : '',
+                        selectedRow ? 'combo-option-selected' : '',
+                      ].filter(Boolean).join(' ')}
                       role="option"
-                      aria-selected={item.value === value}
+                      aria-selected={selectedRow}
                       onMouseDown={(event) => {
                         // Commit before blur/click-outside can close the list.
                         event.preventDefault();
@@ -222,9 +231,9 @@ export function SearchableSelect({
                       }}
                       onMouseEnter={() => setActiveIndex(navIndex)}
                     >
-                      <span>{item.label}</span>
+                      <span className="combo-label">{item.label}</span>
                       {item.hint ? <span className="combo-option-note">{item.hint}</span> : null}
-                      {item.value === value ? (
+                      {selectedRow ? (
                         <span className="combo-check" aria-hidden="true">
                           ✓
                         </span>

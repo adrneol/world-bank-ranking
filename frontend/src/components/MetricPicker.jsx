@@ -8,26 +8,34 @@
  * its valid analyses.
  */
 
-import { SUBJECTS, metricLabel } from '../config/metrics.js';
+import { useMemo } from 'react';
+import { SUBJECTS, activeRegistryVersion, metricLabel } from '../config/metrics.js';
 import { SearchableSelect } from './controls.jsx';
 
-export default function MetricPicker({ id, label = 'Metric', value, onChange, hint = null, operationsByMetric = null }) {
-  // No useMemo here by design: the option list must always reflect the live
-  // registry. A memoized list went stale after hydrateRegistry() swapped
-  // SUBJECTS (first-load missing-metrics bug); twenty items recompute
-  // trivially every render, and hydration propagates through App's
-  // registryVersion state re-render.
-  const options = Object.values(SUBJECTS).map((subject) => ({
-    group: subject.label,
-    items: subject.metricKeys.map((key) => {
-      const ops = operationsByMetric?.[key];
-      return {
-        value: key,
-        label: metricLabel(key),
-        hint: ops && ops.length > 0 ? ops.map((o) => o.label).join(' · ') : undefined,
-      };
-    }),
-  }));
+export default function MetricPicker({ id, label = 'Metric', value, onChange, hint = null, operationsByMetric = null, subject = null }) {
+  // Family-scoped when `subject` names an analysis subject: only that
+  // subject's metrics are offered (data-driven via the hydrated registry).
+  // Memoized on the registry generation so hydration swaps propagate on the
+  // next App re-render without rebuilding the list on every render.
+  const version = activeRegistryVersion();
+  const options = useMemo(() => {
+    const subjects = subject && SUBJECTS[subject] ? [SUBJECTS[subject]] : Object.values(SUBJECTS);
+    const built = [];
+    for (const s of subjects) {
+      const items = [];
+      for (const key of s.metricKeys) {
+        const ops = operationsByMetric?.[key];
+        items.push({
+          value: key,
+          label: metricLabel(key),
+          hint: ops && ops.length > 0 ? ops.map((o) => o.label).join(' · ') : undefined,
+        });
+      }
+      built.push({ group: s.label, items });
+    }
+    return built;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subject, version, operationsByMetric]);
 
   return (
     <SearchableSelect

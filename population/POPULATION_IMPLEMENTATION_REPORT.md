@@ -53,8 +53,9 @@ pre-existing refresh-auth env test, byte-identical); frontend lint 0
 errors, build OK; all prior families green, paths untouched.
 
 ## 11. Specification checks
-SP.POP.TOTL confirmed; stock enforced; 3 bases; CAGR secondary-only;
-no cumulative/average/sequence contamination; endpoint logic; LFL
-intersection; dynamic groups; DESC competition; full precision; mean
-benchmark; focus excluded; gaps exact; missing≠zero; declines preserved;
-N=1/N=2 correct (unit); oracles green.
+SP.POP.TOTL confirmed; stock enforced; 3 bases; annual/
+change/growth correct; CAGR secondary-only; no cumulative/average/sequence;
+endpoints; annual eligibility; LFL intersection; dynamic groups;
+group-first; DESC competition; full precision; mean benchmark; focus
+excluded; gaps exact; missing≠zero; declines preserved; N=1/N=2 correct;
+full oracles green.

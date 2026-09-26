@@ -7,12 +7,12 @@
  * recalculates the universe or the decomposition.
  */
 
-import { Fragment, useCallback, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
 import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import SlopeChart from '../components/charts/SlopeChart.jsx';
-import { METRICS, SUBJECTS, isCapitalMetricKey, isExternalMetricKey, isFxMetricKey, isPopulationMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
+import { METRICS, SUBJECTS, activeRegistryVersion, isCapitalMetricKey, isExternalMetricKey, isFxMetricKey, isPopulationMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBasisOptions, subjectOf } from '../config/metrics.js';
 import PricesMovement from './PricesMovement.jsx';
 import TradeMovement from './TradeMovement.jsx';
 import CapitalMovement from './CapitalMovement.jsx';
@@ -53,12 +53,27 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
   const subject = subjectOf(metricKey);
-  // Analysis bases come from backend capability metadata (movementBases):
-  // level always; growth only where YOY is declared; period total/average
-  // only where the registry declares SUM/AVG. Labels match the actual
-  // calculation — consecutive-year growth reads Annual YoY, multi-year
-  // endpoint percent reads Period endpoint change (Rule A).
-  const basisOptions = movementBases(metricKey, yearA, yearB);
+  // Selectable analysis bases come from backend capability metadata via
+  // movementBasisOptions(): ONLY available bases are rendered — never
+  // disabled placeholders. Labels match the actual calculation —
+  // consecutive-year growth reads Annual YoY, multi-year endpoint percent
+  // reads Period endpoint change (Rule A). A stale/invalid basis (URL,
+  // metric switch) resets to the first available option; the backend
+  // remains authoritative by failing closed on anything else.
+  // Memoized on the registry generation so hydration swaps propagate once
+  // instead of rebuilding option lists on every render.
+  const registryVersion = activeRegistryVersion();
+  const basisOptions = useMemo(
+    () => movementBasisOptions(metricKey, yearA, yearB),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [metricKey, yearA, yearB, registryVersion],
+  );
+  useEffect(() => {
+    if (!basisOptions.some((b) => b.id === basis)) {
+      onBasis?.(basisOptions[0]?.id ?? 'level');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metricKey]);
   return (
     <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Comparison controls">
       <FocusPicker countries={countries} value={country} onChange={(v) => onCountry?.(v)} id="mv-country" />
@@ -72,17 +87,12 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
           onMetric(next.includes(metricKey) ? metricKey : next[0]);
         }}
       />
-      <MetricPicker id="mv-metric" label="Metric" value={metricKey} onChange={onMetric} />
+      <MetricPicker id="mv-metric" label="Metric" value={metricKey} onChange={onMetric} subject={subject} />
       <SearchableSelect
         id="mv-basis"
         label="Basis"
         value={basis}
-        options={basisOptions.map((b) => ({
-          value: b.id,
-          label: b.label,
-          disabled: !b.available,
-          disabledReason: b.available ? undefined : b.disabledReason,
-        }))}
+        options={basisOptions.map((b) => ({ value: b.id, label: b.label }))}
         onChange={onBasis}
       />
       <SearchableSelect
@@ -1104,10 +1114,32 @@ function ThreeYearResults({ data }) {
     return { base: sorted, page, pages, pageSize, slice: sorted.slice((page - 1) * pageSize, page * pageSize) };
   })();
 
+  // Focus level values across the three selected years, straight from the
+  // backend analytical rows (same observations that produced the ranks).
+  // Rendered only when the focus economy holds a finite value every year.
+  const focusRow3 = (data.economies?.rows ?? []).find((r) => r.iso3 === data.focus?.iso3) ?? null;
+  const focusValues3 = [y.a, y.mid, y.b]
+    .map((year, i) => ({ year, value: [focusRow3?.valueA, focusRow3?.valueMid, focusRow3?.valueB][i] }))
+    .filter((p) => typeof p.value === 'number' && Number.isFinite(p.value));
+  const decimals3 = metricDecimals(data.metric?.key);
+
   return (
     <>
       <h3 className="subhead">What happened to India&apos;s position number?</h3>
       <SummaryCards3 data={data} />
+      {focusValues3.length === 3 ? (
+        <ChartCard
+          title={`${data.focus?.name ?? 'Focus'} level value, ${y.a} to ${y.mid} to ${y.b}`}
+          unit={data.metric?.unit}
+          summary={`${data.focus?.name ?? 'Focus'} level values ${focusValues3.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
+        >
+          <BarComparisonChart
+            entries={focusValues3.map((p) => ({ name: String(p.year), value: p.value }))}
+            unit={data.metric?.unit}
+            decimals={decimals3}
+          />
+        </ChartCard>
+      ) : null}
       <div className="explanation" role="note" aria-label="Result in words">
         <StorySentence3 data={data} />
       </div>
@@ -3233,6 +3265,29 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                 />
               </ChartCard>
             ) : null}
+            {(() => {
+              // Focus level values for the two selected years, straight from
+              // the backend analytical rows (same observations as the ranks).
+              const focusRow = (data.economies?.rows ?? []).find((r) => r.iso3 === data.focus?.iso3) ?? null;
+              const points = [
+                { year: data.years.a, value: focusRow?.valueA },
+                { year: data.years.b, value: focusRow?.valueB },
+              ].filter((p) => typeof p.value === 'number' && Number.isFinite(p.value));
+              if (points.length !== 2) return null;
+              return (
+                <ChartCard
+                  title={`${focusName} level value, ${data.years.a} vs ${data.years.b}`}
+                  unit={data.metric?.unit}
+                  summary={`${focusName} level values ${points.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
+                >
+                  <BarComparisonChart
+                    entries={points.map((p) => ({ name: String(p.year), value: p.value }))}
+                    unit={data.metric?.unit}
+                    decimals={metricDecimals(metricKey)}
+                  />
+                </ChartCard>
+              );
+            })()}
             <div className="explanation" role="note" aria-label="Result in words">
               <StorySentence data={data} />
             </div>

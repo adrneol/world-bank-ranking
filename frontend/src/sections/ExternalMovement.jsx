@@ -25,7 +25,7 @@ import { Field, MethodologyPanel, Pagination, StatusBlock, UnavailableState } fr
 import FocusPicker from '../components/FocusPicker.jsx';
 import MetricPicker from '../components/MetricPicker.jsx';
 import { SearchableSelect } from '../components/controls.jsx';
-import { metricKeysForSubject, movementBases, subjectOf } from '../config/metrics.js';
+import { metricKeysForSubject, movementBases, movementBasisOptions, subjectOf } from '../config/metrics.js';
 import { SUBJECTS } from '../config/metrics.js';
 
 function fmt(v, decimals) {
@@ -166,7 +166,7 @@ export function ExternalMovementControls({ availableYears, yearA, yearB, yearMid
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
   const subject = subjectOf(metricKey);
-  const basisOptions = movementBases(metricKey, yearA, yearB);
+  const basisOptions = movementBasisOptions(metricKey, yearA, yearB);
   useEffect(() => {
     if (!basisOptions.some((b) => b.id === basis)) {
       onBasis?.(basisOptions[0]?.id);
@@ -202,12 +202,12 @@ export function ExternalMovementControls({ availableYears, yearA, yearB, yearMid
           onMetric(next.includes(metricKey) ? metricKey : next[0]);
         }}
       />
-      <MetricPicker id="mv-metric" label="Metric" value={metricKey} onChange={onMetric} />
+      <MetricPicker id="mv-metric" label="Metric" value={metricKey} onChange={onMetric} subject={subject} />
       <SearchableSelect
         id="mv-basis"
         label="Basis"
         value={basis}
-        options={basisOptions.map((b) => ({ value: b.id, label: b.label, disabled: !b.available, disabledReason: b.available ? undefined : b.disabledReason }))}
+        options={basisOptions.map((b) => ({ value: b.id, label: b.label }))}
         onChange={onBasis}
       />
       <SearchableSelect
