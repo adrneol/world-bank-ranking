@@ -219,7 +219,9 @@ function buildPeriodResult({ values, focusIso3, basisId, requiredYears, periodLa
         }
       : null,
     focusAvailable: Boolean(focusRow),
-    ranking: ranked.map((r) => ({ iso3: r.iso3, value: r.value, rank: r.rank })),
+    // Additive display field only: names were already resolved server-side
+    // (nameByIso); no value, rank, universe or benchmark is recalculated.
+    ranking: ranked.map((r) => ({ iso3: r.iso3, name: r.name ?? nameByIso.get(r.iso3) ?? null, value: r.value, rank: r.rank })),
     benchmarkUniverse: loo.computable ? { peerCount: loo.peerCount } : null,
     _names: nameByIso,
   };
@@ -263,7 +265,8 @@ function buildAnnualResult({ values, focusIso3, basisId, year }) {
         }
       : null,
     focusAvailable: Boolean(focusRow),
-    ranking: ranked.map((r) => ({ iso3: r.iso3, value: r.value, rank: r.rank })),
+    // Additive display field only (see buildPeriodResult); no recalculation.
+    ranking: ranked.map((r) => ({ iso3: r.iso3, name: r.name ?? null, value: r.value, rank: r.rank })),
   };
 }
 
