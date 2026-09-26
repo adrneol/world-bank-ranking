@@ -387,11 +387,35 @@ export function isTradeMetricKey(metricKey) {
   return Object.prototype.hasOwnProperty.call(TRADE_BASES, metricKey);
 }
 
+/**
+ * Canonical Capital Flow bases (metric-specific, 3 + 3 ranked).
+ * Endpoint diagnostics (Δ flow, Δ ratio) are intentionally NOT listed:
+ * they are unranked descriptive companions, never primary bases.
+ */
+export const CAPITAL_BASES = Object.freeze({
+  fdi_inflows: Object.freeze([
+    Object.freeze({ id: 'fdi_annual_value', label: 'Annual net FDI', available: true, disabledReason: null }),
+    Object.freeze({ id: 'fdi_period_cumulative', label: 'Cumulative net FDI', available: true, disabledReason: null }),
+    Object.freeze({ id: 'fdi_period_average', label: 'Average annual net FDI', available: true, disabledReason: null }),
+  ]),
+  fdi_inflows_pct_gdp: Object.freeze([
+    Object.freeze({ id: 'fdigdp_annual_value', label: 'Annual FDI (% of GDP)', available: true, disabledReason: null }),
+    Object.freeze({ id: 'fdigdp_period_average', label: 'Average annual FDI (% of GDP)', available: true, disabledReason: null }),
+    Object.freeze({ id: 'fdigdp_period_cumulative_share', label: 'Cumulative FDI / cumulative GDP', available: true, disabledReason: null }),
+  ]),
+});
+
+export function isCapitalMetricKey(metricKey) {
+  return Object.prototype.hasOwnProperty.call(CAPITAL_BASES, metricKey);
+}
+
 export function movementBases(metricKey, yearA = null, yearB = null) {
   // Prices metrics expose ONLY their own approved subset (2 / 3 / 3).
   if (isPricesMetricKey(metricKey)) return PRICES_BASES[metricKey];
   // Trade metrics expose ONLY their own approved subset (4 / 4).
   if (isTradeMetricKey(metricKey)) return TRADE_BASES[metricKey];
+  // Capital Flow metrics expose ONLY their own approved subset (3 / 3 ranked).
+  if (isCapitalMetricKey(metricKey)) return CAPITAL_BASES[metricKey];
   const caps = metricCapabilities(metricKey);
   const subject = subjectOf(metricKey);
   const isFlow = caps?.observationType === 'FLOW';

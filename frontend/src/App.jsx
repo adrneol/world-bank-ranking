@@ -243,7 +243,11 @@ export default function App() {
       'exp_annual_value', 'exp_period_cagr', 'exp_period_total', 'exp_period_average',
       'imp_annual_value', 'imp_period_cagr', 'imp_period_total', 'imp_period_average',
     ];
-    const basis = ['growth', 'period_total', 'period_average', ...PRICES_BASIS_IDS, ...TRADE_BASIS_IDS].includes(filters.basis)
+    const CAPITAL_BASIS_IDS = [
+      'fdi_annual_value', 'fdi_period_cumulative', 'fdi_period_average',
+      'fdigdp_annual_value', 'fdigdp_period_average', 'fdigdp_period_cumulative_share',
+    ];
+    const basis = ['growth', 'period_total', 'period_average', ...PRICES_BASIS_IDS, ...TRADE_BASIS_IDS, ...CAPITAL_BASIS_IDS].includes(filters.basis)
       ? filters.basis
       : 'level';
     // Focus country (Phase 1: generic focus abstraction, IND default).

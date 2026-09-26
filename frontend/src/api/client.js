@@ -154,6 +154,23 @@ export const api = {
       options,
     ),
   tradeGroups: (options) => get('/api/trade/country-groups', {}, options),
+  // Canonical Capital Flow movement (3+3 ranked bases; backend-authoritative).
+  capitalMovement: ({ indicator, metric, basis, yearA, yearB, yearMid, country, groupType, group } = {}, options) =>
+    get(
+      '/api/movement/capital',
+      {
+        indicator: indicator ?? metric,
+        basis,
+        yearA,
+        yearB,
+        ...(yearMid !== undefined && yearMid !== null && String(yearMid).toLowerCase() !== 'none' ? { yearMid } : {}),
+        country,
+        ...(groupType ? { groupType } : {}),
+        ...(group ? { group } : {}),
+      },
+      options,
+    ),
+  capitalGroups: (options) => get('/api/capital/country-groups', {}, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>
