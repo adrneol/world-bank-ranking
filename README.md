@@ -380,7 +380,7 @@ this project has none to configure.
 
 ## Testing
 
-- Backend: `npm test` in `backend/` — 359 tests covering configuration,
+- Backend: `npm test` in `backend/` — 568 tests covering configuration,
   subject/metric registry (twenty metrics, semantic metadata, lifecycle),
   country universe, ranking, ties, denominators, YoY,
   YoY ranking, pagination, search (text and exact-rank), World Bank client
@@ -407,11 +407,26 @@ Bank on every frontend request. Data is refreshed when the database is empty
 background refresh, guarded so concurrent requests share one run), or
 manually via `POST /api/data/refresh`. Without explicit years a refresh
 fetches the historical ingest range (defaults 1960 through the current
-calendar year) for all eight indicators, storing only what the World Bank
+calendar year) for all production metrics, storing only what the World Bank
 returns. Refresh state, lock state, and recent runs are visible through
 `GET /api/data-status`. A failed refresh is recorded
 and the previous valid dataset keeps serving; automatic retries back off
 instead of looping.
+
+Deployment model: a single backend writer owns each database file (one
+`node` server process per `data/worldbank.db`; the CLI ingest scripts are
+the only other writer and must never run concurrently with the server).
+The SQLite refresh lock serializes refreshes across these local processes,
+and server boot recovers a lock left behind by a crashed holder.
+Multi-host or multi-writer shared-database deployment is intentionally
+unsupported — there is no distributed lease by design.
+
+Freshness is retrieval-time, not publication-triggered: the TTL window
+(default 24 h via `CACHE_TTL_HOURS`) runs from the last successful
+retrieval. A newly published World Bank vintage is picked up by the next
+refresh after TTL expiry, or immediately via manual refresh. The actual
+World Bank vintage behind each analysis is always visible in API responses
+(`vintage` / `wbLastUpdated` evidence) and in the UI next to every result.
 
 ## Source / Methodology
 
