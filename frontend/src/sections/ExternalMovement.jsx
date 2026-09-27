@@ -864,11 +864,15 @@ export default function ExternalMovement({ availableYears, yearA, yearB, yearMid
         onGroupValue={setGroupValue}
         onSwap={() => { if (yearA != null && yearB != null) { onYearA(yearB); onYearB(yearA); } }}
       />
-      {sameYear ? <StatusBlock title="Select two different years" message="Start and end years must differ for a Movement comparison." /> : null}
-      {loading ? <StatusBlock title="Loading External Sector analysis…" message="Fetching backend-calculated values." /> : null}
-      {error ? (
-        <StatusBlock title="External Sector analysis unavailable" message={error.message} action={{ label: 'Retry', onClick: retry }} />
-      ) : null}
+      {sameYear ? (
+        <StatusBlock
+          empty
+          emptyText="Start and end years must differ for a Movement comparison."
+          sectionName="External Sector analysis"
+        />
+      ) : (
+        <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="External Sector analysis" />
+      )}
       {!loading && !error && data && !data.available ? (
         <UnavailableState reason={data.reason} hint="Required World Bank data are incomplete for the selected comparison." />
       ) : null}

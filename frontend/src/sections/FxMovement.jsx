@@ -817,11 +817,15 @@ export default function FxMovement({ availableYears, yearA, yearB, yearMid = nul
       <p className="card-unit">
         Exchange Rate · Official FX vs USD · Nominal official exchange-rate movement vs USD.
       </p>
-      {sameYear ? <StatusBlock title="Select two different years" message="Start and end years must differ for a Movement comparison." /> : null}
-      {loading ? <StatusBlock title="Loading Exchange Rate analysis…" message="Fetching backend-calculated values." /> : null}
-      {error ? (
-        <StatusBlock title="Exchange Rate analysis unavailable" message={error.message} action={{ label: 'Retry', onClick: retry }} />
-      ) : null}
+      {sameYear ? (
+        <StatusBlock
+          empty
+          emptyText="Start and end years must differ for a Movement comparison."
+          sectionName="Exchange Rate analysis"
+        />
+      ) : (
+        <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="Exchange Rate analysis" />
+      )}
       {!loading && !error && data && !data.available ? (
         <UnavailableState reason={data.reason} hint="Required World Bank data are incomplete for the selected comparison." />
       ) : null}

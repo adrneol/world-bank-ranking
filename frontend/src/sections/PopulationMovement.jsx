@@ -841,11 +841,15 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
         onGroupValue={setGroupValue}
         onSwap={() => { if (yearA != null && yearB != null) { onYearA(yearB); onYearB(yearA); } }}
       />
-      {sameYear ? <StatusBlock title="Select two different years" message="Start and end years must differ for a Movement comparison." /> : null}
-      {loading ? <StatusBlock title="Loading Population analysis…" message="Fetching backend-calculated values." /> : null}
-      {error ? (
-        <StatusBlock title="Population analysis unavailable" message={error.message} action={{ label: 'Retry', onClick: retry }} />
-      ) : null}
+      {sameYear ? (
+        <StatusBlock
+          empty
+          emptyText="Start and end years must differ for a Movement comparison."
+          sectionName="Population analysis"
+        />
+      ) : (
+        <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="Population analysis" />
+      )}
       {!loading && !error && data && !data.available ? (
         <UnavailableState reason={data.reason} hint="Required World Bank data are incomplete for the selected comparison." />
       ) : null}
