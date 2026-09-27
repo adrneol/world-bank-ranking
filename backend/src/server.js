@@ -38,6 +38,7 @@ import {
   countAllCountries,
   countEligibleCountries,
   getCountry,
+  getDatasetFingerprint,
   getIndicatorByMetricKey,
   getObservation,
   getObservedCountryIds,
@@ -55,6 +56,7 @@ import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from '.
 import { buildFullRanking } from './services/fullRanking.js';
 import { buildIndiaYearlyRows } from './services/indiaYearly.js';
 import { runIntegrityChecks } from './services/integrity.js';
+import { getCachedIntegrity, integrityCacheKey, resetIntegrityCache } from './services/statusCache.js';
 import { buildRankVerification, normalizeNeighborCount } from './services/rankVerification.js';
 import { buildPeriodSummary } from './services/periodService.js';
 import { buildPricesMovement, listPriceCountryGroups, PRICES_ERROR_CODES } from './services/pricesMovementService.js';
@@ -1197,10 +1199,28 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     } catch {
       lock = null;
     }
+    // Dataset fingerprint: identifies the published refresh generation
+    // (latest success run). Additive and read-only; lets already-open UIs
+    // detect a background TTL refresh completion without re-fetching data
+    // blindly, and keys the integrity memo below.
+    let fingerprint = null;
+    try {
+      fingerprint = getDatasetFingerprint(h);
+    } catch {
+      fingerprint = null;
+    }
+    // Integrity is memoized by refresh generation (R-12): the published
+    // dataset only changes inside a successful publish transaction, which
+    // always advances the fingerprint. Rapid polls within one generation
+    // reuse the verified report instead of rescanning full tables.
+    // /api/integrity below stays uncached (explicit on-demand validation).
     let integrity = null;
     try {
-      const report = runIntegrityChecks(h);
-      integrity = { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
+      const key = integrityCacheKey(fingerprint);
+      integrity = getCachedIntegrity(key, () => {
+        const report = runIntegrityChecks(h);
+        return { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
+      }).report;
     } catch (error) {
       integrity = { passed: false, error: error.message };
     }
@@ -1210,6 +1230,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       progress: getIngestProgress(),
       lock,
       integrity,
+      fingerprint,
       autoRefresh: {
         enabled: autoRefreshEnabled,
         ttlHours: cache.ttlHours,

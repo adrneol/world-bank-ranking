@@ -8,8 +8,9 @@
  * is backend-calculated; this shell holds UI state only.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api/client.js';
+import { fingerprintOf, isNewerGeneration } from './utils/refreshGeneration.js';
 import {
   COMPARE_OPERATIONS,
   SUBJECTS,
@@ -349,6 +350,11 @@ export default function App() {
     }));
   }, []);
 
+  // Adopted refresh generation (R-04): the fingerprint of the dataset the
+  // visible views were built from. Declared before handleRefreshed so the
+  // manual-refresh path can adopt the new generation without rediscovery.
+  const knownGeneration = useRef(null);
+
   const handleRefreshed = useCallback((summary) => {
     // The notice lives here (above the remounted <main>) so it survives the
     // data remount. Re-derive years (a newer vintage may extend the range)
@@ -361,12 +367,80 @@ export default function App() {
           ? `Refresh #${summary.runId} partially completed — some indicators failed, so nothing was published. The previous dataset remains active.`
           : `Refresh #${summary.runId} succeeded — ${summary.rowsUpserted} observations upserted (World Bank vintage ${summary.wbLastUpdated ?? 'unknown'}).`,
       );
+      // A successful manual refresh advances the published generation: adopt
+      // it so the background watcher below does not "rediscover" it.
+      if (summary.status === 'success' && summary.runId != null) {
+        knownGeneration.current = { runId: summary.runId, lastSuccessAt: null, maxFetchedAt: null, observationCount: null };
+      }
     }
     setDataVersion((v) => v + 1);
   }, []);
 
+  // Background TTL-refresh revalidation (R-04): GET /api/data-status is
+  // side-effect free (excluded from auto-refresh triggers), so polling it can
+  // never start a refresh or duplicate one. When its fingerprint advances
+  // past the adopted generation — i.e. an automatic background refresh
+  // published a newer dataset while this tab was open — remount data views
+  // exactly like a manual refresh does. No economics here: the fingerprint is
+  // a backend-provided identity, and revalidation re-reads backend results.
   const filtersReady = !yearsLoading && !yearsError && availableYears.length > 0;
   const view = effective.view;
+
+  // Background TTL-refresh revalidation (R-04): GET /api/data-status is
+  // side-effect free (excluded from auto-refresh triggers), so polling it can
+  // never start a refresh or duplicate one. When its fingerprint advances
+  // past the adopted generation — i.e. an automatic background refresh
+  // published a newer dataset while this tab was open — remount data views
+  // exactly like a manual refresh does. No economics here: the fingerprint is
+  // a backend-provided identity, and revalidation re-reads backend results.
+  useEffect(() => {
+    // Adopt, don't revalidate, until the app has real data on screen: the
+    // first observation only records the baseline generation.
+    if (!filtersReady) return undefined;
+    let cancelled = false;
+    let timer = null;
+    const check = async () => {
+      if (cancelled || document.hidden) return;
+      let status = null;
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+          status = await api.dataStatus({ signal: controller.signal, timeoutMs: 15000 });
+        } finally {
+          clearTimeout(timeout);
+        }
+      } catch {
+        return; // Background watcher never surfaces errors; the views' own fetches report them.
+      }
+      if (cancelled) return;
+      const next = fingerprintOf(status);
+      if (!next || (next.runId === null && !next.lastSuccessAt)) return;
+      const prev = knownGeneration.current;
+      if (!prev) {
+        knownGeneration.current = next;
+        return;
+      }
+      if (isNewerGeneration(prev, next)) {
+        knownGeneration.current = next;
+        setRefreshNotice(
+          `Background refresh published a newer dataset${next.runId != null ? ` (run #${next.runId})` : ''} — all views were updated automatically.`,
+        );
+        setDataVersion((v) => v + 1);
+      }
+    };
+    // Stagger the first check so it never races initial page-load fetches.
+    timer = setTimeout(function tick() {
+      if (cancelled) return;
+      check().finally(() => {
+        if (!cancelled) timer = setTimeout(tick, 60000);
+      });
+    }, 30000);
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [filtersReady]);
 
   return (
     <div className="app">

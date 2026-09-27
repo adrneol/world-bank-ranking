@@ -2,9 +2,15 @@
  * Centralized backend API client.
  *
  * The ONLY place that knows endpoint URLs. It handles the base URL
- * (VITE_API_BASE_URL, same-origin fallback), JSON parsing, HTTP errors and
- * abort signals. It never calculates ranks, YoY values, denominators or
- * coverage — it only transports backend-calculated results.
+ * (VITE_API_BASE_URL, same-origin fallback), JSON parsing, HTTP errors,
+ * abort signals and bounded request timeouts. It never calculates ranks,
+ * YoY values, denominators or coverage — it only transports
+ * backend-calculated results.
+ *
+ * Every request is bounded (default 30 s, per-call `timeoutMs` override):
+ * a hung backend produces a distinct retryable TIMEOUT ApiError, never an
+ * eternally pending promise. Caller aborts (filter changes, unmount, manual
+ * retry) keep native AbortError semantics.
  */
 
 // Precedence: explicit VITE_API_BASE_URL (local override or production)
@@ -12,7 +18,31 @@
 // same-origin API in deployments that serve both from one host). Trailing
 // slashes and surrounding whitespace are stripped so neither
 // "<base>//api/years" nor "<base>api/years" can be constructed.
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
+// The optional chaining keeps this module importable outside Vite (e.g.
+// Node-based contract tests where import.meta.env is undefined); browser
+// behavior is unchanged.
+let baseUrlOverride = null;
+const BASE_URL = (import.meta.env?.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
+
+function resolveBaseUrl() {
+  return baseUrlOverride ?? BASE_URL;
+}
+
+/**
+ * Test seam (and advanced embedding override): point the client at an
+ * explicit base URL. Production code never calls this; the build-time
+ * VITE_API_BASE_URL remains the only production mechanism.
+ */
+export function setApiBaseUrl(url) {
+  baseUrlOverride = typeof url === 'string' && url.trim() !== '' ? url.trim().replace(/\/+$/, '') : null;
+}
+
+/**
+ * Default bound for one backend request (ms). Slow first responses
+ * (cold-starting hosts, saturated networks) must surface as a distinct,
+ * retryable TIMEOUT error — never as infinite loading.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
 export class ApiError extends Error {
   constructor(message, { status = null, code = null } = {}) {
@@ -30,21 +60,56 @@ function buildUrl(path, params = {}) {
     query.set(key, String(value));
   }
   const suffix = query.toString();
-  return `${BASE_URL}${path}${suffix ? `?${suffix}` : ''}`;
+  return `${resolveBaseUrl()}${path}${suffix ? `?${suffix}` : ''}`;
 }
 
-async function request(path, { params = {}, signal = null, method = 'GET', body = null } = {}) {
+async function request(
+  path,
+  { params = {}, signal = null, method = 'GET', body = null, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {},
+) {
+  // Compose the caller's AbortSignal (filter changes, unmount, manual retry)
+  // with a bounded timeout so a hung backend can never leave the UI in
+  // loading forever. Caller aborts keep AbortError semantics; only the
+  // timeout produces the distinct TIMEOUT ApiError.
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer = null;
+  const onCallerAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else if (typeof signal.addEventListener === 'function') {
+      signal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+  }
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new DOMException('Request timed out', 'TimeoutError'));
+    }, timeoutMs);
+  }
   let response;
   try {
     response = await fetch(buildUrl(path, method === 'GET' ? params : {}), {
       method,
-      signal,
+      signal: controller.signal,
       headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch (error) {
+    if (timedOut || error?.name === 'TimeoutError') {
+      throw new ApiError(
+        `The backend is taking longer than expected (HTTP ${method} ${path} exceeded ${timeoutMs} ms). It may be warming up — retry shortly.`,
+        { code: 'TIMEOUT' },
+      );
+    }
     if (error?.name === 'AbortError') throw error;
     throw new ApiError('Could not reach the backend. Is the API server running?', { code: 'NETWORK_ERROR' });
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    if (signal && typeof signal.removeEventListener === 'function') {
+      signal.removeEventListener('abort', onCallerAbort);
+    }
   }
 
   let payload = null;

@@ -3,12 +3,28 @@
  * Freshness, vintage, lock state and integrity come from GET /api/data-status;
  * manual refresh POSTs /api/data/refresh. While a refresh runs, the section
  * polls for progress and disables duplicate submissions.
+ *
+ * Phase 1 reliability (R-02/R-07): the status request is bounded (a hung or
+ * cold-starting backend surfaces a distinct, retryable TIMEOUT instead of
+ * infinite loading); a slow first load shows a "warming up" hint with an
+ * inline retry after 10 s; status polling starts the moment a manual refresh
+ * is kicked off — not only after the minutes-long POST resolves — so
+ * backend progress.stage streams while the refresh runs.
  */
 
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
+
+/** Full refreshes stream dozens of indicator payloads; bound the POST at 10 min. */
+const REFRESH_POST_TIMEOUT_MS = 10 * 60 * 1000;
+/** Status reads stay tolerant of cold starts, but never unbounded. */
+const STATUS_TIMEOUT_MS = 45000;
+/** After this long with no status response, say so instead of spinning quietly. */
+const SLOW_LOAD_HINT_MS = 10000;
+/** Status poll cadence while a refresh is running. */
+const PROGRESS_POLL_MS = 2000;
 
 function ageText(ageHours) {
   if (ageHours === null || ageHours === undefined) return 'unknown';
@@ -20,23 +36,58 @@ function ageText(ageHours) {
 export default function DataStatus({ onRefreshed }) {
   const [refreshState, setRefreshState] = useState({ running: false, error: null });
   const [pollToken, setPollToken] = useState(0);
-  const { data, loading, error, retry } = useApi((signal) => api.dataStatus({ signal }), `datastatus:${pollToken}`);
+  // Slow-first-load hint (R-02): independent of the fetch itself, so a hung
+  // request still explains itself instead of spinning silently forever.
+  const [slowLoad, setSlowLoad] = useState(false);
+  const { data, loading, error, retry } = useApi(
+    (signal) => api.dataStatus({ signal, timeoutMs: STATUS_TIMEOUT_MS }),
+    `datastatus:${pollToken}`,
+  );
 
+  // Bump the status poll and clear a stale slow-load hint. All pollToken
+  // changes flow through here so the warming hint always restarts cleanly.
+  // Called only from event/async contexts (never synchronously in an effect).
+  const bumpPoll = () => {
+    setSlowLoad(false);
+    setPollToken((t) => t + 1);
+  };
+  const retryWhileLoading = () => {
+    setSlowLoad(false);
+    retry();
+  };
   const inProgress = Boolean(data?.inProgress);
+  // Poll while the backend is refreshing OR while our own manual POST is in
+  // flight (R-07): the POST resolves only when the whole refresh completes,
+  // so gating on `inProgress` alone would show no progress until the end.
+  const polling = inProgress || refreshState.running;
 
   useEffect(() => {
-    if (!inProgress) return undefined;
-    const timer = setTimeout(() => setPollToken((t) => t + 1), 2000);
+    if (!loading) return undefined;
+    const timer = setTimeout(() => setSlowLoad(true), SLOW_LOAD_HINT_MS);
     return () => clearTimeout(timer);
-  }, [inProgress, pollToken]);
+  }, [loading, pollToken]);
+
+  useEffect(() => {
+    if (!polling) return undefined;
+    const timer = setTimeout(() => bumpPoll(), PROGRESS_POLL_MS);
+    return () => clearTimeout(timer);
+    // bumpPoll is stable in practice (no deps); including it would restart
+    // the cadence needlessly on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polling, pollToken]);
 
   async function startRefresh() {
     if (refreshState.running) return;
     setRefreshState({ running: true, error: null });
+    // Start polling immediately so backend progress.stage streams while the
+    // awaited POST below runs (it resolves only at refresh completion).
+    // No duplicate refresh can start: the button disables, the backend
+    // serializes on its refresh lock (409), and the POST is never retried.
+    bumpPoll();
     try {
-      const summary = await api.refresh({});
+      const summary = await api.refresh({}, { timeoutMs: REFRESH_POST_TIMEOUT_MS });
       setRefreshState({ running: false, error: null });
-      setPollToken((t) => t + 1);
+      bumpPoll();
       // The success notice lives in App state (outside the remounted <main>),
       // otherwise the data remount below would wipe it instantly.
       onRefreshed?.(summary);
@@ -46,7 +97,7 @@ export default function DataStatus({ onRefreshed }) {
           ? 'A refresh is already running — no duplicate was started.'
           : 'The previous valid dataset remains available.';
       setRefreshState({ running: false, error: `${refreshError?.message ?? 'Refresh failed.'} ${failedNote}` });
-      setPollToken((t) => t + 1);
+      bumpPoll();
     }
   }
 
@@ -73,7 +124,19 @@ export default function DataStatus({ onRefreshed }) {
         ) : null
       }
     >
-      <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="data status" />
+      <StatusBlock loading={loading && !slowLoad} error={error} empty={false} onRetry={retry} sectionName="data status" />
+      {loading && slowLoad && !error ? (
+        <div className="status status-loading" role="status">
+          <p>
+            Still loading data status — the API is taking longer than expected
+            (it may be warming up after a cold start). You can wait or try again;
+            no data has been changed.
+          </p>
+          <button type="button" className="btn btn-secondary" onClick={retryWhileLoading}>
+            Retry now
+          </button>
+        </div>
+      ) : null}
       {!loading && !error && data ? (
         <>
           <dl className="facts facts-grid">

@@ -331,6 +331,23 @@ VITE_API_BASE_URL=https://your-backend.example.com
 Configure the actual backend URL as a build/deploy environment variable,
 e.g. in Vercel for both Preview and Production.) No source-code change is
 needed to switch between the local backend and a deployed backend.
+Do not commit a real backend URL to any tracked file: local-only
+`frontend/.env` / `frontend/.env.local` are git-ignored conveniences, and
+`vite dev` always uses the local proxy regardless (see below).
+
+The backend refuses to start in `NODE_ENV=production` unless the deployment
+environment provides:
+
+```text
+REFRESH_ADMIN_TOKEN=<random-secret>   # required: locks POST /api/data/refresh
+CORS_ORIGINS=https://your-frontend.example.com  # required: exact-match allowlist, comma-separated, no wildcards
+```
+
+CORS is never `*`: only exact origins listed in `CORS_ORIGINS` receive
+`Access-Control-Allow-Origin`, and requests without an `Origin` header
+(curl, server-to-server) keep working. Serve the frontend and backend from
+one host when a separate CORS setup is unwanted — an empty
+`VITE_API_BASE_URL` (relative `/api`) then needs no allowlist entry.
 
 ## Environment Variables
 
@@ -350,6 +367,8 @@ always uses the Vite `/api` proxy even when a local (untracked)
 back to a local untracked `frontend/.env` and then to relative `/api`.
 Local-only files (`.env`, `.env.local`) are never committed.
 | `PORT` | backend | API listen port (default 3001). |
+| `REFRESH_ADMIN_TOKEN` | backend | Bearer token for `POST /api/data/refresh`. Empty = open (local dev/tests only). Production refuses to start without it. Never logged or returned. |
+| `CORS_ORIGINS` | backend | Exact-match allowed frontend origins, comma-separated, no wildcards. Unset = permissive dev default. Production refuses to start without it. |
 | `CACHE_TTL_HOURS` | backend | Cache freshness window (default 24). |
 | `DATABASE_FILE` | backend | SQLite file (default `data/worldbank.db`). |
 | `DEFAULT_START_YEAR` / `DEFAULT_END_YEAR` | backend | Default analysis parameters (currently 2000 / 2025). The available-year selector remains data-driven and is derived from stored World Bank observations. |
