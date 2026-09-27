@@ -20,6 +20,7 @@ import { entityDisplayName, entityToSpec, parseEntitySpecString } from '../compo
 import MetricPicker from '../components/MetricPicker.jsx';
 import { SearchableSelect } from '../components/controls.jsx';
 import {
+  ChartDataFallback,
   EmptyState,
   EntityBadge,
   MethodologyPanel,
@@ -371,32 +372,51 @@ function Trajectory({ entityA, entityB, metricKey, yearA, yearB, countryNames, o
   const summary = `${title} — annual stored observations, ${sampled[0]} to ${sampled[sampled.length - 1]}`;
   if (sampled.length === 2) {
     const at = (rows, year) => rows.find((r) => r.year === year)?.value ?? null;
+    const cell = (v) => (v === null || v === undefined ? '—' : formatValuePlain(v, metricKey));
     return (
+      <>
+        <ChartCard title={title} unit={unit} summary={summary}>
+          <SlopeChart
+            items={[
+              { label: labelA, start: at(data.aRows, sampled[0]), end: at(data.aRows, sampled[1]) },
+              { label: labelB, start: at(data.bRows, sampled[0]), end: at(data.bRows, sampled[1]) },
+            ]}
+            startLabel={String(sampled[0])}
+            endLabel={String(sampled[1])}
+            unit={unit}
+            decimals={decimals}
+          />
+        </ChartCard>
+        <ChartDataFallback
+          label="trajectory endpoint values"
+          regionName="Trajectory endpoint stored observations"
+          columns={[{ header: 'Year' }, { header: labelA }, { header: labelB }]}
+          rows={sampled.map((year) => [String(year), cell(at(data.aRows, year)), cell(at(data.bRows, year))])}
+        />
+      </>
+    );
+  }
+  const point = (rows, year) => rows.find((r) => r.year === year)?.value ?? null;
+  const cell = (v) => (v === null || v === undefined ? '—' : formatValuePlain(v, metricKey));
+  return (
+    <>
       <ChartCard title={title} unit={unit} summary={summary}>
-        <SlopeChart
-          items={[
-            { label: labelA, start: at(data.aRows, sampled[0]), end: at(data.aRows, sampled[1]) },
-            { label: labelB, start: at(data.bRows, sampled[0]), end: at(data.bRows, sampled[1]) },
+        <TimeSeriesChart
+          series={[
+            { label: labelA, points: data.aRows.map((r) => ({ x: r.year, y: r.value })) },
+            { label: labelB, points: data.bRows.map((r) => ({ x: r.year, y: r.value })) },
           ]}
-          startLabel={String(sampled[0])}
-          endLabel={String(sampled[1])}
           unit={unit}
           decimals={decimals}
         />
       </ChartCard>
-    );
-  }
-  return (
-    <ChartCard title={title} unit={unit} summary={summary}>
-      <TimeSeriesChart
-        series={[
-          { label: labelA, points: data.aRows.map((r) => ({ x: r.year, y: r.value })) },
-          { label: labelB, points: data.bRows.map((r) => ({ x: r.year, y: r.value })) },
-        ]}
-        unit={unit}
-        decimals={decimals}
+      <ChartDataFallback
+        label="trajectory values"
+        regionName="Trajectory stored observations by year"
+        columns={[{ header: 'Year' }, { header: labelA }, { header: labelB }]}
+        rows={sampled.map((year) => [String(year), cell(point(data.aRows, year)), cell(point(data.bRows, year))])}
       />
-    </ChartCard>
+    </>
   );
 }
 

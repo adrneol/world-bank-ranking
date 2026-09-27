@@ -35,4 +35,16 @@ export function useIsNarrowChart() {
   return useMediaQuery(NARROW_CHART_QUERY);
 }
 
+/**
+ * Mobile-shell breakpoint for movement economy lists, matching the
+ * stylesheet's own mobile breakpoint (`@media (max-width: 40rem)`).
+ * Shared by RankMovement-style card shells (see MovementCards.jsx) so every
+ * family switches presentation at the same width.
+ */
+export const MOVEMENT_MOBILE_QUERY = '(max-width: 40rem)';
+
+export function useIsMobile() {
+  return useMediaQuery(MOVEMENT_MOBILE_QUERY);
+}
+
 export default useMediaQuery;

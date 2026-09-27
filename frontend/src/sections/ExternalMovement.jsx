@@ -22,6 +22,8 @@ import { isExternalMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
 import { Field, MethodologyPanel, Pagination, StatusBlock, UnavailableState } from '../components/ui.jsx';
+import { CardField, EconomyMobileList } from '../components/MovementCards.jsx';
+import { useIsMobile } from '../hooks/useMediaQuery.js';
 import FocusPicker from '../components/FocusPicker.jsx';
 import MetricPicker from '../components/MetricPicker.jsx';
 import { SearchableSelect } from '../components/controls.jsx';
@@ -438,6 +440,7 @@ function relationOf(rank, focusRank) {
 
 function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
   const tableId = useId();
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
   const [sort, setSort] = useState('rank-asc');
@@ -488,6 +491,25 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
     setPage(p);
   };
   const colCount = 4 + 2 * keys.length;
+  // Per-comparison rank/value details, shared verbatim by the desktop
+  // expandable row and the mobile card disclosure: one code path means the
+  // two presentations can never disagree on backend values.
+  const renderKeyDetails = (r) => (
+    <>
+      {keys.map((k) => (
+        <Fragment key={k}>
+          <div>
+            <dt>{k} rank</dt>
+            <dd className="num">{rankCell(r.perKey[k]?.rank)}</dd>
+          </div>
+          <div>
+            <dt>{k} value</dt>
+            <dd className="num">{cellValue(sec, r.perKey[k]?.value)}{unit && r.perKey[k]?.value != null ? ` ${unit}` : ''}</dd>
+          </div>
+        </Fragment>
+      ))}
+    </>
+  );
   return (
     <div>
       <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Common economy filters">
@@ -527,7 +549,36 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
         />
       </form>
       <p className="footnote">Filtering is presentation-only. Ranks and universes always come from the backend.</p>
-      <div className="table-scroll" role="region" aria-label="Common economies" tabIndex={0}>
+      {isMobile ? (
+        slice.length === 0 ? (
+          <p className="muted">None.</p>
+        ) : (
+          <EconomyMobileList
+            rows={slice}
+            rankOf={(r) => r.refRank}
+            caption="Common economies with like-for-like ranks and values"
+            focusIso={focusIso}
+            focusName={focusName}
+            renderSummary={(r) => (
+              <>
+                {keys.map((k) => (
+                  <Fragment key={k}>
+                    <CardField label={`${k} rank`} num>
+                      {rankCell(r.perKey[k]?.rank)}
+                    </CardField>
+                    <CardField label={`${k} value`} num>
+                      {cellValue(sec, r.perKey[k]?.value)}
+                    </CardField>
+                  </Fragment>
+                ))}
+                <CardField label={`vs ${focusName} (${refKey})`}>{r.relation}</CardField>
+              </>
+            )}
+            renderDetails={(r) => <dl className="dgrid">{renderKeyDetails(r)}</dl>}
+          />
+        )
+      ) : (
+        <div className="table-scroll" role="region" aria-label="Common economies" tabIndex={0}>
         <table className="table table-compact">
           <caption className="sr-only">Common economies with like-for-like ranks and values</caption>
           <thead>
@@ -577,20 +628,7 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
                   {open ? (
                     <tr className="details-row">
                       <td colSpan={colCount} id={detailId}>
-                        <dl className="dgrid">
-                          {keys.map((k) => (
-                            <Fragment key={k}>
-                              <div>
-                                <dt>{k} rank</dt>
-                                <dd className="num">{rankCell(r.perKey[k]?.rank)}</dd>
-                              </div>
-                              <div>
-                                <dt>{k} value</dt>
-                                <dd className="num">{cellValue(sec, r.perKey[k]?.value)}{unit && r.perKey[k]?.value != null ? ` ${unit}` : ''}</dd>
-                              </div>
-                            </Fragment>
-                          ))}
-                        </dl>
+                        <dl className="dgrid">{renderKeyDetails(r)}</dl>
                       </td>
                     </tr>
                   ) : null}
@@ -599,7 +637,8 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
             })}
           </tbody>
         </table>
-      </div>
+        </div>
+      )}
       <p className="footnote" aria-live="polite">
         Showing {slice.length} of {rows.length} ({commonRows.length} common economies) · page {safePage} of {pages}.
       </p>
@@ -622,6 +661,7 @@ function ExternalOutsideSection({ sets, basisId, focusIso, focusName, unit }) {
   const [relationFilter, setRelationFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const isMobile = useIsMobile();
   const { keys, obsByKey, outsideByKey, allOutside } = sets;
   const tabs = useMemo(() => ([
     { id: 'all', label: 'All', rows: allOutside },
@@ -695,7 +735,36 @@ function ExternalOutsideSection({ sets, basisId, focusIso, focusName, unit }) {
         />
       </form>
       <p className="footnote">Filtering is presentation-only. Outside means present in an observed universe but missing from the common set.</p>
-      <div className="table-scroll" role="region" aria-label="Outside economies" tabIndex={0}>
+      {isMobile ? (
+        slice.length === 0 ? (
+          <p className="muted">None.</p>
+        ) : (
+          <EconomyMobileList
+            rows={slice}
+            rankOf={(r) => r.showRank}
+            caption="Economies outside the common comparison set"
+            focusIso={focusIso}
+            focusName={focusName}
+            renderSummary={(r) => (
+              <>
+                {activeTab.key ? null : keys.map((k) => (
+                  <CardField key={`in-${k}`} label={`In ${k}`}>
+                    {(obsByKey.get(k)?.ranking?.some((x) => x.iso3 === r.iso3)) ? 'yes' : '—'}
+                  </CardField>
+                ))}
+                <CardField label="Observed rank" num>
+                  {rankCell(r.showRank)}
+                </CardField>
+                <CardField label={`Observed value${unit ? ` (${unit})` : ''}`} num>
+                  {cellValue(sec, r.value)}
+                </CardField>
+                {activeTab.key ? <CardField label={`vs ${focusName}`}>{r.relation}</CardField> : null}
+              </>
+            )}
+          />
+        )
+      ) : (
+        <div className="table-scroll" role="region" aria-label="Outside economies" tabIndex={0}>
         <table className="table table-compact">
           <caption className="sr-only">Economies outside the common comparison set</caption>
           <thead>
@@ -727,7 +796,8 @@ function ExternalOutsideSection({ sets, basisId, focusIso, focusName, unit }) {
             ))}
           </tbody>
         </table>
-      </div>
+        </div>
+      )}
       <p className="footnote" aria-live="polite">
         Showing {slice.length} of {rows.length} ({activeTab.label}) · page {safePage} of {pages}.
       </p>

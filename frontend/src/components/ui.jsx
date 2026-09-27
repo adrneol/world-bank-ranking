@@ -3,6 +3,8 @@
  * pagination controls and labeled form controls.
  */
 
+import { Children, cloneElement, isValidElement } from 'react';
+
 export function Section({ id, title, subtitle, children, aside }) {
   return (
     <section id={id} className="section" aria-labelledby={`${id}-heading`}>
@@ -78,13 +80,45 @@ export function Pagination({ page, pages, total, pageSize, onPage }) {
   );
 }
 
+/**
+ * Labeled form control (Phase 5 R-13 labeling repair).
+ *
+ * Previously a `<label htmlFor>` wrapping arbitrary children — invalid
+ * whenever the child was a SearchableSelect (whose popover contains its own
+ * labelable filter input) and misleading for composite children. Now a
+ * neutral grouping with a real label association that always reaches the
+ * actual interactive control:
+ *   - native input/select/textarea child with a matching id is explicitly
+ *     tied via aria-labelledby (cloned in place; existing props preserved),
+ *   - component children (SearchableSelect) already expose their own
+ *     accessible name on the trigger button; the visible text is no longer
+ *     wrapped in a label element, so the association cannot be invalid.
+ */
+const NATIVE_LABELED_ELEMENTS = new Set(['input', 'select', 'textarea']);
+
 export function Field({ label, htmlFor, children, hint }) {
+  const labelId = htmlFor ? `${htmlFor}-label` : undefined;
+  const associated = Children.map(children, (child) => {
+    if (
+      labelId &&
+      isValidElement(child) &&
+      typeof child.type === 'string' &&
+      NATIVE_LABELED_ELEMENTS.has(child.type) &&
+      child.props?.id === htmlFor &&
+      child.props?.['aria-labelledby'] === undefined
+    ) {
+      return cloneElement(child, { 'aria-labelledby': labelId });
+    }
+    return child;
+  });
   return (
-    <label className="field" htmlFor={htmlFor}>
-      <span className="field-label">{label}</span>
-      {children}
+    <div className="field">
+      <span className="field-label" id={labelId}>
+        {label}
+      </span>
+      {associated}
       {hint ? <span className="field-hint">{hint}</span> : null}
-    </label>
+    </div>
   );
 }
 
@@ -209,5 +243,65 @@ export function AnalysisHeader({ title, unit, subjectLabel: subject, indicatorCo
       </div>
       {children ? <div className="analysis-header-side">{children}</div> : null}
     </div>
+  );
+}
+
+/**
+ * Accessible textual equivalent for an analytical chart (Phase 5 R-13).
+ *
+ * Charts expose values through hover tooltips; this disclosure carries the
+ * SAME backend-provided values as an ordinary data table so keyboard and
+ * screen-reader users obtain them without hovering. Cells arrive
+ * pre-formatted by the caller from backend responses — this component never
+ * calculates, only lays out. Reuses the existing `chart-data-fallback`
+ * disclosure pattern (same classes, same visual language).
+ *
+ * @param {string} label table subject, e.g. "annual values"
+ * @param {string} regionName accessible region label
+ * @param {{header:string, numeric?:boolean}[]} columns
+ * @param {string[][]} rows pre-formatted cell strings (missing stays '—')
+ */
+export function ChartDataFallback({ label = 'chart values', regionName = null, columns = [], rows = [] }) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  return (
+    <details className="chart-data-fallback">
+      <summary>View {label} as a table</summary>
+      <div className="table-scroll" role="region" aria-label={regionName ?? label} tabIndex={0}>
+        <table className="table table-compact">
+          <thead>
+            <tr>
+              {columns.map((col, i) =>
+                i === 0 ? (
+                  <th key={i} scope="col">
+                    {col.header}
+                  </th>
+                ) : (
+                  <th key={i} scope="col" className={col.numeric === false ? undefined : 'num'}>
+                    {col.header}
+                  </th>
+                ),
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((cells, r) => (
+              <tr key={r}>
+                {cells.map((cell, c) =>
+                  c === 0 ? (
+                    <th key={c} scope="row">
+                      {cell}
+                    </th>
+                  ) : (
+                    <td key={c} className="num">
+                      {cell}
+                    </td>
+                  ),
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
   );
 }

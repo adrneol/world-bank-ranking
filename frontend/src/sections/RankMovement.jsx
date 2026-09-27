@@ -21,10 +21,11 @@ import ExternalMovement from './ExternalMovement.jsx';
 import PopulationMovement from './PopulationMovement.jsx';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
-import { Field, MethodologyPanel, ProvenanceBadge, Section, StatusBlock, UnavailableState } from '../components/ui.jsx';
+import { ChartDataFallback, Field, MethodologyPanel, ProvenanceBadge, Section, StatusBlock, UnavailableState } from '../components/ui.jsx';
 import FocusPicker from '../components/FocusPicker.jsx';
 import MetricPicker from '../components/MetricPicker.jsx';
 import { SearchableSelect } from '../components/controls.jsx';
+import { EconomyMobileList } from '../components/MovementCards.jsx';
 
 function formatSigned(n) {
   if (n === null || n === undefined) return '—';
@@ -446,55 +447,12 @@ function RankEmptyNotice({ query, hasRows }) {
 }
 
 /**
- * Mobile shell for economy result lists. Same backend rows, same Details
- * content components and same backend analytical ranks as the desktop table;
- * only the layout differs. The card is width-constrained to its container
- * (width/max-width 100%, min-width 0) and never inherits table geometry, so
- * Details content reflows vertically instead of stretching across a wide
- * scrolled table. One economy expanded at a time, like the desktop tables.
- *
- * rankOf maps a row to its backend analytical rank (never a render position),
- * so search/filter/sort/pagination cannot renumber what is displayed.
+ * Mobile economy lists render through the shared EconomyMobileList shell
+ * (components/MovementCards.jsx) — same rows, same Details content, same
+ * backend analytical ranks as the desktop tables; only the layout differs.
+ * rankOf maps a row to its backend analytical rank (never a render
+ * position), so search/filter/sort/pagination cannot renumber display.
  */
-function MobileCardList({ rows, rankOf, caption, renderSummary, renderDetails }) {
-  const listId = useId();
-  const [openIso, setOpenIso] = useState(null);
-  return (
-    <div className="economy-cards" role="list" aria-label={caption ?? 'Economies'}>
-      {rows.map((r) => {
-        const open = openIso === r.iso3;
-        const detailId = `${listId}-${r.iso3}-details`;
-        return (
-          <div className="card economy-card" role="listitem" key={r.iso3}>
-            <div className="economy-card-head">
-              <span>{rankCell(rankOf(r))}</span>
-              <span className="economy-card-name">
-                {r.name ?? r.iso3}
-                {r.iso3 === 'IND' ? <span className="focus-tag"> India</span> : null}
-              </span>
-              <span className="mono">{r.iso3}</span>
-            </div>
-            <dl className="facts">{renderSummary(r)}</dl>
-            <button
-              type="button"
-              className="btn btn-ghost economy-card-toggle details-toggle"
-              aria-expanded={open}
-              aria-controls={detailId}
-              onClick={() => setOpenIso(open ? null : r.iso3)}
-            >
-              {open ? 'Hide details' : 'Details'}
-            </button>
-            {open ? (
-              <div className="economy-card-details" id={detailId}>
-                {renderDetails(r)}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 /**
  * Level-mode row details: identity, one section per selected year (rank,
@@ -599,7 +557,7 @@ export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = n
   // to the viewport instead of the wide table geometry.
   if (isMobile) {
     return (
-      <MobileCardList
+      <EconomyMobileList
         rows={rows}
         rankOf={rankOf}
         caption={caption}
@@ -768,7 +726,7 @@ export function CommonTable({ rows, yearA, yearB, yearMid = null, caption }) {
   const rankOf = (r) => r.rankB;
   if (isMobile) {
     return (
-      <MobileCardList
+      <EconomyMobileList
         rows={rows}
         rankOf={rankOf}
         caption={caption}
@@ -1139,6 +1097,14 @@ function ThreeYearResults({ data }) {
             decimals={decimals3}
           />
         </ChartCard>
+      ) : null}
+      {focusValues3.length === 3 ? (
+        <ChartDataFallback
+          label="focus level values"
+          regionName="Focus level values by year"
+          columns={[{ header: 'Year' }, { header: `${data.focus?.name ?? 'Focus'} value${data.metric?.unit ? ` (${data.metric.unit})` : ''}` }]}
+          rows={focusValues3.map((p) => [String(p.year), formatDecimal(p.value, decimals3)])}
+        />
       ) : null}
       <div className="explanation" role="note" aria-label="Result in words">
         <StorySentence3 data={data} />
@@ -1707,7 +1673,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
     activeInterval ? r.intervals?.[activeInterval.key]?.obsRank : r.intervals?.AB?.obsRank;
   if (isMobile) {
     return (
-      <MobileCardList
+      <EconomyMobileList
         rows={rows}
         rankOf={rankOf}
         caption={caption}
@@ -1872,7 +1838,7 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
       return r.displayMid;
     };
     return (
-      <MobileCardList
+      <EconomyMobileList
         rows={rows}
         rankOf={rankOf}
         caption={caption}
@@ -2854,6 +2820,17 @@ function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation 
                     decimals={metricDecimals(metricKey)}
                   />
                 </ChartCard>
+              ) : null}
+              {hasAnnualBars ? (
+                <ChartDataFallback
+                  label="annual observations"
+                  regionName="Annual stored observations composing the period"
+                  columns={[{ header: 'Year' }, { header: `Value${data.unit ? ` (${data.unit})` : ''}` }]}
+                  rows={annualBars.map((b) => [
+                    b.name,
+                    Number.isFinite(b.value) ? formatDecimal(b.value, metricDecimals(metricKey)) : '—',
+                  ])}
+                />
               ) : null}
             </>
           ) : (

@@ -13,7 +13,7 @@ import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
 import { METRICS, metricDecimals, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal, formatRank, formatYoy } from '../utils/format.js';
-import { StatusBlock } from '../components/ui.jsx';
+import { ChartDataFallback, StatusBlock } from '../components/ui.jsx';
 import SubjectInsight from './SubjectInsight.jsx';
 
 export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country = 'IND', focusName = 'India', availableYears = [], onCompareEntities = null }) {
@@ -99,27 +99,16 @@ export default function Overview({ year, subject = 'gdp_per_capita', metricKey =
                   decimals={metricDecimals(historyKey)}
                 />
               </ChartCard>
-              <details className="chart-data-fallback">
-                <summary>View annual values as a table</summary>
-                <div className="table-scroll" role="region" aria-label="Annual history values" tabIndex={0}>
-                  <table className="table table-compact">
-                    <thead>
-                      <tr>
-                        <th scope="col">Year</th>
-                        <th scope="col" className="num">{historyMeta?.shortTitle ?? historyKey}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(hist.data?.rows ?? []).map((r) => (
-                        <tr key={r.year}>
-                          <th scope="row">{r.year}</th>
-                          <td className="num">{r[historyKey]?.indiaValueDisplay?.formatted ?? formatDecimal(r[historyKey]?.indiaValue, metricDecimals(historyKey))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
+              <ChartDataFallback
+                label="annual values"
+                regionName="Annual history values"
+                columns={[{ header: 'Year' }, { header: historyMeta?.shortTitle ?? historyKey }]}
+                rows={(hist.data?.rows ?? []).map((r) => [
+                  String(r.year),
+                  r[historyKey]?.indiaValueDisplay?.formatted ??
+                    formatDecimal(r[historyKey]?.indiaValue, metricDecimals(historyKey)),
+                ])}
+              />
             </>
           ) : null}
           <SubjectInsight
