@@ -1616,6 +1616,10 @@ hr.ddivider {
 }
 
 /* ---------- analytical charts (Recharts) ---------- */
+/* Layout contract (Phase 2 R-05): header → plot shell → HTML legend →
+   source are separate normal-flow regions. ONLY .chart-plot has an explicit
+   height (the Recharts ResponsiveContainer fills it at 100%); the card
+   itself grows naturally with legend/source wrapping. */
 
 .chart-card {
   margin: 1rem 0;
@@ -1623,6 +1627,7 @@ hr.ddivider {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
+  min-width: 0;
 }
 
 .chart-head {
@@ -1637,27 +1642,67 @@ hr.ddivider {
   font-family: var(--serif);
   font-size: 1.02rem;
   color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .chart-unit {
   font-size: 0.82rem;
   color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .chart-body {
   width: 100%;
-  height: 260px;
+  min-width: 0;
 }
 
-.chart-body .recharts-wrapper,
-.chart-body .recharts-surface {
+.chart-plot {
+  width: 100%;
+  height: 260px;
+  min-width: 0;
+}
+
+.chart-plot .recharts-wrapper,
+.chart-plot .recharts-surface {
   outline: none;
+}
+
+/* HTML legend below the plot: wraps/stacks in flow, never overlays axes. */
+.chart-legend-html {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chart-legend-swatch {
+  display: inline-block;
+  flex: none;
+  width: 1.4rem;
+  height: 0;
+  border-top: 2px solid var(--navy);
+  vertical-align: middle;
 }
 
 .chart-source {
   font-size: 0.78rem;
   color: var(--muted);
   margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
 }
 
 .chart-data-fallback summary {
@@ -1668,7 +1713,7 @@ hr.ddivider {
 }
 
 @media (max-width: 40rem) {
-  .chart-body {
+  .chart-plot {
     height: 220px;
   }
 }
