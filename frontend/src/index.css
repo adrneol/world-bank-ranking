@@ -1223,6 +1223,30 @@ hr.ddivider {
   overflow: hidden;
 }
 
+/* Portal mount: layout-neutral (display: contents) so portalled popovers
+   measure against the viewport without shifting page content. */
+.combo-portal {
+  display: contents;
+}
+
+/* Anchored portalled popover (Phase 3 R-06): exact geometry (top/bottom,
+   left, width, maxHeight) arrives as inline styles computed against the
+   visual viewport — flip-up near the bottom edge, clamped horizontally so
+   320px screens never scroll sideways. The portal already escapes overflow
+   ancestors, so the original z-index 60 is kept deliberately (no
+   escalation) and the premium popover theme is unchanged. */
+.combo-popover-portal {
+  position: fixed;
+  top: auto;
+  bottom: auto;
+  min-width: 0;
+  max-width: calc(100vw - 1rem);
+}
+
+.combo-popover-up {
+  border-radius: 8px;
+}
+
 .combo-filter {
   width: 100%;
   border: none;
@@ -1843,7 +1867,12 @@ hr.ddivider {
 }
 
 @media (max-width: 40rem) {
-  .combo-popover {
+  /* Bottom sheet ONLY for long lists (.combo-popover-sheet, see
+     shouldUseSheet): short selectors keep the compact anchored portal
+     popover above. Sizing is visual-viewport-aware (dvh with vh fallback)
+     so the sheet tracks browser chrome, keyboard and rotation instead of
+     overflowing the visible viewport. Only the option list scrolls. */
+  .combo-popover-sheet {
     position: fixed;
     left: 0.75rem;
     right: 0.75rem;
@@ -1852,12 +1881,19 @@ hr.ddivider {
     width: auto;
     max-width: none;
     max-height: 70vh;
+    max-height: 70dvh;
     display: flex;
     flex-direction: column;
   }
 
-  .combo-list {
+  .combo-popover-sheet .combo-filter {
+    flex: none;
+  }
+
+  .combo-popover-sheet .combo-list {
     max-height: 50vh;
+    max-height: 50dvh;
+    overflow-y: auto;
   }
 
   .segmented {
