@@ -9,8 +9,10 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { METRICS, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
+import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { formatYoy } from '../utils/format.js';
-import { Section, StatusBlock, Pagination, Field, UnavailableState } from '../components/ui.jsx';
+import { Section, StatusBlock, Pagination, UnavailableState } from '../components/ui.jsx';
+import SearchField from '../components/SearchField.jsx';
 
 // Must stay identical to backend parseRankQuery (domain/ranking.js).
 // Message-only use: the backend performs the actual rank lookup.
@@ -31,6 +33,20 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
     setPage(1);
   }, [year, metricKey, country]);
 
+  // Search-as-you-type for the backend-powered search (debounced: the list
+  // is remote, so keystrokes must not fire a request each). Matching
+  // semantics stay entirely backend-owned (substring name/ISO3, exact YoY
+  // rank, backend numbering). Applied from a timeout (never synchronously
+  // in the effect body) so one keystroke never cascades two renders.
+  const debouncedInput = useDebouncedValue(searchInput.trim(), 300);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(debouncedInput);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [debouncedInput]);
+
   const depsKey = `yoyrank:${metricKey}:${year ?? ''}:${page}:${pageSize}:${search}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) => api.yoyRanking({ indicator: metricKey, year, page, pageSize, search, country }, { signal }),
@@ -46,10 +62,15 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
     setPage(nextSize && nextSize !== pageSize ? 1 : next);
   }
 
-  function submitSearch(event) {
-    event.preventDefault();
+  function submitSearch() {
     setPage(1);
     setSearch(searchInput.trim());
+  }
+
+  function clearSearch() {
+    setSearchInput('');
+    setSearch('');
+    setPage(1);
   }
 
   return (
@@ -71,36 +92,18 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
         </p>
       ) : null}
 
-      <form className="toolbar" onSubmit={submitSearch} role="search" aria-label="Search YoY ranking">
-        <Field label="Search country, ISO3, or YoY rank" htmlFor="yoyrank-search">
-          <span className="search-row">
-            <input
-              id="yoyrank-search"
-              type="search"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="e.g. India, IND, or 134"
-              autoComplete="off"
-            />
-            <button type="submit" className="btn btn-secondary">
-              Search
-            </button>
-            {search ? (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => {
-                  setSearchInput('');
-                  setSearch('');
-                  setPage(1);
-                }}
-              >
-                Clear
-              </button>
-            ) : null}
-          </span>
-        </Field>
-      </form>
+      <div className="toolbar">
+        <SearchField
+          id="yoyrank-search"
+          label="Search country, ISO3, or YoY rank"
+          value={searchInput}
+          onChange={setSearchInput}
+          onSubmit={submitSearch}
+          appliedQuery={search}
+          onClear={clearSearch}
+          placeholder="e.g. India, IND, or 134"
+        />
+      </div>
 
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="YoY ranking" />
 

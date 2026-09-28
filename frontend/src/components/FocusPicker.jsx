@@ -3,7 +3,7 @@
  *
  * Same props contract as the Phase-1 picker; the interaction is now the
  * shared SearchableSelect (type to filter, arrows/Enter/Escape, visible
- * focus, click-outside, mobile bottom-sheet popover). The backend/database
+ * focus, click-outside, viewport-anchored popover). The backend/database
  * remains authoritative for country names — nothing is hard-coded here.
  * Focus stays country-only; aggregates and groups belong to Compare.
  */

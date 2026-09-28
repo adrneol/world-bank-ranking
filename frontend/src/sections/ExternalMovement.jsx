@@ -22,6 +22,7 @@ import { isExternalMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
 import { Field, MethodologyPanel, Pagination, StatusBlock, UnavailableState } from '../components/ui.jsx';
+import { defaultMovementCommonSort, movementCommonSortOptions, sortMovementCommonRows } from '../components/movementSort.js';
 import { CardField, EconomyMobileList } from '../components/MovementCards.jsx';
 import { useIsMobile } from '../hooks/useMediaQuery.js';
 import FocusPicker from '../components/FocusPicker.jsx';
@@ -452,6 +453,12 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
   const refSection = lflByKey.get(refKey);
   const refFocusRank = focusRankOf(refSection, focusIso);
   const sec = { basis: { id: basisId } };
+  // Per-comparison sort (rank/value × direction for every compared period),
+  // normalized to a valid option: a stale id (e.g. after toggling the middle
+  // year) falls back to the reference comparison instead of sorting wrongly.
+  const effectiveSort = movementCommonSortOptions(keys).some((o) => o.value === sort)
+    ? sort
+    : defaultMovementCommonSort(keys);
   const rows = useMemo(() => {
     const base = commonRows.map((r) => {
       const ref = r.perKey[refKey];
@@ -464,25 +471,8 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
       if (relationFilter === 'below') return r.relation === 'below';
       return true;
     });
-    const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-    const byIso = (x, y) => (x.iso3 < y.iso3 ? -1 : x.iso3 > y.iso3 ? 1 : 0);
-    const sorted = [...related];
-    switch (sort) {
-      case 'rank-desc':
-        sorted.sort((x, y) => (y.refRank ?? -Infinity) - (x.refRank ?? -Infinity) || byIso(x, y));
-        break;
-      case 'value-asc':
-        sorted.sort((x, y) => (num(x.refValue) ?? Infinity) - (num(y.refValue) ?? Infinity) || byIso(x, y));
-        break;
-      case 'value-desc':
-        sorted.sort((x, y) => (num(y.refValue) ?? -Infinity) - (num(x.refValue) ?? -Infinity) || byIso(x, y));
-        break;
-      case 'rank-asc':
-      default:
-        sorted.sort((x, y) => (x.refRank ?? Infinity) - (y.refRank ?? Infinity) || byIso(x, y));
-    }
-    return sorted;
-  }, [commonRows, query, relationFilter, sort, refKey, refFocusRank]);
+    return sortMovementCommonRows(related, effectiveSort, keys);
+  }, [commonRows, query, relationFilter, effectiveSort, refKey, refFocusRank, keys]);
   const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(Math.max(1, page), pages);
   const slice = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -537,14 +527,9 @@ function ExternalCommonTable({ sets, basisId, focusIso, focusName, unit }) {
         <SearchableSelect
           id={`ec-sort-${tableId}`}
           label="Sort"
-          value={sort}
+          value={effectiveSort}
           searchable={false}
-          options={[
-            { value: 'rank-asc', label: 'Rank — best first' },
-            { value: 'rank-desc', label: 'Rank — lowest first' },
-            { value: 'value-asc', label: 'Value — low to high' },
-            { value: 'value-desc', label: 'Value — high to low' },
-          ]}
+          options={movementCommonSortOptions(keys).map((o) => ({ value: o.value, label: o.label }))}
           onChange={(v) => { setSort(v); setPage(1); }}
         />
       </form>

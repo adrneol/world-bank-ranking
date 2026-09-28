@@ -56,6 +56,21 @@ body {
   padding: 0 1rem;
 }
 
+/* Global page-content shell: every top-level view gets deliberate breathing
+   room below the sticky header (desktop and mobile). Sections and cards
+   already carry the shared radius; this single rule keeps content from ever
+   touching the header border without per-page margin hacks. Anchor
+   scroll-margins on sections stay authoritative for jump offsets. */
+#main {
+  padding-top: 1rem;
+}
+
+@media (max-width: 40rem) {
+  #main {
+    padding-top: 0.75rem;
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -80,8 +95,15 @@ body {
 }
 
 /* ---------- header ---------- */
+/* Sticky site header: stays at the top on every view while page content
+   scrolls beneath. Its stacking layer sits above page content (including
+   sticky table headers) but below the drawer scrim/panel (200/201), so an
+   open drawer captures interaction and closing restores the header. */
 
 .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   background: #101828;
   color: #fff;
   padding: 1.75rem 0 1.25rem;
@@ -123,6 +145,16 @@ body {
   align-items: center;
   gap: 0.9rem;
   min-width: 0;
+}
+
+/* Long focus-country names must wrap inside the brand block, never push
+   the header row or the page into horizontal overflow. */
+.brand-row > div {
+  min-width: 0;
+}
+
+.app-header h1 {
+  overflow-wrap: break-word;
 }
 
 .brand-icon {
@@ -181,6 +213,167 @@ body {
 .tab:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
+}
+
+/* ---------- primary navigation (info tabs + drawer trigger) ---------- */
+
+.mainnav {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.mainnav .tabs {
+  flex-wrap: wrap;
+}
+
+.navdrawer-trigger {
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+/* ---------- analytical navigation drawer ---------- */
+/* Floating side panel (not a full-height page): daylight margins on every
+   side let the scrim and underlying page stay visible. Internal list
+   scrolls; the page behind never scrolls while open. */
+
+.navdrawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.45);
+  z-index: 200;
+}
+
+.navdrawer-panel {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  height: auto;
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  width: min(22rem, calc(100vw - 3rem));
+  background: var(--surface);
+  color: var(--ink);
+  z-index: 201;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: -12px 0 32px rgba(16, 24, 40, 0.25);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1rem 1.25rem;
+  overflow: hidden;
+  animation: popover-fade 120ms ease-out;
+}
+
+@media (max-width: 40rem) {
+  /* Floating side panel on phones too: bounded width with visible page
+     around it — never a full-screen takeover. Descriptors collapse. */
+  .navdrawer-panel {
+    top: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
+    width: min(76vw, 20rem);
+    padding: 0.85rem 0.85rem 1rem;
+  }
+
+  .navdrawer-item-hint {
+    display: none;
+  }
+
+  .navdrawer-sub {
+    font-size: 0.78rem;
+  }
+}
+
+.navdrawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.navdrawer-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 1.1rem;
+}
+
+.navdrawer-sub {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.navdrawer-list {
+  list-style: none;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0;
+  /* Take remaining panel height and scroll internally on short screens. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.navdrawer-list li {
+  margin: 0 0 0.15rem;
+}
+
+.navdrawer-item {
+  font: inherit;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.navdrawer-item:hover {
+  background: var(--combo-hover);
+}
+
+.navdrawer-item:focus-visible {
+  outline: 2px solid var(--focus-line);
+  outline-offset: -2px;
+}
+
+.navdrawer-item-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.navdrawer-item-hint {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.navdrawer-item-check {
+  flex: none;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.navdrawer-item-active {
+  border-color: var(--line);
+  background: var(--paper);
+}
+
+.navdrawer-panel .footnote {
+  margin: 0.25rem 0 0;
 }
 
 .subtabs {
@@ -365,7 +558,8 @@ a:focus-visible {
   border-radius: var(--radius);
   padding: 1.25rem;
   margin: 0 0 1.25rem;
-  scroll-margin-top: 1rem;
+  /* Clear the sticky site header on anchor/skip-link jumps. */
+  scroll-margin-top: 8rem;
   min-width: 0;
 }
 
@@ -393,6 +587,72 @@ a:focus-visible {
 .subhead {
   font-size: 1rem;
   margin: 1.25rem 0 0.5rem;
+}
+
+/* ---------- methodology breadcrumb + back navigation ---------- */
+/* Intentional crumb treatment: quiet parent links, subtle separators, an
+   emphasized current level. Flex-wrap keeps long trails on narrow screens;
+   never a horizontal scroller. */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.35rem;
+  margin: 0.75rem 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  max-width: 100%;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.crumb-sep {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.crumb-link {
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.1rem 0.25rem;
+  margin: 0 -0.25rem;
+  cursor: pointer;
+  text-decoration: none;
+  min-height: 0;
+}
+
+.crumb-link:hover {
+  color: var(--ink);
+  background: var(--combo-hover);
+  text-decoration: underline;
+}
+
+.crumb-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.crumb-current {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* Secondary back-navigation action: the site's secondary-button language
+   rather than a bare hyperlink. */
+.backnav-row {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.backnav {
+  min-height: 2.5rem;
 }
 
 /* ---------- tables ---------- */
@@ -504,6 +764,10 @@ thead .sticky-col {
 
 .facts-grid {
   grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.facts-grid > div.span-all {
+  grid-column: 1 / -1;
 }
 
 .facts > div {
@@ -1233,14 +1497,31 @@ hr.ddivider {
    left, width, maxHeight) arrives as inline styles computed against the
    visual viewport — flip-up near the bottom edge, clamped horizontally so
    320px screens never scroll sideways. The portal already escapes overflow
-   ancestors, so the original z-index 60 is kept deliberately (no
-   escalation) and the premium popover theme is unchanged. */
+   ancestors. Layering is deliberate: page content and sticky table headers
+   (1–2) < sticky site header (100) < popovers (150) < drawer scrim/panel
+   (200/201), so an upward-flipped menu never slides beneath the header
+   while the drawer still captures everything when open. */
 .combo-popover-portal {
   position: fixed;
   top: auto;
   bottom: auto;
   min-width: 0;
   max-width: calc(100vw - 1rem);
+  z-index: 150;
+  /* Flex column so the option list — not the page — absorbs height
+     constraints: the filter stays pinned while long year lists scroll
+     inside viewports of any size. */
+  display: flex;
+  flex-direction: column;
+}
+
+.combo-popover-portal .combo-filter {
+  flex: none;
+}
+
+.combo-popover-portal .combo-list {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .combo-popover-up {
@@ -1821,6 +2102,97 @@ hr.ddivider {
   margin-top: 0.6rem;
 }
 
+/* ---------- home hero (landing page; same tokens as insight) ---------- */
+
+.home-hero {
+  border-left-width: 4px;
+  padding: 1.25rem 1.25rem 1.1rem;
+}
+
+.home-hero .analysis-title {
+  margin: 0.35rem 0 0.6rem;
+  font-size: clamp(1.5rem, 3.4vw, 2.05rem);
+  line-height: 1.15;
+  max-width: 22ch;
+  text-wrap: balance;
+}
+
+.home-hero > p {
+  font-size: 0.95rem;
+  max-width: 75ch;
+}
+
+.home-hero p {
+  max-width: 75ch;
+}
+
+.home-hero .analysis-header-side {
+  margin-top: 0.9rem;
+}
+
+.home-cta-row {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.contact-email {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Home and Methodology family cards: flex column with the action pinned
+   to the bottom so cards stay equal-looking as descriptions vary. Actions
+   are real buttons (existing btn-secondary language) with wrapping labels —
+   never raw underlined hyperlinks, never clipped outside the card. */
+.family-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.family-card .card-action {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+.home-card-link {
+  white-space: normal;
+  text-align: left;
+  line-height: 1.4;
+  min-height: 2.5rem;
+}
+
+.family-card .home-card-link {
+  width: 100%;
+}
+
+/* Formula blocks keep equations intact: contained horizontal scroll inside
+   the card instead of overflowing it or breaking mid-token on 320px. */
+.formula-scroll {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 500;
+  padding-bottom: 0.25rem;
+}
+
+/* Methodology detail rhythm: compact scannable rows with a distinct
+   formula card and comfortable mobile measure. */
+.methodology-detail .facts-grid {
+  gap: 0.65rem 1.5rem;
+}
+
+.methodology-detail .formula-scroll {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+
 /* ---------- observed vs like-for-like emphasis ---------- */
 
 .lfl-grid {
@@ -1867,33 +2239,49 @@ hr.ddivider {
 }
 
 @media (max-width: 40rem) {
-  /* Bottom sheet ONLY for long lists (.combo-popover-sheet, see
-     shouldUseSheet): short selectors keep the compact anchored portal
-     popover above. Sizing is visual-viewport-aware (dvh with vh fallback)
-     so the sheet tracks browser chrome, keyboard and rotation instead of
-     overflowing the visible viewport. Only the option list scrolls. */
-  .combo-popover-sheet {
-    position: fixed;
-    left: 0.75rem;
-    right: 0.75rem;
-    top: auto;
-    bottom: 0.75rem;
-    width: auto;
-    max-width: none;
-    max-height: 70vh;
-    max-height: 70dvh;
-    display: flex;
+  /* Deliberate two-row mobile header: brand row first, navigation row
+     second. Labels keep full size and touch targets (never microscopic);
+     the nav row scrolls horizontally only if the viewport still cannot
+     fit Home + Methodology + About + trigger side by side. The scrollbar
+     itself is visually hidden (scrolling, keyboard and SR behavior kept)
+     so no stray track line appears beneath the nav row. */
+  .app-header-compact {
+    padding: 0.8rem 0 0.7rem;
+  }
+
+  .header-row {
     flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
   }
 
-  .combo-popover-sheet .combo-filter {
+  .brand-row {
+    width: 100%;
+  }
+
+  /* Primary nav becomes a single scrollable row: three info tabs plus the
+     drawer trigger must never wrap into a multi-row header block. */
+  .mainnav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    /* Hide the scroll track visually (no stray line under the nav row);
+       scrolling, keyboard and screen-reader behavior are unchanged. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .mainnav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mainnav .tabs {
+    flex-wrap: nowrap;
+  }
+
+  .mainnav .tab {
     flex: none;
-  }
-
-  .combo-popover-sheet .combo-list {
-    max-height: 50vh;
-    max-height: 50dvh;
-    overflow-y: auto;
+    white-space: nowrap;
   }
 
   .segmented {

@@ -8,7 +8,9 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { METRICS, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { Section, StatusBlock, Pagination, Field, UnavailableState } from '../components/ui.jsx';
+import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
+import { Section, StatusBlock, Pagination, UnavailableState } from '../components/ui.jsx';
+import SearchField from '../components/SearchField.jsx';
 
 // Must stay identical to backend parseRankQuery (domain/ranking.js).
 // Message-only use: the backend performs the actual rank lookup.
@@ -32,6 +34,21 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
   useEffect(() => {
     setPage(1);
   }, [year, metricKey, country]);
+
+  // Search-as-you-type for the backend-powered search (debounced: the list
+  // is remote, so keystrokes must not fire a request each). The Search
+  // button / Enter submits immediately; matching semantics stay entirely
+  // backend-owned (substring name/ISO3, exact rank, backend numbering).
+  // Applied from a timeout (never synchronously in the effect body) so one
+  // keystroke never cascades two renders.
+  const debouncedInput = useDebouncedValue(searchInput.trim(), 300);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(debouncedInput);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [debouncedInput]);
 
   const depsKey = `fullrank:${metricKey}:${year ?? ''}:${page}:${pageSize}:${search}:${country}`;
   const { data, loading, error, retry } = useApi(
@@ -58,10 +75,15 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
     setPage(nextSize && nextSize !== pageSize ? 1 : next);
   }
 
-  function submitSearch(event) {
-    event.preventDefault();
+  function submitSearch() {
     setPage(1);
     setSearch(searchInput.trim());
+  }
+
+  function clearSearch() {
+    setSearchInput('');
+    setSearch('');
+    setPage(1);
   }
 
   return (
@@ -70,36 +92,18 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
       title="Full country ranking"
       subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by the backend: ${orderText}.`}
     >
-      <form className="toolbar" onSubmit={submitSearch} role="search" aria-label="Search ranking">
-        <Field label="Search country, ISO3, or rank" htmlFor="fullrank-search">
-          <span className="search-row">
-            <input
-              id="fullrank-search"
-              type="search"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="e.g. India, IND, or 12"
-              autoComplete="off"
-            />
-            <button type="submit" className="btn btn-secondary">
-              Search
-            </button>
-            {search ? (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => {
-                  setSearchInput('');
-                  setSearch('');
-                  setPage(1);
-                }}
-              >
-                Clear
-              </button>
-            ) : null}
-          </span>
-        </Field>
-      </form>
+      <div className="toolbar">
+        <SearchField
+          id="fullrank-search"
+          label="Search country, ISO3, or rank"
+          value={searchInput}
+          onChange={setSearchInput}
+          onSubmit={submitSearch}
+          appliedQuery={search}
+          onClear={clearSearch}
+          placeholder="e.g. India, IND, or 12"
+        />
+      </div>
 
       <StatusBlock loading={loading} error={error} empty={empty && !unavailable} onRetry={retry} sectionName="full ranking" />
 

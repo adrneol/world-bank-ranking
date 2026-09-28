@@ -1,11 +1,13 @@
 /**
- * PHASE-3 TESTS: shared popover geometry (R-06/R-09/R-10).
+ * PHASE-3 TESTS (updated Round 2E): shared popover geometry.
  *
  * The frontend popover helper is dependency-free (no JSX, no Vite
  * features), imported here by relative path so the flip/bounds contract
  * every SearchableSelect relies on is pinned: open down with room, flip up
  * near the bottom edge, constrain on the roomier side when neither fits,
  * and never overflow the viewport horizontally — including 320px widths.
+ * Since Round 2E every list (including 66-option year lists on mobile)
+ * uses this anchored placement; there is no bottom-sheet surface anymore.
  */
 
 import assert from 'node:assert/strict';
@@ -18,7 +20,6 @@ import {
   POPOVER_MAX_WIDTH,
   POPOVER_MIN_HEIGHT,
   POPOVER_MIN_WIDTH,
-  shouldUseSheet,
 } from '../../frontend/src/components/popover.js';
 
 const VIEWPORT = { viewportW: 390, viewportH: 844 };
@@ -99,9 +100,17 @@ test('content-height estimate grows with options and caps for year-size lists', 
   assert.ok(placement.maxHeight <= POPOVER_MAX_HEIGHT, '66-option list stays viewport-bounded');
 });
 
-test('only long lists become sheets on mobile (R-09 short-list rule)', () => {
-  assert.equal(shouldUseSheet({ isMobile: true, optionCount: 66 }), true);
-  assert.equal(shouldUseSheet({ isMobile: true, optionCount: 8 }), false);
-  assert.equal(shouldUseSheet({ isMobile: true, optionCount: 3 }), false);
-  assert.equal(shouldUseSheet({ isMobile: false, optionCount: 66 }), false);
+test('long year lists stay anchored and viewport-bounded on narrow screens', () => {
+  for (const viewportW of [320, 360, 375, 390, 414]) {
+    const placement = computePopoverPlacement({
+      trigger: { top: 600, bottom: 640, left: 16, width: 200 },
+      viewportW,
+      viewportH: 800,
+      contentHeight: estimatePopoverHeight({ optionCount: 66, showFilter: true }),
+    });
+    assert.ok(['down', 'up'].includes(placement.dir), `anchored placement at ${viewportW}px`);
+    assert.ok(placement.width <= viewportW - 16, `menu narrower than viewport at ${viewportW}px`);
+    assert.ok(placement.left >= 8 && placement.left + placement.width <= viewportW - 8 + 1, `clamped at ${viewportW}px`);
+    assert.ok(placement.maxHeight <= POPOVER_MAX_HEIGHT, '66-option list stays viewport-bounded');
+  }
 });

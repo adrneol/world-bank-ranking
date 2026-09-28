@@ -26,6 +26,12 @@ import { SearchableSelect } from './components/controls.jsx';
 import { Field } from './components/ui.jsx';
 import FocusPicker from './components/FocusPicker.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
+import NavDrawer, { NavDrawerTrigger } from './components/NavDrawer.jsx';
+import { siteMetadata } from './config/site.js';
+import { getHeaderContext } from './utils/headerContext.js';
+import Home from './sections/Home.jsx';
+import About from './sections/About.jsx';
+import Methodology from './sections/Methodology.jsx';
 import Compare from './sections/Compare.jsx';
 import Overview from './sections/Overview.jsx';
 import YearlyTable from './sections/YearlyTable.jsx';
@@ -77,20 +83,46 @@ function YearOrEmpty({ years, id, value, onChange, label, emptyLabel = '—' }) 
   );
 }
 
-const VIEWS = Object.freeze([
-  { id: 'overview', label: 'Overview' },
-  { id: 'data', label: 'Data' },
-  { id: 'rank', label: 'Rank' },
-  { id: 'movement', label: 'Movement' },
-  { id: 'yoy', label: 'YoY' },
-  { id: 'compare', label: 'Compare' },
-  { id: 'coverage', label: 'Coverage' },
-  { id: 'audit', label: 'Audit' },
-  { id: 'status', label: 'Status' },
+// Global header identity: thin presentational wrapper over the
+// view-aware header-context resolver (no business logic here).
+function HeaderIdentity({ view, country, focusName, year, yearA, yearB }) {
+  const { primary, secondary } = getHeaderContext({ view, country, focusName, year, yearA, yearB });
+  return (
+    <div>
+      <p className="eyebrow">{primary}</p>
+      <h1>{secondary}</h1>
+    </div>
+  );
+}
+
+// Header tabs: informational pages always visible. The nine analytical
+// workspaces live in the NavDrawer (same view ids, same setFilter routing).
+const INFO_VIEWS = Object.freeze([
+  { id: 'home', label: 'Home' },
+  { id: 'methodology', label: 'Methodology' },
+  { id: 'about', label: 'About' },
+]);
+
+const ANALYTICAL_VIEWS = Object.freeze([
+  { id: 'overview', label: 'Overview', hint: 'Focus-country cards and history' },
+  { id: 'data', label: 'Data', hint: 'Yearly tables over a range' },
+  { id: 'rank', label: 'Rank', hint: 'Verify rank and full table' },
+  { id: 'movement', label: 'Movement', hint: 'Rank and value movement' },
+  { id: 'yoy', label: 'YoY', hint: 'Year-over-year ranking' },
+  { id: 'compare', label: 'Compare', hint: 'Entity comparison workspace' },
+  { id: 'coverage', label: 'Coverage', hint: 'Data coverage and denominators' },
+  { id: 'audit', label: 'Audit', hint: 'Source verification' },
+  { id: 'status', label: 'Status', hint: 'Data status and refresh' },
 ]);
 
 function isViewId(value) {
-  return VIEWS.some((v) => v.id === value);
+  return (
+    INFO_VIEWS.some((v) => v.id === value) || ANALYTICAL_VIEWS.some((v) => v.id === value)
+  );
+}
+
+function isAnalyticalView(value) {
+  return ANALYTICAL_VIEWS.some((v) => v.id === value);
 }
 
 export default function App() {
@@ -107,7 +139,7 @@ export default function App() {
     metric: 'nominal_current',
     neighbors: 5,
     fromYear: '',
-    view: 'overview',
+    view: 'home',
     country: 'IND',
     cmpEntityA: '',
     cmpEntityB: '',
@@ -122,6 +154,24 @@ export default function App() {
   }));
   const [rankSub, setRankSub] = useState('verify');
   const [yoySub, setYoySub] = useState('ranking');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerTriggerRef = useRef(null);
+
+  // Public site display metadata (About/Home labels only; analytical data
+  // always comes from the backend). Resolved once per render from Vite env.
+  const site = useMemo(() => siteMetadata(), []);
+
+  // Home entry points: plain view switches, plus subject-aware Movement
+  // entry (first metric of the subject — the same rule the Analysis
+  // selector uses, so Home links can never invent a metric).
+  const openSubjectInMovement = useCallback((subjectKey) => {
+    const keys = metricKeysForSubject(subjectKey);
+    setFilters((prev) => ({
+      ...prev,
+      metric: keys.includes(prev.metric) ? prev.metric : (keys[0] ?? prev.metric),
+      view: 'movement',
+    }));
+  }, []);
 
   // Load available years once (plus reload after a successful refresh).
   useEffect(() => {
@@ -212,7 +262,7 @@ export default function App() {
     const neighborsRaw = Number.parseInt(filters.neighbors, 10);
     const neighbors = Number.isInteger(neighborsRaw) ? Math.max(0, Math.min(50, neighborsRaw)) : 5;
     const fromYear = filters.fromYear !== '' && filters.fromYear != null ? pick(filters.fromYear, null) : null;
-    const view = isViewId(filters.view) ? filters.view : 'overview';
+    const view = isViewId(filters.view) ? filters.view : 'home';
     // Rank-movement years default to a decade-like pair when available,
     // otherwise the stored extremes. Never hardcoded to a fixed range.
     const defaultYearA = availableYears.includes(2004) ? 2004 : minYear;
@@ -457,14 +507,47 @@ export default function App() {
               width="56"
               height="56"
             />
-            <div>
-              <p className="eyebrow">World Bank WDI · {effective.focusName} {subjectLabel(effective.subject)}</p>
-              <h1>
-                {effective.focusName} ranking{effective.year != null ? <span className="header-year"> — {effective.year}</span> : null}
-              </h1>
-            </div>
+            {/* Site identity is view-aware (Round 2G): the header-context
+                resolver maps each view to its meaningful identity —
+                neutral for info/compare/status pages, the period endpoints
+                for Movement, focus country + year for single-year
+                workspaces. Presentation only; all values come from the
+                already-resolved effective filter state. */}
+            <HeaderIdentity
+              view={view}
+              country={effective.country}
+              focusName={effective.focusName}
+              year={effective.year}
+              yearA={effective.yearA}
+              yearB={effective.yearB}
+            />
           </div>
-          <Tabs views={VIEWS} active={view} onChange={(v) => setFilter('view', v)} />
+          <nav className="mainnav" aria-label="Site navigation">
+            <Tabs views={INFO_VIEWS} active={view} onChange={(v) => setFilter('view', v)} />
+            <NavDrawerTrigger
+              buttonRef={drawerTriggerRef}
+              label={
+                isAnalyticalView(view)
+                  ? (ANALYTICAL_VIEWS.find((v) => v.id === view)?.label ?? 'Analysis')
+                  : 'Explore analysis'
+              }
+              expanded={drawerOpen}
+              onClick={() => setDrawerOpen(true)}
+            />
+          </nav>
+          <NavDrawer
+            open={drawerOpen}
+            destinations={ANALYTICAL_VIEWS}
+            active={view}
+            triggerLabel={
+              isAnalyticalView(view)
+                ? (ANALYTICAL_VIEWS.find((v) => v.id === view)?.label ?? 'Analysis')
+                : 'Explore analysis'
+            }
+            returnFocusRef={drawerTriggerRef}
+            onSelect={(v) => setFilter('view', v)}
+            onClose={() => setDrawerOpen(false)}
+          />
         </div>
       </header>
 
@@ -495,7 +578,7 @@ export default function App() {
             ) : null}
           </div>
         ) : null}
-        {filtersReady && view !== 'movement' && view !== 'status' && view !== 'compare' ? (
+        {filtersReady && view !== 'movement' && view !== 'status' && view !== 'compare' && view !== 'home' && view !== 'methodology' && view !== 'about' ? (
           <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
             <form className="filter-grid" onSubmit={(e) => e.preventDefault()} aria-label="Data filters">
               {/*
@@ -563,6 +646,17 @@ export default function App() {
         ) : null}
 
         <main id="main" key={`${dataVersion}:${view}:${effective.country}`}>
+          {view === 'home' ? (
+            <Home
+              sourceName={site.sourceName}
+              onOpenView={(v) => setFilter('view', v)}
+              onOpenSubject={openSubjectInMovement}
+            />
+          ) : null}
+          {view === 'methodology' ? <Methodology /> : null}
+          {view === 'about' ? (
+            <About site={site} onOpenView={(v) => setFilter('view', v)} />
+          ) : null}
           {filtersReady && view === 'overview' ? (
             <>
               <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={availableYears} onCompareEntities={openCompareWith} />

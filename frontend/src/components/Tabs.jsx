@@ -35,9 +35,14 @@ export default function Tabs({ views, active, onChange }) {
   }
 
   return (
-    <div className="tabs" role="tablist" aria-label="Analytical views">
+    <div className="tabs" role="tablist" aria-label="Site pages">
       {views.map((view, index) => {
         const selected = view.id === active;
+        // When an analytical view (drawer) is active, no header tab is
+        // selected — but the first tab stays keyboard-reachable so roving
+        // tabindex never strands keyboard users outside the tablist.
+        const hasActive = views.some((v) => v.id === active);
+        const focusable = selected || (!hasActive && index === 0);
         return (
           <button
             key={view.id}
@@ -49,7 +54,7 @@ export default function Tabs({ views, active, onChange }) {
             id={`tab-${view.id}`}
             aria-selected={selected}
             aria-controls={`panel-${view.id}`}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={focusable ? 0 : -1}
             className={selected ? 'tab tab-active' : 'tab'}
             onClick={() => onChange(view.id)}
             onKeyDown={(event) => handleKeyDown(event, index)}

@@ -357,6 +357,11 @@ files. The backend needs no API key.
 | Variable | Where | Meaning |
 |---|---|---|
 | `VITE_API_BASE_URL` | frontend | Backend base URL. Empty means relative `/api` (local proxy / same host). |
+| `VITE_SITE_AUTHOR_NAME` / `VITE_SITE_AUTHOR_ROLE` | frontend | Public About-page author labels. Optional; empty renders a documented neutral fallback. Display only — never analytical. |
+| `VITE_SITE_LAST_UPDATED_YEAR` / `_MONTH` / `_DAY` | frontend | Site-content update date as separate parts (e.g. year+month renders "July 2026"). Optional. Display only — dataset freshness always comes from the backend. |
+| `VITE_SITE_DATA_YEAR` / `VITE_SITE_DATA_MONTH` | frontend | Informational reference vintage named by site content. Optional. The authoritative vintage always comes from API responses. |
+| `VITE_SITE_SOURCE_NAME` | frontend | Public dataset name (default "World Bank WDI"). |
+| `VITE_SITE_CONTACT_EMAIL` | frontend | Public contact email for the About page Contact section. Optional; empty omits the address. Display only — never a secret. |
 
 Frontend environment files (`frontend/`): `VITE_API_BASE_URL` is read with
 Vite's file precedence. `vite dev` additionally loads the tracked

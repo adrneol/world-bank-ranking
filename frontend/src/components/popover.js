@@ -17,7 +17,25 @@ export const POPOVER_MAX_WIDTH = 384; // 24rem — matches the desktop cap
 export const POPOVER_MIN_WIDTH = 192; // 12rem — stays tappable/readable
 export const POPOVER_MAX_HEIGHT = 336; // anchored popovers never exceed this
 export const POPOVER_MIN_HEIGHT = 120; // constrained side still shows content
-export const SHEET_LIST_THRESHOLD = 8; // >8 options counts as a LONG list
+
+/**
+ * Singleton portal mount shared by overlay UI (combo popovers, nav drawer).
+ * Mounted inside the React root element (not document.body) so synthetic
+ * events keep working, with body fallback. `position: fixed` children still
+ * lay out against the visual viewport because no ancestor creates a
+ * transform/filter/contain context. Layout-neutral via display: contents.
+ */
+let portalNode = null;
+export function getPortalMount() {
+  if (typeof document === 'undefined') return null;
+  if (!portalNode || !portalNode.isConnected) {
+    portalNode = document.createElement('div');
+    portalNode.className = 'combo-portal';
+    const mount = document.getElementById('root') ?? document.body;
+    mount.appendChild(portalNode);
+  }
+  return portalNode;
+}
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -43,15 +61,6 @@ export function estimatePopoverHeight({ optionCount = 0, showFilter = false } = 
   const rows = Math.max(optionCount, 1);
   const listHeight = Math.min(rows, 10) * 34 + 12;
   return Math.round((showFilter ? 46 : 0) + listHeight);
-}
-
-/**
- * Whether a mobile trigger should use the bottom-sheet surface instead of
- * an anchored popover. Only LONG lists become sheets — short selectors
- * (Basis, small groups) stay compact anchored popovers on mobile too.
- */
-export function shouldUseSheet({ isMobile = false, optionCount = 0 } = {}) {
-  return Boolean(isMobile) && optionCount > SHEET_LIST_THRESHOLD;
 }
 
 /**
@@ -114,6 +123,5 @@ export function computePopoverPlacement({
 export default {
   computePopoverPlacement,
   estimatePopoverHeight,
-  shouldUseSheet,
   viewportSize,
 };
