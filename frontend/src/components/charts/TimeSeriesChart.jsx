@@ -21,8 +21,8 @@ import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
-const STROKES = [CHART_COLORS.primary, CHART_COLORS.secondary];
-const DASHES = [undefined, '6 3'];
+const STROKES = [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.tertiary];
+const DASHES = [undefined, '6 3', '2 2'];
 
 // Recharts entrance animation is disabled on every Line below
 // (isAnimationActive={false}): the app's motion policy allows no more than

@@ -8,13 +8,12 @@
  */
 
 import { api } from '../api/client.js';
-import ChartCard from '../components/charts/ChartCard.jsx';
-import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
-import { METRICS, metricDecimals, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
+import { METRICS, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
-import { formatDecimal, formatRank, formatYoy } from '../utils/format.js';
-import { ChartDataFallback, StatusBlock } from '../components/ui.jsx';
+import { formatRank, formatYoy } from '../utils/format.js';
+import { StatusBlock } from '../components/ui.jsx';
 import SubjectInsight from './SubjectInsight.jsx';
+import OverviewHistory from './OverviewHistory.jsx';
 
 export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country = 'IND', focusName = 'India', availableYears = [], onCompareEntities = null }) {
   const keys = metricKeysForSubject(subject);
@@ -87,29 +86,17 @@ export default function Overview({ year, subject = 'gdp_per_capita', metricKey =
             units and are never combined or scored against each other.
           </p>
           {historyHasData ? (
-            <>
-              <ChartCard
-                title={`${historyMeta?.shortTitle ?? historyKey} — history`}
-                unit={historyMeta?.unitLong ?? historyMeta?.unit}
-                summary={historySummary}
-              >
-                <TimeSeriesChart
-                  series={[{ label: displayName, points: historyPoints }]}
-                  unit={historyMeta?.unitLong ?? historyMeta?.unit}
-                  decimals={metricDecimals(historyKey)}
-                />
-              </ChartCard>
-              <ChartDataFallback
-                label="annual values"
-                regionName="Annual history values"
-                columns={[{ header: 'Year' }, { header: historyMeta?.shortTitle ?? historyKey }]}
-                rows={(hist.data?.rows ?? []).map((r) => [
-                  String(r.year),
-                  r[historyKey]?.indiaValueDisplay?.formatted ??
-                    formatDecimal(r[historyKey]?.indiaValue, metricDecimals(historyKey)),
-                ])}
-              />
-            </>
+            <OverviewHistory
+              key={`${country}:${subject}:${historyKey}`}
+              country={country}
+              displayName={displayName}
+              historyKey={historyKey}
+              historyMeta={historyMeta}
+              historyRows={hist.data?.rows ?? []}
+              windowStart={historyYears[0] ?? null}
+              windowEnd={historyYears[historyYears.length - 1] ?? null}
+              summary={historySummary}
+            />
           ) : null}
           <SubjectInsight
             metricKey={metricKey ?? keys[0]}

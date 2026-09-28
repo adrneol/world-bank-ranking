@@ -62,7 +62,10 @@ test('chart text equivalents reuse backend values without new economics', () => 
   const fallback = /export function ChartDataFallback\([\s\S]*?\n\}/.exec(ui)?.[0] ?? '';
   assert.ok(fallback.includes('chart-data-fallback'), 'existing disclosure pattern reused');
   assert.ok(!fallback.includes('useApi') && !fallback.includes('api.'), 'fallback lays out caller-provided cells only');
-  for (const file of ['sections/Compare.jsx', 'sections/RankMovement.jsx', 'sections/Overview.jsx']) {
+  for (const file of ['sections/Compare.jsx', 'sections/RankMovement.jsx', 'sections/OverviewHistory.jsx']) {
     assert.ok(read(file).includes('ChartDataFallback'), `${file} exposes chart values as a table`);
   }
+  // Overview's history block (chart + text equivalent) lives in its
+  // Overview-only child module; the section must keep delegating to it.
+  assert.ok(read('sections/Overview.jsx').includes('OverviewHistory'), 'Overview renders its history via OverviewHistory');
 });

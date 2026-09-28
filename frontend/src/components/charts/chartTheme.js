@@ -5,12 +5,15 @@
  * Monochrome quiet-luxury palette drawn from the app CSS tokens
  * (--navy #101828, --muted, --line). Two series stay distinguishable
  * without color alone (second series renders dashed with its own legend
- * label); charts never use color as the sole meaning carrier.
+ * label); charts never use color as the sole meaning carrier. A third
+ * slot exists for optional context overlays: vermillion (Okabe-Ito,
+ * color-blind-safe against navy/teal) rendered dotted, again paired with
+ * its own legend label.
  */
-
 export const CHART_COLORS = Object.freeze({
   primary: '#101828',
   secondary: '#2a7f6f',
+  tertiary: '#D55E00',
   grid: '#e2e2df',
   zero: '#9aa0a6',
   muted: '#5f6368',
