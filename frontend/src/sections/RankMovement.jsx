@@ -11,7 +11,6 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExte
 import { api } from '../api/client.js';
 import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
-import SlopeChart from '../components/charts/SlopeChart.jsx';
 import { METRICS, SUBJECTS, activeRegistryVersion, isCapitalMetricKey, isExternalMetricKey, isFxMetricKey, isPopulationMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBasisOptions, subjectOf } from '../config/metrics.js';
 import PricesMovement from './PricesMovement.jsx';
 import TradeMovement from './TradeMovement.jsx';
@@ -3221,27 +3220,6 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
           <>
             <h3 className="subhead">What happened to India&apos;s position number?</h3>
             <SummaryCards data={data} />
-            {data.focusMovement?.fullRankA != null && data.focusMovement?.fullRankB != null ? (
-              <ChartCard
-                title={`${focusName} position movement, ${data.years.a} to ${data.years.b}`}
-                unit="analytical rank (1 at top)"
-                summary={`${focusName} observed rank ${data.focusMovement.fullRankA} to ${data.focusMovement.fullRankB}, like-for-like ${data.focusMovement.commonRankA} to ${data.focusMovement.commonRankB}`}
-              >
-                <SlopeChart
-                  items={[
-                    { label: 'Observed position', start: data.focusMovement.fullRankA, end: data.focusMovement.fullRankB },
-                    ...(data.focusMovement.commonRankA != null && data.focusMovement.commonRankB != null
-                      ? [{ label: 'Like-for-like position', start: data.focusMovement.commonRankA, end: data.focusMovement.commonRankB }]
-                      : []),
-                  ]}
-                  startLabel={String(data.years.a)}
-                  endLabel={String(data.years.b)}
-                  unit="rank"
-                  decimals={0}
-                  invertY
-                />
-              </ChartCard>
-            ) : null}
             {(() => {
               // Focus level values for the two selected years, straight from
               // the backend analytical rows (same observations as the ranks).
