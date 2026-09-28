@@ -2075,6 +2075,27 @@ hr.ddivider {
   outline: none;
 }
 
+/* Chart interaction focus (visual fix): Recharts renders tooltip portals
+   into focusable `<g tabindex="-1" class="recharts-zIndex-layer_*">`
+   elements. They are correctly excluded from tab order, but mouse/touch
+   interaction moves DOM focus onto them and the browser then draws its
+   default (large black) focus outline around the layer's bounding box.
+   Suppress that artifact for pointer interaction only; keyboard focus
+   (:focus-visible, e.g. tabbing to the chart surface for the arrow-key
+   tooltip layer) keeps a calm on-brand ring instead of the native one.
+   Resting appearance, hover, cursor, tooltip and data are untouched. */
+.chart-plot .recharts-wrapper:focus:not(:focus-visible),
+.chart-plot .recharts-surface:focus:not(:focus-visible),
+.chart-plot g[class*='recharts-zIndex-layer']:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.chart-plot .recharts-wrapper:focus-visible,
+.chart-plot .recharts-surface:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Overview context-series control: compact chip checkboxes in the site's
    control language. Fieldset/legend carry the accessible name; the row
    wraps on narrow screens and each chip keeps a tappable target. */
