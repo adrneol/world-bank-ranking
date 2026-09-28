@@ -37,6 +37,7 @@ import {
   countAggregateCountries,
   countAllCountries,
   countEligibleCountries,
+  countObservations,
   getCountry,
   getDatasetFingerprint,
   getIndicatorByMetricKey,
@@ -257,6 +258,18 @@ const ah = (fn) => (req, res, next) => {
 };
 
 /**
+ * DB-level refresh-lock signal for the cold-start gate. Never throws on the
+ * read path: an unreadable lock simply means "no lock evidence".
+ */
+function isRefreshLocked(db) {
+  try {
+    return getRefreshLockState(db)?.locked === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Manual-refresh admin authentication.
  *
  * When REFRESH_ADMIN_TOKEN is configured, POST /api/data/refresh requires
@@ -364,7 +377,22 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- years ----------
   app.get('/api/years', ah(async (req, res) => {
-    const available = listAvailableYears(handle());
+    const h = handle();
+    // Cold-start seeding: the database is empty and the first ingest is
+    // still running (boot or TTL-triggered empty refresh). There are no
+    // years to report yet — say so explicitly instead of returning an empty
+    // range the frontend could mistake for "no data". The frontend treats
+    // DATA_LOADING as still-starting (warm-up continues), not as a failure.
+    if (countObservations(h) === 0 && (isRefreshInProgress() || isRefreshLocked(h))) {
+      res.status(503).json({
+        error: {
+          message: 'Data service is starting and the first dataset is not published yet. Retry shortly.',
+          code: 'DATA_LOADING',
+        },
+      });
+      return;
+    }
+    const available = listAvailableYears(h);
     res.json({
       ...available,
       defaults: { startYear: config.defaultStartYear, endYear: config.defaultEndYear },
@@ -1335,14 +1363,28 @@ async function boot() {
     console.warn(`Refresh-lock recovery skipped: ${error.message}`);
   }
 
-  // First-run behavior: ingest on empty when enabled.
+  // Accept traffic (especially /api/health) BEFORE any potentially slow
+  // data work: on a cold host the service must answer readiness while the
+  // first dataset is still being prepared, never block listen() on a
+  // multi-minute ingest. /api/years reports DATA_LOADING (503) while the
+  // seed runs; every other endpoint keeps its existing behavior.
+  const app = createApp();
+  const server = app.listen(config.port, () => {
+    console.log(`World Bank India GDP ranking backend listening on port ${config.port}`);
+    console.log(`  Health: http://localhost:${config.port}/api/health`);
+  });
+
+  // First-run behavior: ingest on empty when enabled — now in the
+  // background, after listen(), so startup never blocks availability.
   try {
     const { countObservations } = await import('./db/repository.js');
     if (countObservations(db) === 0) {
       if (config.autoIngestOnEmpty) {
-        console.log('Database is empty; ingesting World Bank data on startup...');
-        await ensureDataPresent(db, { trigger: 'boot' });
-        console.log('Startup ingestion complete.');
+        console.log('Database is empty; ingesting World Bank data in the background...');
+        ensureDataPresent(db, { trigger: 'boot' }).then(
+          () => console.log('Startup ingestion complete.'),
+          (error) => console.error(`Startup ingestion failed: ${error.message}`),
+        );
       } else {
         console.log('Database is empty; WB_AUTO_INGEST_ON_EMPTY=0 so startup ingestion is skipped. POST /api/data/refresh to ingest.');
       }
@@ -1378,12 +1420,6 @@ async function boot() {
   } catch (error) {
     console.warn(`Integrity checks skipped: ${error.message}`);
   }
-
-  const app = createApp();
-  const server = app.listen(config.port, () => {
-    console.log(`World Bank India GDP ranking backend listening on port ${config.port}`);
-    console.log(`  Health: http://localhost:${config.port}/api/health`);
-  });
 
   const shutdown = () => {
     console.log('Shutting down...');

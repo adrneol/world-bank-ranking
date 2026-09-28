@@ -27,6 +27,7 @@ import { Field } from './components/ui.jsx';
 import FocusPicker from './components/FocusPicker.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
 import NavDrawer, { NavDrawerTrigger } from './components/NavDrawer.jsx';
+import { BootstrapError, BootstrapStillConnecting, BootstrapWarmup } from './components/BootstrapStatus.jsx';
 import { siteMetadata } from './config/site.js';
 import { getHeaderContext } from './utils/headerContext.js';
 import Home from './sections/Home.jsx';
@@ -125,10 +126,32 @@ function isAnalyticalView(value) {
   return ANALYTICAL_VIEWS.some((v) => v.id === value);
 }
 
+// Cold-start bootstrap policy: GET /api/years is the cold-start gate, and a
+// free-tier backend wake can take up to about a minute. This ONE request
+// therefore carries a longer per-call bound (the shared 30 s
+// DEFAULT_REQUEST_TIMEOUT_MS is unchanged for every other request). The UI
+// shows the warm-up state below 60 s, the still-connecting state with a
+// controlled retry at/above 60 s, and a genuine error only when the request
+// actually fails.
+const YEARS_BOOTSTRAP_TIMEOUT_MS = 120000;
+const WARMUP_THRESHOLD_S = 60;
+// Re-check delay while the backend explicitly reports DATA_LOADING (empty
+// database with the first ingest still running): not a failure, so the
+// warm-up clock keeps running and a single follow-up attempt is scheduled.
+const SEED_FOLLOWUP_MS = 10000;
+
 export default function App() {
   const [yearsData, setYearsData] = useState(null);
   const [yearsError, setYearsError] = useState(null);
   const [yearsLoading, setYearsLoading] = useState(true);
+  // Real elapsed seconds for the in-flight years attempt (drives the
+  // warm-up/still-connecting UI; stops when the request settles).
+  const [yearsElapsed, setYearsElapsed] = useState(0);
+  // Controlled-retry trigger: bumped only by the Retry connection action so
+  // a retry re-runs the years gate WITHOUT refetching countries/indicators.
+  const [yearsToken, setYearsToken] = useState(0);
+  const yearsRequestId = useRef(0);
+  const yearsController = useRef(null);
   const [dataVersion, setDataVersion] = useState(0);
   const [refreshNotice, setRefreshNotice] = useState(null);
 
@@ -173,27 +196,82 @@ export default function App() {
     }));
   }, []);
 
-  // Load available years once (plus reload after a successful refresh).
+  // Lifecycle-aware years bootstrap: single-flight, abortable, real clock.
+  // Exactly one attempt runs at a time. A newer attempt (manual retry,
+  // post-refresh revalidation) or unmount aborts the previous controller,
+  // and stale responses can never overwrite newer state (request id +
+  // aborted-signal guards). The elapsed clock drives the warm-up UI: it
+  // ticks while the attempt is in flight, stops on settle, and resets only
+  // when a fresh attempt starts.
   useEffect(() => {
-    let cancelled = false;
+    const id = yearsRequestId.current + 1;
+    yearsRequestId.current = id;
+    const controller = new AbortController();
+    yearsController.current = controller;
+    const clockStart = Date.now();
+    let timer = null;
+    let followup = null;
+    const stillCurrent = () => yearsRequestId.current === id && !controller.signal.aborted;
+
     setYearsLoading(true);
     setYearsError(null);
-    api
-      .years()
-      .then((result) => {
-        if (cancelled) return;
-        setYearsData(result);
-        setYearsLoading(false);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setYearsError(error);
-        setYearsLoading(false);
-      });
-    return () => {
-      cancelled = true;
+    setYearsElapsed(0);
+    timer = setInterval(() => {
+      if (!stillCurrent()) return;
+      setYearsElapsed(Math.floor((Date.now() - clockStart) / 1000));
+    }, 500);
+
+    const settle = () => {
+      if (timer !== null) clearInterval(timer);
+      if (followup !== null) clearTimeout(followup);
+      timer = null;
+      followup = null;
+      if (yearsController.current === controller) yearsController.current = null;
     };
-  }, [dataVersion]);
+
+    const runAttempt = () => {
+      api
+        .years({ signal: controller.signal, timeoutMs: YEARS_BOOTSTRAP_TIMEOUT_MS })
+        .then((result) => {
+          if (!stillCurrent()) return;
+          settle();
+          setYearsData(result);
+          setYearsLoading(false);
+        })
+        .catch((error) => {
+          if (!stillCurrent()) return;
+          if (error?.name === 'AbortError') return;
+          // Backend is seeding its first dataset (empty database, ingest
+          // running): not a failure. Stay in warm-up on the original clock
+          // and schedule a single follow-up attempt.
+          if (error?.code === 'DATA_LOADING') {
+            followup = setTimeout(() => {
+              if (!stillCurrent()) return;
+              runAttempt();
+            }, SEED_FOLLOWUP_MS);
+            return;
+          }
+          settle();
+          setYearsError(error);
+          setYearsLoading(false);
+        });
+    };
+    runAttempt();
+
+    return () => {
+      controller.abort();
+      if (timer !== null) clearInterval(timer);
+      if (followup !== null) clearTimeout(followup);
+    };
+  }, [dataVersion, yearsToken]);
+
+  // Controlled retry ("Try connecting to the backend again"): abort any
+  // in-flight attempt, then start exactly one fresh attempt with a reset
+  // clock. Rapid clicks only supersede — concurrent attempts are impossible.
+  const retryBootstrap = useCallback(() => {
+    yearsController.current?.abort();
+    setYearsToken((t) => t + 1);
+  }, []);
 
   // Eligible countries for the focus picker (backend metadata is the
   // authority for names; the picker lists countries only — no aggregates,
@@ -562,19 +640,15 @@ export default function App() {
           views that use it. Loading/error notices still render everywhere.
         */}
         {yearsLoading || yearsError ? (
-          <div className="filterbar filterbar-compact" role="region" aria-label="Global filters">
-            {yearsLoading ? (
-              <p className="status status-loading" role="status">
-                Loading available years…
-              </p>
+          <div className="filterbar filterbar-compact" role="region" aria-label="Data service status">
+            {yearsLoading && yearsElapsed < WARMUP_THRESHOLD_S ? (
+              <BootstrapWarmup elapsedSec={yearsElapsed} />
             ) : null}
-            {yearsError ? (
-              <div className="status status-error" role="alert">
-                <p>Could not load available years: {yearsError.message}</p>
-                <button type="button" className="btn btn-secondary" onClick={() => setDataVersion((v) => v + 1)}>
-                  Retry
-                </button>
-              </div>
+            {yearsLoading && yearsElapsed >= WARMUP_THRESHOLD_S ? (
+              <BootstrapStillConnecting elapsedSec={yearsElapsed} onRetry={retryBootstrap} />
+            ) : null}
+            {!yearsLoading && yearsError ? (
+              <BootstrapError message={yearsError.message} elapsedSec={yearsElapsed} onRetry={retryBootstrap} />
             ) : null}
           </div>
         ) : null}

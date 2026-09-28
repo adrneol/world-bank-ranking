@@ -51,3 +51,9 @@ export function readableReason(reason) {
   if (!reason) return null;
   return String(reason).replace(/_/g, ' ');
 }
+
+/** Real elapsed seconds for the cold-start bootstrap clock (presentation only). */
+export function formatElapsed(sec) {
+  const n = Math.max(0, Math.floor(sec ?? 0));
+  return `${n} second${n === 1 ? '' : 's'}`;
+}

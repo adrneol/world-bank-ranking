@@ -899,6 +899,107 @@ hr.ddivider {
   color: var(--ok);
 }
 
+/* ---------- bootstrap cold-start states ---------- */
+
+.warmup {
+  padding: 1rem 1.1rem;
+}
+
+.warmup-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.35rem;
+}
+
+.warmup-pulse {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: none;
+  animation: warmup-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes warmup-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+}
+
+.warmup-title {
+  font-weight: 650;
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.warmup-body {
+  margin: 0 0 0.6rem;
+  max-width: 70ch;
+}
+
+.warmup-counter {
+  font-family: var(--mono);
+  font-size: 1.45rem;
+  font-weight: 600;
+  margin: 0 0 0.6rem;
+  color: var(--ink);
+}
+
+.warmup-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #d7e3fa;
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+}
+
+.warmup-bar-fill {
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: warmup-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes warmup-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.warmup-foot {
+  margin: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .warmup-pulse,
+  .warmup-bar-fill {
+    animation: none;
+  }
+}
+
 .muted {
   color: var(--muted);
 }

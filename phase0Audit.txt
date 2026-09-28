@@ -1,0 +1,295 @@
+PHASE 0 — FULL SYSTEM AUDIT
+Read-only. No source files were edited. Diagnostic commands run: local DB timing, EXPLAIN QUERY PLAN, local HTTP timing of GET /api/years, file/config inspection, targeted greps. Implementation is explicitly not started.
+
+1. EXECUTIVE SUMMARY
+What this project is. A World Bank WDI analysis app: Express 5 backend ingests official WDI observations into SQLite and serves backend-calculated ranks/YoY/movements/comparisons; a React 19 + Vite frontend is display-only. Twenty indicators in eight subjects. Ranking/YoY/denominator math lives in backend/src/domain/ + backend/src/services/; the frontend transports results (frontend/src/api/client.js:7 states this explicitly). This separation is intact — no frontend analytical recalculation was found.
+
+Overall architecture (healthy core, three sick edges):
+
+World Bank WDI API
+ → wb/client.js (paginated fetch, retries) + wb/ingest.js (staged publish, locks, TTL)
+ → SQLite data/worldbank.db (raw preserved; 33.3 MB, 228,776 obs, 20 indicators)
+ → domain/ (ranking, yoy, universe, comparison, growthComparison, transforms, *Movement)
+ → services/ (backend-authoritative verification, fail-closed invariants)
+ → Express JSON API (server.js, ~30 routes)
+ → React frontend (single filters object → effective memo → section fetches)
+The three reported problems, in one paragraph each:
+
+/api/years deployed timeout (30 s). Locally the endpoint is fast (measured 458 ms first / 356 ms warm over HTTP; 602 ms / 357 ms at repo level). The handler itself (backend/src/server.js:366-373) is one listAvailableYears() call plus fire-and-forget TTL middleware — it does not await ingestion. The deployed failure is therefore not a slow query on a warm host. The evidence chain points to cold/empty/sleeping-backend boot cost: backend/data/ is git-ignored and no DB file is tracked (git ls-files backend/data = empty), there is no IaC (vercel.json/render.yaml/Dockerfile/etc. all absent), SQLite is a local file (ephemeral on serverless/free-tier disks), and boot() (server.js:1338-1345) performs a blocking full ingest on empty DB (1960→current year × 20 metrics via paginated country/all fetches). Add Render-style sleep/wake (~30–60 s container + Node 22.5 + schema + COUNT(*) + integrity scan), a 24 h TTL background refresh that publishes 228 k rows in one transaction, an N+1 DISTINCT years query, and a frontend that blocks every view behind filtersReady with no AbortController on the years effect — and a 30 s fixed timeout becomes a whole-app outage. Details + measurements in §4.
+Focus-country leak (India sticks). There is no single clean source-of-truth bug; there are four stacked mechanisms: (a) an active display hardcode in RankMovement.jsx (r.iso3 === 'IND' at lines 626, 630, 785, 789, 1765, 1769, 1916, 1920 + ~40 "India…" narrative strings) that highlights/labels India even when country=USA — every other movement family correctly uses focusIso/focusName; (b) Compare defaults coupled to focus (App.jsx:324-326: cmpEntityA = country:${country}, cmpEntityB = USA↔CHN swap) so changing focus rewrites Compare's unresolved defaults; (c) IND-omission in share URLs (App.jsx:368: country omitted when IND) combined with fail-closed-to-IND resolution (App.jsx:314-317); (d) dormant country='IND', focusName='India' prop defaults in ~17 section/component signatures (harmless today because App.jsx always passes explicit props, but any direct render/test without props reverts to India). Cache keys are otherwise correct (every depsKey includes ${country} except Compare-main, where the entity spec already encodes country). Full trace in §5.
+Analytical views / Compare navigation. The registration itself is clean (single ANALYTICAL_VIEWS array, NavDrawer is a correct accessible dialog, aria-current="page", focus return works). The breakage is in state/URL architecture: no router (no Routes/pushState/popstate listener at all), URL mirroring uses replaceState only (App.jsx:382) so browser Back/Forward changes the URL bar without updating state; rankSub/yoySub tab state is not in the URL (App.jsx:155-156, absent from PARAMS); cmp* params are only serialized when view==='compare' (App.jsx:370-380) so a Compare link opened from another view depends on live state; every view switch remounts <main key={dataVersion:view:country}> (App.jsx:648) destroying local pagination/tab/detail state by design. "Current: Status" is derived from routing state (NavDrawer.jsx:156 renders triggerLabel, which App.jsx:542-546 derives from view) — not a separate bug, but the label and the drawer can only agree when view is correct. Compare-specific: its fetch is correctly focus-independent, but its defaults inherit focus (see above) and its Trajectory panel fans out up to 31 api.observations calls. Details in §6.
+Methodology verdict: GDP families flow through the generic ordinal-rank engine with extensive golden protection (perCapitaRegression, comparison oracle sweeps); non-GDP families deliberately diverge (competition ranking, ASC/NEUTRAL directions, signed-domain refusals, four different period dialects, mean-vs-median benchmarks). No invented values, no fake graph data, no frontend math duplication found. The biggest regression hazard is confusing the dialects (ordinal vs competition ranks, [A,B) vs inclusive vs S+1..E periods, positionNumberChange vs placesGained). Details in §7.
+
+2. SYSTEM ARCHITECTURE
+Frontend (frontend/)
+React 19 + Vite 8 (frontend/package.json), dev on :5173 with /api → localhost:3001 proxy (vite.config.js:7-16).
+No router. App.jsx owns one filters object (App.jsx:135-154), derives effective via useMemo (App.jsx:247-336), mirrors to URL via replaceState (App.jsx:354-383).
+API client src/api/client.js: base URL = VITE_API_BASE_URL trimmed, else relative /api (:24-29); per-request AbortController + DEFAULT_REQUEST_TIMEOUT_MS = 30000 (:45); distinct TIMEOUT / NETWORK_ERROR / BAD_RESPONSE / REQUEST_ERROR errors (:99-130); no automatic retries (retry = useApi.retry() + manual buttons).
+Views: INFO_VIEWS (home/methodology/about, header Tabs) + 9-entry ANALYTICAL_VIEWS (overview/data/rank/movement/yoy/compare/coverage/audit/status, NavDrawer dialog). Sections in src/sections/, pickers in src/components/, registry in src/config/metrics.js (hydrated from /api/indicators, static GDP fallback).
+Data fetching per section via hooks/useApi.js (request-id + abort on depsKey change); except the years/countries/indicators bootstrap in App.jsx, which uses manual cancelled flags with no AbortController.
+Backend (backend/)
+Node ≥22.5, Express 5, node:sqlite DatabaseSync single shared handle (db/index.js:19,87-110), WAL on, FK on, idempotent schema + column migrations + value_raw backfill on every open.
+src/server.js (createApp + boot): ~30 routes (/api/health, /api/years, /api/focus/yearly + /api/india/gdp-ranking alias sharing handleYearly, /api/ranking, /api/ranking/verify, /api/yoy-ranking, /api/yoy-ranking/verify, /api/comparison/level, /api/compare, /api/entities, /api/groups/evaluate, /api/periods/summary, 6× /api/movement/* + 6× */country-groups, /api/coverage, /api/observations, /api/countries, /api/metadata, /api/indicators, /api/data-status, /api/integrity, POST /api/data/refresh).
+Auto-refresh middleware wraps 30 GET paths including /api/years (server.js:91-121,338-352): calls maybeAutoRefresh() (reads COUNT(*) + MAX(fetched_at) + latest run + lock state) and on stale/empty fires a fire-and-forget background refreshData(); never awaits, never blocks the response, sets X-Auto-Refresh header.
+boot() (server.js:1311-1397): prod guards (REFRESH_ADMIN_TOKEN + CORS_ORIGINS required) → getDb() → stale-lock recovery → empty ? blocking ensureDataPresent : stale ? background maybeAutoRefresh → warn-only integrity scan → listen.
+Ingestion (wb/ingest.js): fetch range defaults 1960→current calendar year with start-1 predecessor for YoY (deriveFetchRange), per-page 20 000, per-request 30 s timeout with 5 retries + backoff (wb/client.js), staged publish inside one SQLite transaction (publishStagedRefresh), dual single-flight locks (in-memory + refresh_locks id=1), 15 min post-failure cooldown.
+Database
+File backend/data/worldbank.db (33,177,312 bytes / 31.7 MB locally, +32 KB shm, 0 wal at rest; plus untracked worldbank.db.pre-phase5 10.35 MB).
+Tables: countries, indicators (20 rows, metric_key unique), observations PK (country_id, indicator_id, year) with value REAL + value_raw TEXT, fetch_runs, ingest_year_stats, refresh_locks.
+Indexes (6): idx_countries_is_aggregate, idx_countries_iso3, idx_observations_ind_year_value(indicator_id,year,value), idx_observations_country(country_id,indicator_id,year), idx_fetch_runs_started, idx_ingest_year_stats_metric_year. No global-year index — the listAvailableYears global DISTINCT cannot use the leading indicator_id column (confirmed by EXPLAIN QUERY PLAN, see §4).
+Contents measured: 228,776 observations, 20 indicators, 66 years (1960–2025).
+Deployment (as actually configured)
+No IaC in repo: vercel.json, render.yaml/yml, Dockerfile, fly.toml, Procfile, app.yaml all absent (verified). Docs (README Production Deployment + frontend/.env.example) describe: frontend static dist/ on Vercel with real VITE_API_BASE_URL as env var; backend as one long-lived Node process (node src/server.js). Local-only frontend/.env / .env.local are empty-base-URL (same-origin) and git-ignored; tracked .env.development pins empty base URL so vite dev always uses the proxy.
+Backend prod requires REFRESH_ADMIN_TOKEN (present, 64 chars locally — length only, value never read) and CORS_ORIGINS (present locally). CORS is exact-match allowlist, no wildcards; no-Origin requests (curl) pass through.
+Deployment model stated in README: one writer per DB file; multi-host/shared-DB explicitly unsupported; TTL freshness 24 h default.
+Data flow (text diagram)
+WDI API ──wb/client(fetchAllPages, retry)──▶ wb/ingest(refreshData, staged TX, locks)
+  ──▶ SQLite observations (raw REAL + value_raw TEXT preserved)
+  ──▶ domain/* (pure calc: rankByValue ISO3-break ordinal; computeYoy raw-value
+      + null-never-zero guards; universe filter; comparison identities;
+      growth peer-avgs; transforms gates; 6 movement dialects; periods [A,B))
+  ──▶ services/* (validate → atomic reads → engine → verify* fail-closed
+      → formatValue decoration only)
+  ──▶ Express routes (finished numbers + vintage/methodology blocks)
+  ──▶ frontend api/client (transport) → useApi/effective → sections/Charts
+      (verbatim render, gaps stay gaps, backend ranks never renumbered)
+3. SOURCE-OF-TRUTH MAP
+Category	Source	Transformation	Consumer	Notes / violation
+Raw WDI observations	Backend DB (observations + value_raw)	None (preserved)	All services	Clean. value_raw round-trip test-pinned
+Metric/subject registry	Backend /api/indicators → hydrateRegistry	subjectOf(metric), resolveMetricKey	effective.metric/subject, all sections	Static GDP fallback if hydration fails (fail-safe, by design)
+Available years	Backend listAvailableYears	pick() validation in effective	Year selectors, defaults	Never hardcoded (spec §8 honored). filtersReady gates all data views — single point of total failure
+Focus country	URL ?country= → filters.country → effective.country	parseFocusCountry (backend), metadata name lookup	Every api.*({country}) call, headings	Fail-closed to IND; see §5 for 4 leak mechanisms
+Focus display name	Backend countries metadata	eligibleCountries.find(iso3)?.name	focusName props, rankSubs/yoySubs labels	Movement families use backend data.focus override; RankMovement hardcodes "India" strings anyway (§5)
+Derived ranks/YoY/denominators	Backend services	None in frontend	Tables, charts, verification panels	No violations found: no rank/YoY/denominator math in frontend/src (sort helpers only re-order display rows by backend fields)
+Movement decomposition	Backend (comparisonService, *MovementService)	None	RankMovement + 6 family sections	Frontend displays positionNumberChange/placesGained verbatim; sign conventions differ per family (risk, §7)
+Compare entities	URL cmpEntity* → effective.cmp* → backend /api/compare	entityToSpec/parseEntitySpecString	Compare.jsx builder + trajectory	Defaults derive from focus (country:${country}) — coupling, §5
+Groups	User ISO3 list → groupsEvaluate → compare(groupMode)	Backend capability matrix	Compare group builder	Non-aggregatable refused with machine reasons (correct)
+View/route	filters.view → effective.view	isViewId gate, replaceState mirror	<main>, Tabs, NavDrawer, filter bar	No router; Back/Forward broken; sub-tabs not in URL (§6)
+Formatting/scale	Frontend domain/format (backend) + utils/format, chartFormat	displayScaleHint (T/B/M/k), decimals	Labels, tooltips, axes	Presentation-only; tooltips keep registry precision (correct)
+Freshness/vintage	Backend fetch_runs/vintage.js	fingerprintOf	DataStatus, refresh notices, per-response vintage	Background watcher polls data-status (side-effect-free, excluded from auto-refresh triggers — correct)
+Refresh control	POST /api/data/refresh (token + rate limit)	Locks + staged publish	DataStatus UI, handleRefreshed → dataVersion++	Partial refresh publishes nothing (correct)
+4. /api/years FAILURE ANALYSIS
+4.1 Exact request path
+Browser: api.years()  [frontend/src/api/client.js:138 → get('/api/years',{},options)]
+  → App.jsx:181-182  api.years()  (no timeoutMs override → 30000; no signal)
+  → GET {base}/api/years
+  → Express: CORS → JSON → auto-refresh middleware (server.js:339-351)
+  │     maybeAutoRefresh(handle(), …)   // getCacheStatus: COUNT(*) + MAX(fetched_at)
+  │                                      // + latest run + lock check; stale/empty →
+  │                                      //   fire-and-forget refreshData() + X-Auto-Refresh
+  → handler (server.js:366-373): listAvailableYears(handle())
+  │     1× global DISTINCT + N× per-metric DISTINCT (N = 20 indicators)
+  → 200 { years[66], minYear, maxYear, perMetric{20}, defaults{2000,2025}, methodology }
+EXPLAIN QUERY PLAN (measured locally):
+
+Global DISTINCT: SEARCH c USING INDEX idx_countries_is_aggregate → SEARCH o USING INDEX idx_observations_country (country_id=?) → USE TEMP B-TREE FOR DISTINCT. I.e. no covering index on (year) — join + temp-tree distinct over all 228 k rows.
+Per-metric DISTINCT: SEARCH o USING INDEX idx_observations_ind_year_value (indicator_id=?) → indexed, fine.
+repository.js:524-547 loops listIndicators → listYearsWithData per indicator: 1 + 20 = 21 queries per /api/years call. /api/metadata (server.js:1144) and /api/data-status (server.js:1243) call the same function plus COUNT(*)/MAX(fetched_at), so they share the cost profile.
+
+4.2 Exact frontend timeout path
+client.js:45: DEFAULT_REQUEST_TIMEOUT_MS = 30000.
+request() (:66-90): creates internal AbortController, arms setTimeout(30000) → aborts with TimeoutError.
+catch (:99-107): timeout → ApiError("The backend is taking longer than expected (HTTP GET /api/years exceeded 30000 ms). It may be warming up — retry shortly.", {code:'TIMEOUT'}). This is the exact deployed message.
+Years bootstrap (App.jsx:177-196): no signal, no useApi, only a cancelled flag — filter changes/navigation cannot abort it; competing requests pile up.
+Failure UX (App.jsx:564-580): Could not load available years: {message} + Retry button (setDataVersion(v=>v+1) refetches years + countries + indicators simultaneously).
+Blast radius (App.jsx:436,660-742): filtersReady = !yearsLoading && !yearsError && availableYears.length > 0; every data view (overview/data/rank/movement/yoy/compare/coverage/audit) renders only under filtersReady. A years failure is a whole-app outage, including the Status view's siblings (Status itself renders without filtersReady, but nothing else does).
+4.3 Measured timings (local, warm DB present)
+Layer	Measurement	Result
+Repo listAvailableYears	node -e direct, 228,776 obs	602 ms cold / 357 ms warm
+HTTP GET /api/years	in-process createApp({autoRefresh:false}) + fetch	458 ms first / 356 ms second, 200, 66 years (1960–2025)
+HTTP GET /api/metadata	same harness (calls years + more)	520 ms
+DB size	stat	33,176,712 bytes
+EXPLAIN QUERY PLAN	global vs per-metric	global = join + temp B-tree; per-metric = index-assisted
+Conclusion from measurement: the query is sub-second locally and cannot by itself explain a 30 s deployed timeout. The bottleneck is environmental + architectural, not the SQL text.
+
+4.4 Cold/warm/deployed behavior
+Local warm (DB present, TTL fresh): ~0.4 s. Healthy.
+Deployed cold / empty DB: boot() blocks listen on ensureDataPresent full ingest: fetched range 1959(predecessor)→current year × 20 indicators through country/all pagination, each WB request 30 s timeout × 5 retries (wb/client.js:114,162). Expected duration: minutes, not seconds. During this window every request (or connection refusal, depending on boot phase) exceeds the 30 s frontend bound.
+Deployed cold /تریال ephemeral disk: backend/data/ is git-ignored (.gitignore:11-15) and no DB is tracked (git ls-files backend/data empty). Any host with an ephemeral filesystem (Vercel serverless, Render free without persistent disk) starts empty on every deploy/restart/sleep-wake → repeats the full ingest. This is the highest-probability standing cause.
+Sleeping backend: free-tier hosts suspend idle containers; wake = container start + Node 22.5 boot + getDb WAL/schema/migration + COUNT(*) + stale-lock check + integrity scan + (if TTL stale) background refresh spawn — easily 10–60 s before Express answers, all inside the frontend's 30 s window. The "warming up — retry shortly" copy assumes exactly this, but the app has no warmup path that answers /api/years from a cheap source while boot finishes.
+Every-request cost (not just cold): even warm, each /api/years pays the auto-refresh middleware's getCacheStatus (COUNT(*) + MAX(fetched_at) + run lookup) plus 21 DISTINCT queries; when TTL is stale it additionally spawns a background refresh whose single-transaction publish of ~228 k rows contends on the one shared SQLite handle (WAL helps concurrent reads, but the writer's COMMIT plus the sync DatabaseSync API serializes work on one connection). Concurrent years + metadata + data-status + section fetches queue behind it.
+Frontend amplification: Retry bumps dataVersion, refetching years+countries+indicators at once; the years effect has no abort, so rapid retries stack uncancelled 30 s requests; the background data-status watcher (15 s timeout, first check staggered 30 s, App.jsx:446-493) never surfaces errors and does not mitigate.
+4.5 Likely root cause (ranked, evidence-backed)
+Empty/ephemeral DB → blocking boot ingest on the deployed host (evidence: git-ignored backend/data/, no tracked DB, no IaC/persistent-disk config, boot() blocking ingest, local DB 33 MB that cannot arrive via git). Severity: P0.
+Sleep/wake + heavyweight boot on a free-tier host with no warmup/lightweight-readiness path (evidence: 30 s fixed frontend bound, whole-app filtersReady gate, no /api/health-gated degraded UI, "warming up" copy with no warmup architecture). P0.
+N+1 DISTINCT years query + middleware COUNT/MAX on every call with no cache (evidence: 21 queries/call measured; statusCache.js memoizes only integrity, not years). Turns a 0.4 s local call into a multi-second call under contention and makes cold paths worse. P1.
+Missing global-year covering index (evidence: EXPLAIN shows temp B-tree distinct; idx_observations_ind_year_value can't serve the unfiltered global query). P2 alone, P1 combined with (3).
+Frontend years effect without abort + whole-app gate + retry fan-out (evidence: App.jsx:177-196 vs useApi.js:32; filtersReady gating all views; Retry refetches 3 resources). Converts a slow backend into a stuck UI. P1.
+4.6 Possible fix directions (for the implementation phase — not implemented now)
+Persistent disk / pre-seeded DB artifact for the deployed backend (or documented single-host-with-volume topology); never rely on boot ingest in production.
+Boot: listen first, ingest in background; add a cheap readiness endpoint already present (/api/health answers without touching observations — use it for warmup gating).
+Cache listAvailableYears in-process with invalidation on publish (same pattern as statusCache.js), and/or collapse N+1 into grouped queries; add covering index on observations(year, …) — must prove byte-identical payloads before/after.
+Give the years effect a real AbortController (route through useApi or equivalent), decouple views from the global gate where safe (e.g. Status/DataStatus already independent), stagger bootstrap fetches, debounce Retry.
+Do not "fix" by raising the 30 s timeout until the backend answers health+years in well under it on a cold host; a larger timeout without the above only lengthens the outage.
+5. FOCUS COUNTRY BUG ANALYSIS
+5.1 Complete lifecycle (as built)
+URL ?country=USA
+ → readUrlState() once at mount [App.jsx:50-58,135-154] (spread-last over default country:'IND')
+ → filters.country ──► effective.country [App.jsx:314-315: trim/upper/^[A-Z]{3}$ else 'IND']
+ → effective.focusName [App.jsx:316-317: metadata lookup, else 'India' iff IND else raw ISO3]
+ → section props country={effective.country} focusName={effective.focusName} [App.jsx:660-740]
+ → api.*({country}) [client.js:139-289: every data call carries country except
+      health/years/metadata/indicators/entities/compare/groupsEvaluate/dataStatus/integrity/refresh]
+ → backend parseFocusCountry/parseCountry [server.js:198,217-219] default FOCUS_COUNTRY IND [config.js:1460],
+      resolveFocus DB lookup [services/focusCountry.js:28]
+ → response { focus:{iso3,name}, ... indiaValue*/... } (legacy field names, generic values)
+ → section renders (depsKey includes country → correct refetch)
+ → URL mirror [App.jsx:354-383]: country omitted when IND [App.jsx:368]
+Backend handling is generic and correct (focusIso3 params, FOCUS_COUNTRY single default, unknown → 400). The leak is frontend-side, in four layers:
+
+5.2 Layer A — Active display hardcode in RankMovement.jsx (the observed symptom)
+App.jsx:680-696 passes country={effective.country} correctly, and the fetch key is correct (RankMovement.jsx:2871: movement:${metricKey}:${yearA}:${yearB}:…:${basis}:${country} → api.comparisonLevel({…, country})). But the rendered tables ignore the prop:
+
+RankMovement.jsx:626 + :630: <tr className={r.iso3 === 'IND' ? 'row-focus' : …}> + {r.iso3 === 'IND' ? <span> India</span> : null} (main table)
+:785 + :789: same hardcode (middle-year table)
+:1765 + :1769, :1916 + :1920: same hardcode (interval/growth tables — per subagent extraction)
+~40 narrative strings: aria-label="India ranking movement summary" (:138), "India's observed position…", "Above/Below/Crossed India", "Relation to India", "Effect on India's position", filter options Above India in ${a} (:878-902), placeholder="e.g. India, IND, or #12" (:1333), etc.
+Every other movement family does this correctly (CapitalMovement.jsx:569,573,742, FxMovement.jsx:542,546,714, etc.: r.iso3 === focusIso + {focusName}). So: changing focus to USA refetches USA data (backend correct) but the Analysis-family movement tables still highlight and narrate India. This matches the reported screenshot behavior exactly and is the primary bug.
+
+5.3 Layer B — Compare defaults coupled to focus (App.jsx:324-326)
+const cmpEntityA = … ?? `country:${country}`;
+const defaultB = `country:${country === 'USA' ? 'CHN' : 'USA'}`;
+Changing global focus rewrites Compare's defaults even if the user never visited Compare; a shared Compare URL without explicit cmpEntity* resolves differently per viewer's focus. Compare.jsx itself is innocent (its depsKey at :466 correctly omits country — the entity specs already encode it — and its fetches send no country).
+
+5.4 Layer C — IND-default + IND-omission URL round-trip (App.jsx:143,314-317,368)
+Initial state country:'IND'; invalid/missing → 'IND'; display fallback 'India' iff IND.
+Mirror omits country when IND "so existing India links keep working" (:366-368).
+Net effect: India is the gravitational default everywhere (correct for legacy links, but any dropped/empty param — including the no-localStorage reload path, since storage grep = 0 hits) silently becomes India rather than an explicit neutral/empty state.
+5.5 Layer D — Dormant prop defaults (country='IND', focusName='India' in ~17 signatures)
+Overview.jsx:18, Coverage.jsx:13, AuditSource.jsx:13, LevelVerification.jsx:58, YearlyTable.jsx:40, YearComparison.jsx:13, YoyRanking.jsx:26, YoyVerification.jsx:72, FullRanking.jsx:26, all six family movement sections, RankMovement.jsx:51,2852, FocusPicker.jsx:15, MovementCards.jsx:59-60. Currently masked (App always passes explicit values), but any future direct render, test, or new view entry without props reverts to India. FocusPicker's empty-list fallback (free-text ISO3 input) additionally bypasses validation client-side (backend 400s it — safe but rough).
+
+5.6 What is not the cause
+Backend focus handling: generic, DB-driven, tested for CHN/USA/IDN + 400s for XYZ/WLD (focusCountry.test.js:11). Not hard-coded beyond the documented FOCUS_COUNTRY default.
+Memo staleness: effective deps include filters (hence country) and eligibleCountries (hence focusName updates post-metadata-load) — recomputation is correct.
+Cache keys: all section depsKeys include ${country} (48 hits audited); Compare-main intentionally excludes it (entity-spec-keyed). No storage-key leak (no localStorage/sessionStorage usage at all).
+main key={dataVersion:view:country} remounts on focus change — this clears stale local state (pagination/tabs), which is correct isolation, not a leak; but it also means focus changes are destructive to in-progress view state (UX cost, §6).
+5.7 Capability question
+All analysis families accept arbitrary country end-to-end (backend validates any ISO3 in metadata; frontend passes it through; movement LOO uses focusIso3). No family was found with a legitimate India-only limitation — the India persistence is accidental (Layer A) + default gravity (Layers B–D), not methodology.
+
+6. ANALYTICAL VIEWS / COMPARE ANALYSIS
+6.1 Registration & routing (architecture as built)
+ANALYTICAL_VIEWS (9: overview/data/rank/movement/yoy/compare/coverage/audit/status, App.jsx:106-116) is the single registry; isViewId/isAnalyticalView gate it (:118-126); view falls back to 'home' (:265).
+Header Tabs (info views) + NavDrawerTrigger/NavDrawer (analytical) both call the same setFilter('view', v) (App.jsx:526-550); drawer choose() no-ops when selecting the active view (NavDrawer.jsx:99-102).
+PARAMS (App.jsx:48) = the URL vocabulary: years, metric, neighbors, fromYear, view, yearA/B/Mid, basis, country, 9× cmp*. readUrlState runs once; mirror runs on every effective change via replaceState only — no pushState, no popstate/hashchange listener (grep: zero hits outside CSS). Consequences:
+Deep links load correctly (?view=compare&country=USA&… hydrates on boot — covered by App.test).
+In-app navigation replaces history — Back/Forward moves the URL bar without touching state (broken restore; no test covers it).
+rankSub/yoySub (App.jsx:155-156) are not URL state — Rank/YoY sub-tabs reset on reload/share/remount.
+cmp* params serialize only when view==='compare' (:370-380) — navigating away drops Compare specifics from the URL while keeping them in memory; a copied non-Compare URL loses the Compare builder.
+View content: lazy-mounted per view under one remounting <main> (App.jsx:648-742); filter bar hidden for movement/status/compare/home/methodology/about by rendering only (:554-563 comment + :581 condition) — state preserved, DOM destroyed. openSubjectInMovement (Home→Movement, :167-174) and openCompareWith (entity prefill → Compare, :391-401 ← Overview.jsx:107 ← SubjectInsight.jsx:277) are the only cross-view prefills.
+6.2 Drawer/modal (what works, what doesn't)
+Works: true role=dialog aria-modal (NavDrawer.jsx:118-126), body overflow lock (:35-41), initial focus on active item (:46-52), focus return to trigger (:54-69), Escape/Arrow/Home/End (:78-97), scrim close (:110-117), aria-current="page" (:143), "Current: {triggerLabel}" footer (:156) where triggerLabel derives from view (App.jsx:529-546) — so "Current: Status" is canonical, not duplicated; drawer and page cannot disagree unless view itself is wrong.
+Gaps: no focus trap beyond initial focus (Tab can leave the dialog into the locked page); SubTabs (Rank/YoY) are a separate control system from the drawer with no URL presence, so drawer "current" and sub-tab "current" compose rather than agree; mobile/desktop share the same components (responsive handled in CSS + MovementCards + viewport-aware SearchableSelect popover) with no divergent nav logic found — but no test exercises drawer/viewport interaction.
+6.3 Compare workspace (specifics)
+Props all from effective.cmp* (App.jsx:712-733); entities parsed via parseEntitySpecString (Compare.jsx:445-446); fetch gate canFetch requires non-null entities + non-empty groups (:459-465); api.compare sends entity specs + indicator + years + operation + groupMode (:467-485); group previews via api.groupsEvaluate (EntityPicker.jsx:25-31); Trajectory fans out ≤31 api.observations calls (Compare.jsx:297-338).
+State model differs from other views only in defaults source (focus-derived, §5 Layer B) — otherwise it follows the same effective → props → depsKey → fetch pattern. No duplicate Compare state was found (single filters object; no local entity copies).
+Issues: (1) defaults coupling (§5B); (2) close/reopen within the SPA preserves builder state (memory filters), but reload/share depends on cmp* params being present — they are only written while on Compare, so a Compare URL copied from another view is incomplete; (3) direct navigation to ?view=compare without cmpEntity* silently resolves to focus-derived defaults rather than an explicit empty builder; (4) Trajectory fan-out multiplies backend load per Compare visit (up to 31 sequential/parallel observations calls — check concurrency behavior in implementation phase).
+6.4 Responsive notes
+Header/nav/drawer/workspace/controls/graphs/tables all share one CSS system (index.css, 45 KB) with breakpoints exercised by responsive.test.js (static gates) and movementSort/MovementCards mobile fallbacks (focusIso='IND' default again — Layer D). No recent-fix regression was provable statically; git log shows a cluster of responsive fixes (7c5321b, d92d0ea, 85539de) with no contradictory follow-ups. Recommend manual device-matrix verification in the test plan (§14) rather than asserting regressions from code.
+7. METHODOLOGY AUDIT
+All calculations verified against backend/src/domain/ + services/; frontend performs none (confirmed by grep: *100/CAGR hits in frontend are labels/formulas/axis scaling, never economics; chartAdapters.test.js pins exact passthrough with nulls preserved).
+
+7.1 Shared engines (GDP path — approved, must not regress)
+Level rank (domain/ranking.js): keep finite-numbered valid rows only (missing never zero/ranked); sort raw value (never formatted) by direction, ISO3 ASC tie-break, 1-based distinct ordinals (not 1,1,3 / not dense) — deliberate total-order choice; denominator = valid observations for that exact metric-year; directionFor returns DESC/ASC/null, null → services refuse RANK_UNSUPPORTED (never silent).
+YoY (domain/yoy.js): ((cur/prev)−1)×100 on raw values; guards yield null + reason (never 0): both/previous/current_missing, non_finite, both_years_zero, previous_not_positive, sign_change_across_endpoints; cur==0 && prev>0 validly −100%.
+YoY rank (domain/yoyRanking.js): same per-pair rule, order by YoY DESC + ISO3 ASC, own denominator (valid pairs ≤ level denominator).
+Universe (domain/universe.js): aggregate iff region.id==NA || region.value==Aggregates || blank ISO3; precedence missing > non-finite > invalid_year > blank_iso3 > aggregate > unknown (catches XD/XN income-group rows).
+Level comparison (domain/comparison.js): Common/Exited/Entered ISO3 sets; reuses rank engines; positional above/below (never value compare — tie-break safety); identities commonRankA = fullRankA − exitedAboveA, commonRankB = fullRankB − enteredAboveB, fullB−fullA = (commonB−commonA) + enteredAboveB − exitedAboveA; positionNumberChange = Fb−Fa (down-positive) vs placesGained = Fa−Fb (up-positive); verifyComparison fail-closed → COMPARISON_INVARIANT_FAILED with no numbers on breach; three-year extension with COMMON_3 and per-segment identities.
+Growth comparison (growthComparison.js): no cross-interval rank deltas; like-for-like universes G(AB) / G(AM)∩G(MB)∩G(AB); unweighted peer mean (focus excluded, ISO3-sorted sum); vsPeer plain pp subtraction; flow endpoint labelled Annual flow: B vs A.
+Transforms/periods (transforms.js, periods.js): capability-gated (canTransform); percentChange ≡ YoY for valid inputs; CAGR needs years>0, A>0, B≥0; group SUM strict, group ratio recomputed from legs (never averaged); cross-rate A_per_USD/B_per_USD; canonical period is half-open [A,B) with strict completeness (INCOMPLETE_PERIOD + missing list, never zero-filled/silently skipped).
+Coverage (domain/coverage.js): CASE B>C>A>D facts-only with forbidden-phrase test pins (never invents missing-data causes); separate YoY coverage.
+Format (domain/format.js): presentation only (T/B scale hints, decimals).
+7.2 Per-family registry (capability matrix, config.js)
+Family	Metrics	Direction	Change types	Groups	Periods	Notes
+GDP per capita (4)	nominal_current/constant, ppp_current/constant	DESC	ABSOLUTE/PERCENT/YoY/CAGR	refused (NOT_AGGREGATABLE)	none	LEVEL POSITIVE_ONLY, decimals 0
+Total GDP (4)	total_*	DESC	same	SUM (trillions display)	none	Same math, parity-tested vs per-capita
+Prices (3)	inflation_cpi RATE SIGNED	ASC	ABSOLUTE/PP	OFFICIAL_ONLY	—	pp, never relative %
+inflation_cpi_index INDEX	NEUTRAL	ABSOLUTE/INDEX_POINT	OFFICIAL_ONLY	—	level ranking refused
+inflation_deflator RATE SIGNED	ASC	ABSOLUTE/PP	—	—	
+Trade (2)	exports/imports_current FLOW	DESC	ABSOLUTE/PERCENT/YoY/CAGR	SUM	SUM/AVG, trillions	Inclusive S..E periods
+Capital (2)	fdi_inflows FLOW SIGNED	DESC	ABSOLUTE/YoY (no %/CAGR)	SUM (billions)	SUM/AVG	Diagnostics unranked; S+1..E
+fdi_inflows_pct_gdp RATIO	DESC	ABSOLUTE/PP	WEIGHTED_RATIO (ΣFDI/ΣGDP×100, never avg of %)	none	needs total_current leg
+FX (1)	fx_official QUOTED LCU-per-US$	NEUTRAL	ABSOLUTE/PERCENT/YoY	MEMBER_ONLY	none	level unranked; depreciation = rank 1; median benchmark
+External (3)	current_account FLOW SIGNED	DESC	ABSOLUTE/YoY	SUM (billions)	SUM/AVG	intensity Σflow/ΣGDP×100
+reserves_ex_gold LEVEL	DESC	ABSOLUTE/PERCENT/YoY/CAGR	SUM	none	stock (summation semantics flagged §7.3f)
+remittances_received FLOW	DESC	full flow set	SUM	SUM/AVG	
+Population (1)	population_total LEVEL	DESC	ABSOLUTE/PERCENT/YoY/CAGR	SUM (billions display)	none	never summed across years
+7.3 Movement dialects (deliberate divergence — GDP engines untouched)
+Prices 8 bases (CPI-index/inflation/deflator, cumul compounded ∏(1+r/100)−1), Trade 8 (4+4, inclusive), Capital 6+2 diagnostics, FX 3 (endpoints only), External 10 (3+3+4, frozen median-vs-mean split), Population 3. All use competition ranking (1,1,3) — opposite of GDP's ordinal convention — with ASC for Prices, DESC elsewhere (FX directed/frozen). Benchmarks: LOO mean everywhere except FX/External-raw-scale (median); gap signs differ (benchmark−focus vs country−benchmark; FX depreciation-positive). Period dialects: canonical [A,B) vs Trade inclusive S..E vs Capital/External S+1..E vs FX/Population endpoints-only.
+
+7.4 Methodology risks / deviations found
+None of the "must never" list violated: no invented values, no fake graph data, no frontend economics, no cross-unit mixing, no substituted indicator codes (registry integrity asserted at import; test-override path requires NODE_ENV=test + explicit flag).
+Risks (all latent, none observed as live wrong numbers): (a) ordinal-vs-competition confusion if a generic helper is reused across families; (b) period-dialect off-by-one if [A,B) is applied to Prices/Trade/Capital; (c) sign-convention slips (positionNumberChange vs placesGained, gap direction, FX depreciation); (d) YoY-null vs 0% display (UI must render reason, never 0); (e) YoY≠level denominators; (f) reserves SUM / population SUM registry entries vs never-sum-a-stock/never-sum-across-years domain rules — aggregation allowed only across entities, never across time; (g) NEUTRAL-direction bypass would silently invert FX/index economics; (h) mixed-vintage warnings are advisory only.
+8. PERFORMANCE AUDIT
+Endpoint	Queries / work	Cost class	Evidence
+GET /api/years	21 DISTINCT scans (1 global join+temp-tree + 20 indexed) + middleware COUNT(*)+MAX(fetched_at)+run+lock	Highest read-only	458/356 ms local; §4
+GET /api/metadata	years + indicators + counts	Same or higher	520 ms local
+GET /api/data-status	years + fingerprint + runs + cached integrity	Same class	Code path server.js:1193-1249
+GET /api/compare (+trajectory ≤31 obs calls)	entity resolve + per-year reads + group legs	Fan-out risk	Compare.jsx:297-338,467-485
+/api/comparison/level, movement endpoints	2–3 year-slice eligible reads + engine + verify	Moderate, bounded	Atomic getEligibleObservationsForYears
+/api/ranking, /api/yoy-ranking	one year-slice + rank + paginate/search post-compute	Moderate	Search never renumbers (correct)
+POST /api/data/refresh	full WDI fetch + single-TX publish	Minutes; writer-blocks-readers	Locks + 15-min cooldown mitigate repeats
+No setInterval anywhere; only setTimeouts are WB-client sleep/abort (wb/client.js:40,114), request timeouts, and UI timers. No N+1 beyond the years per-metric loop (by design, to keep per-metric coverage). Serialization: /api/years ships 66 years + 20 per-metric arrays (small); /api/metadata and full rankings paginate. Every proposed optimization must preserve byte-identical analytical payloads (golden tests exist to enforce this).
+
+9. DEPLOYMENT AUDIT
+Frontend: static build (vite build → dist/, present locally; git-ignored), hosting per docs = Vercel (Preview+Production VITE_API_BASE_URL). Local frontend/.env + .env.local = empty base (same-origin); .env.development pins empty for dev proxy. Public site metadata envs are display-only. No headers/rewrites config in repo — verify dist/ + env var + /api routing (or absolute backend URL) on the actual Vercel project in implementation phase.
+Backend: node src/server.js, Node ≥22.5 (node:sqlite + process.loadEnvFile dependency), PORT default 3001, DATABASE_FILE default data/worldbank.db. No container/manifest/IaC in repo — the actual host (Render/Vercel/other), disk persistence, sleep policy, and start command must be read off the hosting dashboard, not assumed. Local .env has token + CORS origin (lengths confirmed, values never read).
+Database: local file, WAL, single-writer model; multi-host/shared-DB unsupported by design. No persistence story exists in the repo for the deployed host — this is the central deployment gap (§4.5 item 1).
+Runtime assumptions that break in production: boot-ingests-when-empty (fine locally, fatal on ephemeral disks); TTL background refresh assumes a process that lives >24 h (false on sleeping/scale-to-zero hosts); SQLite file assumes a volume that survives restarts (false on serverless).
+Compatibility verdict: the stack is coherent for a single persistent host (VM/VPS/Render-with-disk/fly-volume). It is not compatible as-is with serverless or diskless free-tier hosting at 33 MB + 228 k rows + multi-minute ingest.
+10. TEST COVERAGE AUDIT
+Backend: 58 test files (accessibilityGate, capitalApi, capitalMovement, chartAdapters, comboPopover, comparison(+Api), config, coverage, dataStatusFingerprint, entityCompare, external(Api+Movement), focusCountry, frontendClientTimeout, fx(Api+Movement), growthComparison(+Api), historicalCoverage, indiaYearly, ingest, integrity, measureRegistry, movementCards, numerical, perCapitaRegression, phase5, phase7b, phase7c1, phase7c2, pointBreaker, population(Api+Movement), prices(Api+Movement), ranking, refreshGeneration, refreshHardening, refreshLock, refreshProgressGate, refreshRateLimit, refreshSecurity, server, services, statusBlockContract, statusCache, subjects, totalGdp, trade(Api+Movement), transforms, ttlRefresh, universe, wbClient, yoy, yoyRanking). README claims 568; direct count ≈562 it/test( (count-method delta, not a failure).
+Protects today: registry integrity + canonical codes; universe/aggregate exclusion incl. blank-ISO3; ties/denominators; YoY null-never-zero; comparison oracle sweep (every metric × year-pair) + frozen API integers + verification.passed===true; phase7b/7c1/7c2 gates; entity weighted-ratio legs; coverage no-invented-cause; value_raw round-trip; per-capita regression (88 metric-years + 217 universe + independent oracle); refresh locks/rate-limit/TTL; frontendClientTimeout TIMEOUT contract; deep-link ?view=/?country= handling; drawer/nav; header context; movement sort; methodology text.
+Missing: /api/years latency/load budget (functional only); Compare.jsx interaction/navigation (no Compare.test.jsx); back/forward + sub-tab URL persistence; arbitrary-focus UI assertions (backend covers CHN/USA/IDN; frontend never asserts a non-India render — the RankMovement hardcode survived because of this); refresh-auth open-endpoint env interaction (README-noted pre-existing); Trajectory fan-out behavior; device-matrix drawer/viewport checks.
+Frontend: 17 test files (RankMovement 8, headerContext 8, site 7, OverviewHistory 7, Methodology 6, methodology 6, movementSort 5, About 5, NavDrawer 5, SearchableSelect 4, methodologyDetails 3, FullRanking 2, Home 2, PricesMovement 1, + cards/responsive static gates). No analytical recalculation (correct — display-only).
+11. ROOT-CAUSE MATRIX
+#	Issue	Evidence	Root cause	Affected files	Severity	Risk	Fix direction	Required regression test
+R1	Deployed /api/years >30 s whole-app outage	Exact TIMEOUT string in prod; local 458/356 ms; filtersReady gates all views	Empty/ephemeral DB → blocking boot ingest; sleeping host; no warmup path	backend/src/server.js:1338-1345,366-373,436; frontend/src/App.jsx:177-196,436,564-580; .gitignore:11-15	P0	High (prod down)	Persistent volume / seeded DB; listen-before-ingest; health-gated UI	Cold-boot test: empty DB → /api/health fast + /api/years bounded; prod fingerprint check
+R2	Years N+1 + uncached + middleware per-call cost	21 queries/call; statusCache only covers integrity; EXPLAIN temp-tree	No years cache; missing global-year index	backend/src/db/repository.js:524-547; services/statusCache.js; db/schema.sql:42-78	P1	Med (perf)	In-process cache invalidated on publish; covering index; collapse loop	Payload byte-identity test + latency budget test
+R3	Years effect unabortable; retry fans out	No AbortController in App.jsx:177-196 vs useApi.js:32; Retry refetches 3 resources	Bootstrap outside useApi pattern	frontend/src/App.jsx:177-238,574	P1	Med (stuck UI)	Route bootstrap through abortable hook; stagger; debounce retry	Abort-on-unmount + retry-singleflight test
+R4	Movement tables still show India after focus change	r.iso3==='IND' ×8 + ~40 "India" strings in RankMovement; siblings use focusIso	Hard-coded display identity in generic component	frontend/src/sections/RankMovement.jsx:138,233-320,487-902,1085-1345,1765-1920,3221	P0	High (wrong country shown)	Parameterize by country/focusName/data.focus; remove literals	Render with country=USA: assert no "India", USA highlighted, fetch used USA
+R5	Changing focus rewrites Compare defaults	App.jsx:324-326 focus-derived cmpEntityA/B	Coupled defaults, no explicit-empty state	frontend/src/App.jsx:321-334,370-380; sections/Compare.jsx:423-485	P1	Med	Decouple: explicit defaults set once / only when entering Compare; keep URL round-trip	Focus-change-while-away-from-Compare test
+R6	Back/Forward + sub-tab + Compare-URL loss	replaceState only; no listeners; rankSub/yoySub ∉ PARAMS; cmp* gated on view	Router-less URL architecture	frontend/src/App.jsx:48-58,155-156,354-383,648	P1	Med (nav)	History sync (pushState+popstate) or documented replace-only + persist subtabs/compare params	Back/forward + reload + deep-link tests
+R7	Dormant IND prop defaults (17 sites)	country='IND', focusName='India' signatures	Copy-pasted fallback convention	17 section/component files (§5.5)	P2	Low-Med (future leak)	Neutral/required props; lint rule	Prop-absence render test
+R8	"Current: X" trust question	Footer renders triggerLabel from view	Not a separate bug — canonical derivation	components/NavDrawer.jsx:156; App.jsx:529-546	P3	Low	Keep; cover with test	Drawer-active-vs-view test
+R9	Methodology dialect confusion hazard	Ordinal vs competition; 4 period dialects; sign conventions	Documented divergence, easy to misuse	domain/*Movement.js, transforms.js, comparison.js	P1 (guard)	High (wrong economics)	No code change now; add cross-family invariant tests before any refactor	Existing goldens must keep passing untouched
+12. CHANGE PLAN (ordered, implementation phase — pending approval)
+P0 — blocking correctness/production
+
+Deployment persistence + readiness: confirm actual host/disk/sleep/start from dashboards; provision persistent volume or seeded DB artifact; make boot() listen before blocking ingest; gate the UI's years load on cheap readiness. Verify cold-boot TIMEOUT gone with production checks (§14).
+RankMovement focus parameterization (R4): replace all IND/India display logic with country/focusName/data.focus; keep fetch/backend untouched. Add the USA-render regression test first (red), then fix (green).
+P1 — important functional 3. Years cost: cache + covering index + loop collapse with byte-identity proof. 4. Bootstrap abortability + retry discipline (R3); consider loosening the global filtersReady gate for views that don't need years (Status already exempt — extend deliberately, never by skipping validation). 5. Compare defaults decoupling (R5) + URL persistence rules (R6, minimal: persist cmp* + subtabs or document replace-only; add popstate handling). 6. Cross-family methodology guard tests (no methodology change — locks current behavior).
+
+P2 — UX improvements 7. Neutralize dormant IND defaults (R7); FocusPicker empty-list UX; remount-destruction softening (preserve pagination where safe); Trajectory fan-out concurrency/limits; device-matrix drawer/viewport pass.
+
+P3 — optional cleanup 8. "Current: X" test pin; doc updates (deployment topology in README once known); log hygiene (never log secrets — already clean).
+
+13. REGRESSION RISKS (must NOT break)
+Approved GDP/per-capita + Total-GDP math parity; generic ordinal-rank engine semantics (distinct ordinals, ISO3 break).
+Backend authority: no rank/YoY/denominator/coverage/comparison computation moves to the frontend.
+Raw-data integrity: value/value_raw preservation, missing-stays-missing, no zero-fill/interpolation/bridging in any series or chart.
+Metric capabilities: rate/pp, index-point, signed-flow, quotation, NEUTRAL-refusal, non-aggregatable refusals, weighted-ratio legs.
+Ranking universes + per-metric-year denominators + YoY-pair denominators; verification.passed===true contracts; COMPARISON_INVARIANT_FAILED fail-closed paths.
+Arbitrary focus-country behavior once fixed (must work for any ISO3, not just USA-for-India swap).
+Missing-data reason codes surfaced, never finessed into zeros.
+Existing golden suites untouched and green: perCapitaRegression, comparison(+Api), phase7b/7c1/7c2, entityCompare, coverage no-invented-cause, numerical, universe, transforms, yoy(+Ranking).
+API compatibility: route shapes, methodology/vintage blocks, legacy /api/india/gdp-ranking alias, ?metric= legacy links, IND-omitted legacy URLs.
+14. TEST PLAN (per fix; production verification included)
+Fix	Before (expected failure)	After (expected behavior)	Regression test (exact scenario)
+Deployment/cold-boot	Empty-DB deploy: /api/years >30 s or refused during boot ingest	/api/health <1 s during boot; /api/years bounded post-seed; no full ingest on warm restart	New backend test: empty DB boot → health fast, years bounded after background seed; prod check: cold fetch /api/health then /api/years ×3 timing + X-Auto-Refresh header observation
+Years cache+index	21 queries, ~0.4 s local, degrades under contention	Identical JSON, fewer queries, p95 budget met	Byte-identity test (payload diff empty) + latency budget test + EXPLAIN index-use assertion
+Bootstrap abort	Rapid nav/retry stacks 30 s requests	Abort on unmount/filter change; singleflight retry	Frontend test: unmount mid-fetch → no state write; double-Retry → one network burst
+RankMovement focus (R4)	country=USA renders "India", highlights IND row	Renders "United States", highlights USA row, headings/relations use focus	New RankMovement test: props country="USA" focusName="United States" + mocked comparisonLevel USA payload → assert zero "India" strings, row-focus on USA, fetch called with country:"USA"
+Compare decoupling (R5)	Focus change rewrites unseen Compare defaults	Compare defaults stable unless explicitly edited/entered	App test: set focus USA→JPN while view=overview → cmpEntityA/B unchanged unless previously defaulted-and-unvisited (define rule first)
+Router/history (R6)	Back/Forward desync; subtab loss; Compare URL loss	Back/Forward restores; subtabs + Compare shareable	App tests: push/replace sequence, popstate restore, reload with ?view=rank subtab, ?view=compare&cmp* direct load
+Dormant defaults (R7)	Omitted props → India	Omitted props → explicit neutral or required-prop warning	Render-every-section-without-country test
+Methodology guards	— (no change)	Current numbers pinned	Run full backend suite + frontend suite green before/after every change; goldens untouched
+Production verification steps (post-implementation): cold-load deployed frontend → record /api/years timing ×3 (cold/warm/warm); confirm no Could not load available years; switch focus India→USA→JPN across Overview/Data/Rank/Movement/YoY/Compare/Coverage/Audit and screenshot each; deep-link ?view=compare&country=USA&cmpEntityA=country:USA&cmpEntityB=country:CHN fresh-load; browser Back/Forward walk; mobile + desktop drawer pass; manual refresh + TTL-background notice observation.
+
+Appendix — key file:line index (audit anchors)
+Frontend timeout: frontend/src/api/client.js:45,66-107,138 · error surface frontend/src/App.jsx:571-577 · gate App.jsx:436,660-742 · bootstrap App.jsx:177-238 · watcher App.jsx:446-493 · DataStatus timeouts frontend/src/sections/DataStatus.jsx:21-45,64-77,128-139
+Focus: App.jsx:143,314-317,324-326,368 · FocusPicker.jsx:15,21-34 · RankMovement.jsx:51,2852,2871-2888 + hardcodes §5.2 · siblings' correct pattern CapitalMovement.jsx:569,573,742 · backend backend/src/config.js:1460, server.js:198,217-219, services/focusCountry.js:28, services/indiaYearly.js:55,180
+Views/Compare: App.jsx:48-58,100-126,155-156,247-383,526-550,648-742 · NavDrawer.jsx:99-156 · Tabs.jsx:11-124 · Compare.jsx:297-485 · headerContext.js:27-58
+Backend/DB: server.js:91-121,322-373,1311-1397 · db/index.js:19,87-150 · db/repository.js:503-547 · db/schema.sql:42-151 · wb/ingest.js:91-110,347-442,748-861 · wb/client.js:40,114,162
+Methodology: domain/ranking.js,yoy.js,yoyRanking.js,universe.js,comparison.js,growthComparison.js,transforms.js,periods.js,coverage.js,format.js,*Movement.js · services/comparisonService.js,growthComparisonService.js,entityCompare.js,coverageService.js,fullRanking.js · tests: 58 backend files (§10), 17 frontend files (§10)
+Audit complete. STOPPING here per instructions — no implementation until you explicitly approve the next phase.
+
