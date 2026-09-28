@@ -46,7 +46,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country', 'cmpEntityA', 'cmpEntityB', 'cmpLabelA', 'cmpLabelB', 'cmpMetric', 'cmpYearA', 'cmpYearB', 'cmpOp', 'cmpMode'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country', 'cmpEntityA', 'cmpEntityB', 'cmpLabelA', 'cmpLabelB', 'cmpMetric', 'cmpYearA', 'cmpYearB', 'cmpOp', 'cmpMode', 'rankSub', 'yoySub'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -57,6 +57,65 @@ function readUrlState() {
   }
   return state;
 }
+
+// Rank/YoY workspace sub-tabs are URL state (shareable, reload-stable).
+// Unknown values fall back to the existing defaults.
+function readRankSub() {
+  const value = new URLSearchParams(window.location.search).get('rankSub');
+  return value === 'table' ? 'table' : 'verify';
+}
+
+function readYoySub() {
+  const value = new URLSearchParams(window.location.search).get('yoySub');
+  return value === 'verify' ? 'verify' : 'ranking';
+}
+
+// Primary navigation dimensions: changes to these push a browser history
+// entry; all other filter tweaks replace the current entry in place.
+function navKey(effective, rankSub, yoySub) {
+  return [
+    effective.view,
+    effective.country,
+    effective.metric,
+    rankSub,
+    yoySub,
+    effective.cmpEntityA,
+    effective.cmpEntityB,
+  ].join('|');
+}
+
+// Canonical initial filter state: product defaults overlaid once with the
+// URL at startup. popstate restores use the same constructor so an omitted
+// parameter (e.g. country for the IND default) resets to its default
+// instead of leaking the previous state's value.
+function defaultFilters() {
+  return {
+    startYear: null,
+    endYear: null,
+    year: null,
+    metric: 'nominal_current',
+    neighbors: 5,
+    fromYear: '',
+    view: 'home',
+    country: 'IND',
+    cmpEntityA: '',
+    cmpEntityB: '',
+    cmpLabelA: '',
+    cmpLabelB: '',
+    cmpMetric: 'total_current',
+    cmpYearA: null,
+    cmpYearB: null,
+    cmpOp: 'level',
+    cmpMode: 'observed',
+    ...readUrlState(),
+  };
+}
+
+// Default-country geolocation policy (Phase 3, Part B): one mount-only
+// lookup, applied solely as the INITIAL default when no explicit country
+// exists (URL or in-session user choice). Never polled, never re-applied,
+// never an override. Bounded so a slow provider cannot delay the app.
+const GEO_TIMEOUT_MS = 4000;
 
 function YearOptions({ years, id, value, onChange, label }) {
   return (
@@ -155,30 +214,25 @@ export default function App() {
   const [dataVersion, setDataVersion] = useState(0);
   const [refreshNotice, setRefreshNotice] = useState(null);
 
-  const [filters, setFilters] = useState(() => ({
-    startYear: null,
-    endYear: null,
-    year: null,
-    metric: 'nominal_current',
-    neighbors: 5,
-    fromYear: '',
-    view: 'home',
-    country: 'IND',
-    cmpEntityA: '',
-    cmpEntityB: '',
-    cmpLabelA: '',
-    cmpLabelB: '',
-    cmpMetric: 'total_current',
-    cmpYearA: null,
-    cmpYearB: null,
-    cmpOp: 'level',
-    cmpMode: 'observed',
-    ...readUrlState(),
-  }));
-  const [rankSub, setRankSub] = useState('verify');
-  const [yoySub, setYoySub] = useState('ranking');
+  const [filters, setFilters] = useState(defaultFilters);
+  const [rankSub, setRankSub] = useState(readRankSub);
+  const [yoySub, setYoySub] = useState(readYoySub);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTriggerRef = useRef(null);
+  // Default-country precedence (Phase 3, Part B): explicit URL country >
+  // in-session user choice > IP-derived default > India fallback. The ref
+  // records the first two; geolocation may only fill the gap before either
+  // exists. popstate-driven URL countries count as explicit.
+  const countryExplicitRef = useRef(
+    new URLSearchParams(window.location.search).get('country') != null &&
+      new URLSearchParams(window.location.search).get('country') !== '',
+  );
+  // History sync (Phase 3, Part D): last pushed URL + the key fields that
+  // earn a history entry. popSuppressRef skips one mirror sync after a
+  // popstate restore so normalization never rewrites the history stack.
+  const lastUrlRef = useRef(null);
+  const lastNavRef = useRef(null);
+  const popSuppressRef = useRef(false);
 
   // Public site display metadata (About/Home labels only; analytical data
   // always comes from the backend). Resolved once per render from Vite env.
@@ -398,10 +452,12 @@ export default function App() {
     const subject = subjectOf(metric);
     // Compare workspace state (single source of truth, URL-shareable).
     // Entity specs are validated strictly by the backend; here they only
-    // need to be non-empty, with focus/country-aware defaults.
-    const cmpEntityA = filters.cmpEntityA != null && String(filters.cmpEntityA).trim() !== '' ? String(filters.cmpEntityA).trim() : `country:${country}`;
-    const defaultB = `country:${country === 'USA' ? 'CHN' : 'USA'}`;
-    const cmpEntityB = filters.cmpEntityB != null && String(filters.cmpEntityB).trim() !== '' ? String(filters.cmpEntityB).trim() : defaultB;
+    // need to be non-empty. Defaults are NOT derived here: they initialize
+    // once when Compare is first entered (see the lazy-init effect below),
+    // so later focus-country changes can never silently rewrite an
+    // existing Compare configuration.
+    const cmpEntityA = filters.cmpEntityA != null ? String(filters.cmpEntityA).trim() : '';
+    const cmpEntityB = filters.cmpEntityB != null ? String(filters.cmpEntityB).trim() : '';
     const cmpLabelA = filters.cmpLabelA != null ? String(filters.cmpLabelA) : '';
     const cmpLabelB = filters.cmpLabelB != null ? String(filters.cmpLabelB) : '';
     const cmpMetric = resolveMetricKey(filters.cmpMetric) ?? 'total_current';
@@ -428,8 +484,46 @@ export default function App() {
     [effective.focusName],
   );
 
-  // Mirror effective state to the URL (UI state only, never business logic).
+  // Compare defaults lazy-init (Phase 3, Part C): exactly one canonical
+  // rule. When the Compare workspace becomes active with an empty entity
+  // slot, that slot initializes from the CURRENT focus country
+  // (A = focus, B = USA unless focus is USA, then CHN). Non-empty slots —
+  // user selections, explicit URL params, deep-link prefills — are never
+  // touched, so focus changes elsewhere never rewrite Compare.
   useEffect(() => {
+    if (effective.view !== 'compare') return;
+    setFilters((prev) => {
+      const a = prev.cmpEntityA != null ? String(prev.cmpEntityA).trim() : '';
+      const b = prev.cmpEntityB != null ? String(prev.cmpEntityB).trim() : '';
+      if (a !== '' && b !== '') return prev;
+      const focus = String(effective.country ?? 'IND').trim().toUpperCase() || 'IND';
+      return {
+        ...prev,
+        cmpEntityA: a !== '' ? prev.cmpEntityA : `country:${focus}`,
+        cmpEntityB: b !== '' ? prev.cmpEntityB : `country:${focus === 'USA' ? 'CHN' : 'USA'}`,
+      };
+    });
+    // Runs when Compare activates or when its slots/focus change while
+    // active; filling one slot never clears the other.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effective.view, filters.cmpEntityA, filters.cmpEntityB, effective.country]);
+
+  // Mirror effective state to the URL (UI state only, never business logic).
+  // History model (Phase 3, Part D): the first sync replaces (normalizing
+  // legacy URLs); afterwards, changes to the primary navigation dimensions
+  // (view, country, metric, rank/yoy sub-tab, compare entities) push a new
+  // history entry so Back/Forward restores state, while secondary tweaks
+  // (years, neighbors, basis, labels, modes) replace in place.
+  // Compare entity state serializes whenever non-empty — on any view — so a
+  // URL copied anywhere reconstructs the Compare workspace. Rank/YoY
+  // sub-tabs serialize on their own views so shared links reproduce them.
+  useEffect(() => {
+    if (popSuppressRef.current) {
+      popSuppressRef.current = false;
+      lastUrlRef.current = window.location.search;
+      lastNavRef.current = navKey(effective, rankSub, yoySub);
+      return;
+    }
     const query = new URLSearchParams();
     if (effective.startYear != null) query.set('startYear', effective.startYear);
     if (effective.endYear != null) query.set('endYear', effective.endYear);
@@ -445,23 +539,99 @@ export default function App() {
     // India links keep working unchanged and stay clean.
     if (effective.country !== 'IND') query.set('country', effective.country);
     query.set('view', effective.view);
-    if (effective.view === 'compare') {
-      query.set('cmpEntityA', effective.cmpEntityA);
-      query.set('cmpEntityB', effective.cmpEntityB);
-      if (effective.cmpLabelA !== '') query.set('cmpLabelA', effective.cmpLabelA);
-      if (effective.cmpLabelB !== '') query.set('cmpLabelB', effective.cmpLabelB);
-      query.set('cmpMetric', effective.cmpMetric);
-      if (effective.cmpYearA != null) query.set('cmpYearA', effective.cmpYearA);
-      if (effective.cmpYearB != null) query.set('cmpYearB', effective.cmpYearB);
-      query.set('cmpOp', effective.cmpOp);
-      if (effective.cmpMode !== 'observed') query.set('cmpMode', effective.cmpMode);
-    }
+    if (effective.cmpEntityA !== '') query.set('cmpEntityA', effective.cmpEntityA);
+    if (effective.cmpEntityB !== '') query.set('cmpEntityB', effective.cmpEntityB);
+    if (effective.cmpLabelA !== '') query.set('cmpLabelA', effective.cmpLabelA);
+    if (effective.cmpLabelB !== '') query.set('cmpLabelB', effective.cmpLabelB);
+    query.set('cmpMetric', effective.cmpMetric);
+    if (effective.cmpYearA != null) query.set('cmpYearA', effective.cmpYearA);
+    if (effective.cmpYearB != null) query.set('cmpYearB', effective.cmpYearB);
+    query.set('cmpOp', effective.cmpOp);
+    if (effective.cmpMode !== 'observed') query.set('cmpMode', effective.cmpMode);
+    if (effective.view === 'rank') query.set('rankSub', rankSub);
+    if (effective.view === 'yoy') query.set('yoySub', yoySub);
     const next = `?${query.toString()}`;
-    if (window.location.search !== next) window.history.replaceState(null, '', next);
-  }, [effective]);
+    if (window.location.search === next) {
+      lastUrlRef.current = next;
+      lastNavRef.current = navKey(effective, rankSub, yoySub);
+      return;
+    }
+    const nav = navKey(effective, rankSub, yoySub);
+    if (lastUrlRef.current === null || lastNavRef.current !== nav) {
+      window.history.pushState(null, '', next);
+    } else {
+      window.history.replaceState(null, '', next);
+    }
+    lastUrlRef.current = next;
+    lastNavRef.current = nav;
+  }, [effective, rankSub, yoySub]);
 
   const setFilter = useCallback((key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  // Explicit user country choice: marks the session as user-directed (IP
+  // detection must never override it afterwards) and stores the value.
+  // Every country picker in the app routes through here.
+  const setCountry = useCallback(
+    (value) => {
+      countryExplicitRef.current = true;
+      setFilter('country', value);
+    },
+    [setFilter],
+  );
+
+  // IP-derived initial default (mount-only): when the URL carries no
+  // explicit country, ask the backend once for a validated ISO3. Applied
+  // only if the user has not chosen explicitly in the meantime; any
+  // failure, invalid value or unknown country keeps the India fallback.
+  // Runs in parallel with the years bootstrap (which gates first paint),
+  // so no India→detected flash is visible in the normal case.
+  useEffect(() => {
+    if (countryExplicitRef.current) return undefined;
+    const controller = new AbortController();
+    let settled = false;
+    api
+      .geoCountry({ signal: controller.signal, timeoutMs: GEO_TIMEOUT_MS })
+      .then((result) => {
+        if (settled || controller.signal.aborted) return;
+        settled = true;
+        const iso3 = String(result?.iso3 ?? '').trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(iso3)) return;
+        if (countryExplicitRef.current) return;
+        setFilters((prev) => {
+          const current = String(prev.country ?? 'IND').trim().toUpperCase();
+          if (current !== 'IND') return prev;
+          return { ...prev, country: iso3 };
+        });
+      })
+      .catch(() => {
+        // Silent: fallback country stays active.
+      });
+    return () => {
+      settled = true;
+      controller.abort();
+    };
+  }, []);
+
+  // Browser history restore: popstate (Back/Forward) replaces the whole
+  // filter state from the URL, including sub-tabs. The mirror effect skips
+  // its next sync (popSuppressRef) so URL normalization cannot rewrite the
+  // entry the user just navigated to. A URL country always counts as
+  // explicit, so Back/Forward can never resurrect a stale geo default.
+  useEffect(() => {
+    const onPopState = () => {
+      const query = new URLSearchParams(window.location.search);
+      if (query.get('country') !== null && query.get('country') !== '') {
+        countryExplicitRef.current = true;
+      }
+      popSuppressRef.current = true;
+      setFilters(defaultFilters());
+      setRankSub(readRankSub());
+      setYoySub(readYoySub());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   // Deep link from subject views (e.g. FX cross-rate): prefill the Compare
@@ -672,7 +842,7 @@ export default function App() {
               <FocusPicker
                 countries={eligibleCountries}
                 value={effective.country}
-                onChange={(v) => setFilter('country', v)}
+                onChange={(v) => setCountry(v)}
               />
               <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
               <SearchableSelect
@@ -766,7 +936,7 @@ export default function App() {
               onYearMid={(v) => setFilter('yearMid', v ?? '')}
               onMetric={(v) => setFilter('metric', v)}
               onBasis={(v) => setFilter('basis', v)}
-              onCountry={(v) => setFilter('country', v)}
+              onCountry={(v) => setCountry(v)}
             />
           ) : null}
           {filtersReady && view === 'yoy' ? (

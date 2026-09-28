@@ -1,0 +1,1704 @@
+{
+ "prices": {
+  "metric": {
+   "key": "inflation_cpi",
+   "subject": "prices",
+   "indicatorCode": "FP.CPI.TOTL.ZG",
+   "label": "CPI inflation — annual %",
+   "shortLabel": "CPI inflation",
+   "unit": "annual %",
+   "unitLong": "annual %",
+   "currencySymbol": null,
+   "group": "prices",
+   "priceBasis": "NOT_APPLICABLE",
+   "ppp": false,
+   "baseYear": null,
+   "displayScale": null,
+   "worldBankPage": "https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG"
+  },
+  "basis": {
+   "id": "cpi_inflation_cumulative",
+   "metricKey": "inflation_cpi",
+   "label": "Cumulative CPI inflation (%)",
+   "description": "Compounded total consumer-price increase over S+1 through E. Inflation compounds; annual rates are never summed.",
+   "formula": "[prod(t=S+1..E)(1+Inflation(t)/100) - 1] * 100",
+   "unit": "%",
+   "rankable": true,
+   "rankDirection": "ASC",
+   "rankWording": "Ranked by lower cumulative consumer-price increase",
+   "requiresSequence": true
+  },
+  "focus": {
+   "iso3": "USA",
+   "name": "United States"
+  },
+  "years": {
+   "a": 2004,
+   "b": 2014,
+   "order": "a_is_earlier"
+  },
+  "group": {
+   "type": null,
+   "value": "All"
+  },
+  "source": {
+   "provider": "World Bank",
+   "dataset": "World Development Indicators (WDI)",
+   "apiDocumentation": [
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898581",
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"
+   ],
+   "wording": "Rank calculated from World Bank WDI observations.",
+   "disclaimer": "The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.",
+   "focusCountry": {
+    "iso3": "IND",
+    "name": "India"
+   },
+   "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "available": true,
+  "reason": null,
+  "kind": "period",
+  "observed": [
+   {
+    "period": "2004→2014",
+    "requiredYears": [
+     2005,
+     2006,
+     2007,
+     2008,
+     2009,
+     2010,
+     2011,
+     2012,
+     2013,
+     2014
+    ],
+    "basis": {
+     "id": "cpi_inflation_cumulative",
+     "label": "Cumulative CPI inflation (%)",
+     "formula": "[prod(t=S+1..E)(1+Inflation(t)/100) - 1] * 100",
+     "unit": "%",
+     "rankWording": "Ranked by lower cumulative consumer-price increase"
+    },
+    "eligibleCount": 177,
+    "focus": {
+     "iso3": "USA",
+     "value": 25.334598076414096,
+     "rank": 29,
+     "denominator": 177,
+     "benchmark": 83.48727030517806,
+     "benchmarkPeerCount": 176,
+     "pp": 58.15267222876396,
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 25.334598076414096,
+      "rank": 29
+     },
+     {
+      "iso3": "JPN",
+      "name": "Japan",
+      "value": 2.0638131839626705,
+      "rank": 1
+     },
+     {
+      "iso3": "BLZ",
+      "name": "Belize",
+      "value": 4.485261714918365,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 176
+    },
+    "_names": {},
+    "universe": "observed",
+    "incompleteCount": 15
+   }
+  ],
+  "likeForLike": [
+   {
+    "period": "2004→2014",
+    "requiredYears": [
+     2005,
+     2006,
+     2007,
+     2008,
+     2009,
+     2010,
+     2011,
+     2012,
+     2013,
+     2014
+    ],
+    "basis": {
+     "id": "cpi_inflation_cumulative",
+     "label": "Cumulative CPI inflation (%)",
+     "formula": "[prod(t=S+1..E)(1+Inflation(t)/100) - 1] * 100",
+     "unit": "%",
+     "rankWording": "Ranked by lower cumulative consumer-price increase"
+    },
+    "eligibleCount": 177,
+    "focus": {
+     "iso3": "USA",
+     "value": 25.334598076414096,
+     "rank": 29,
+     "denominator": 177,
+     "benchmark": 83.48727030517806,
+     "benchmarkPeerCount": 176,
+     "pp": 58.15267222876396,
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 25.334598076414096,
+      "rank": 29
+     },
+     {
+      "iso3": "JPN",
+      "name": "Japan",
+      "value": 2.0638131839626705,
+      "rank": 1
+     },
+     {
+      "iso3": "BLZ",
+      "name": "Belize",
+      "value": 4.485261714918365,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 176
+    },
+    "_names": {},
+    "universe": "like-for-like"
+   }
+  ],
+  "likeForLikeUniverseSize": 177,
+  "verification": {
+   "passed": true,
+   "checks": [
+    {
+     "check": "basis_formula_unchanged_across_universes",
+     "passed": true
+    }
+   ]
+  }
+ },
+ "capital": {
+  "metric": {
+   "key": "fdi_inflows",
+   "subject": "capital_flows",
+   "indicatorCode": "BX.KLT.DINV.CD.WD",
+   "label": "FDI net inflows — current US$",
+   "shortLabel": "FDI net inflows",
+   "unit": "current US$",
+   "unitLong": "current US$",
+   "currencySymbol": "$",
+   "group": "flows",
+   "priceBasis": "current",
+   "ppp": false,
+   "baseYear": null,
+   "displayScale": "billions",
+   "worldBankPage": "https://data.worldbank.org/indicator/BX.KLT.DINV.CD.WD"
+  },
+  "basis": {
+   "id": "fdi_annual_value",
+   "metricKey": "fdi_inflows",
+   "label": "Annual net FDI",
+   "question": "How much net FDI entered the economy during the selected year?",
+   "formula": "F(i,t) = raw WDI BX.KLT.DINV.CD.WD",
+   "unit": "current US$",
+   "gapUnit": "current US$",
+   "rankWording": "Ranked by largest annual net FDI inflow",
+   "rankable": true,
+   "rankDirection": "DESC",
+   "requiresSequence": false
+  },
+  "focus": {
+   "iso3": "USA",
+   "name": "United States"
+  },
+  "years": {
+   "a": 2004,
+   "b": 2014,
+   "order": "a_is_earlier"
+  },
+  "group": {
+   "type": null,
+   "value": "All"
+  },
+  "flowNote": "FDI net inflows are flows, not stocks. Cumulative FDI is the sum of annual net flows; negative and zero flows are valid data.",
+  "source": {
+   "provider": "World Bank",
+   "dataset": "World Development Indicators (WDI)",
+   "apiDocumentation": [
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898581",
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"
+   ],
+   "wording": "Rank calculated from World Bank WDI observations.",
+   "disclaimer": "The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.",
+   "focusCountry": {
+    "iso3": "IND",
+    "name": "India"
+   },
+   "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "available": true,
+  "reason": null,
+  "kind": "annual",
+  "observed": [
+   {
+    "year": 2004,
+    "basis": {
+     "id": "fdi_annual_value",
+     "label": "Annual net FDI",
+     "question": "How much net FDI entered the economy during the selected year?",
+     "formula": "F(i,t) = raw WDI BX.KLT.DINV.CD.WD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual net FDI inflow"
+    },
+    "eligibleCount": 192,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 213641000000,
+     "valueDisplay": "$213.64 billion",
+     "rank": 1,
+     "denominator": 192,
+     "benchmark": 4155650097.644548,
+     "benchmarkDisplay": "$4.16 billion",
+     "benchmarkPeerCount": 191,
+     "gap": 209485349902.35544,
+     "gapDisplay": "+$209.49 billion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 213641000000,
+      "rank": 1
+     },
+     {
+      "iso3": "NLD",
+      "name": "Netherlands",
+      "value": 139920688181.89,
+      "rank": 2
+     },
+     {
+      "iso3": "GBR",
+      "name": "United Kingdom",
+      "value": 87059621382.2838,
+      "rank": 3
+     }
+    ],
+    "universe": "observed"
+   },
+   {
+    "year": 2014,
+    "basis": {
+     "id": "fdi_annual_value",
+     "label": "Annual net FDI",
+     "question": "How much net FDI entered the economy during the selected year?",
+     "formula": "F(i,t) = raw WDI BX.KLT.DINV.CD.WD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual net FDI inflow"
+    },
+    "eligibleCount": 198,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 251856000000,
+     "valueDisplay": "$251.86 billion",
+     "rank": 2,
+     "denominator": 198,
+     "benchmark": 8689455973.699068,
+     "benchmarkDisplay": "$8.69 billion",
+     "benchmarkPeerCount": 197,
+     "gap": 243166544026.30093,
+     "gapDisplay": "+$243.17 billion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 251856000000,
+      "rank": 2
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 268097181064.335,
+      "rank": 1
+     },
+     {
+      "iso3": "NLD",
+      "name": "Netherlands",
+      "value": 144140814142.929,
+      "rank": 3
+     }
+    ],
+    "universe": "observed"
+   }
+  ],
+  "likeForLike": [
+   {
+    "year": 2004,
+    "basis": {
+     "id": "fdi_annual_value",
+     "label": "Annual net FDI",
+     "question": "How much net FDI entered the economy during the selected year?",
+     "formula": "F(i,t) = raw WDI BX.KLT.DINV.CD.WD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual net FDI inflow"
+    },
+    "eligibleCount": 190,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 213641000000,
+     "valueDisplay": "$213.64 billion",
+     "rank": 1,
+     "denominator": 190,
+     "benchmark": 4196281315.6090403,
+     "benchmarkDisplay": "$4.20 billion",
+     "benchmarkPeerCount": 189,
+     "gap": 209444718684.39096,
+     "gapDisplay": "+$209.44 billion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 213641000000,
+      "rank": 1
+     },
+     {
+      "iso3": "NLD",
+      "name": "Netherlands",
+      "value": 139920688181.89,
+      "rank": 2
+     },
+     {
+      "iso3": "GBR",
+      "name": "United Kingdom",
+      "value": 87059621382.2838,
+      "rank": 3
+     }
+    ],
+    "universe": "like-for-like"
+   },
+   {
+    "year": 2014,
+    "basis": {
+     "id": "fdi_annual_value",
+     "label": "Annual net FDI",
+     "question": "How much net FDI entered the economy during the selected year?",
+     "formula": "F(i,t) = raw WDI BX.KLT.DINV.CD.WD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual net FDI inflow"
+    },
+    "eligibleCount": 190,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 251856000000,
+     "valueDisplay": "$251.86 billion",
+     "rank": 2,
+     "denominator": 190,
+     "benchmark": 9043511486.35399,
+     "benchmarkDisplay": "$9.04 billion",
+     "benchmarkPeerCount": 189,
+     "gap": 242812488513.646,
+     "gapDisplay": "+$242.81 billion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 251856000000,
+      "rank": 2
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 268097181064.335,
+      "rank": 1
+     },
+     {
+      "iso3": "NLD",
+      "name": "Netherlands",
+      "value": 144140814142.929,
+      "rank": 3
+     }
+    ],
+    "universe": "like-for-like"
+   }
+  ],
+  "descriptive": {
+   "kind": "fdi_flow_change",
+   "diagnosticOnly": true,
+   "note": "Change in annual FDI flow (endpoint diagnostic only; not cumulative period FDI).",
+   "periods": [
+    {
+     "period": "2004→2014",
+     "available": true,
+     "endpointChange": 38215000000,
+     "startValue": 213641000000,
+     "endValue": 251856000000
+    }
+   ]
+  },
+  "verification": {
+   "passed": true,
+   "checks": [
+    {
+     "check": "basis_formula_unchanged_across_universes",
+     "passed": true
+    }
+   ]
+  }
+ },
+ "fx": {
+  "metric": {
+   "key": "fx_official",
+   "subject": "exchange",
+   "indicatorCode": "PA.NUS.FCRF",
+   "label": "Official exchange rate — LCU per US$",
+   "shortLabel": "Official FX vs USD",
+   "unit": "LCU per US$",
+   "unitLong": "local currency units per US$ (period average)",
+   "currencySymbol": null,
+   "group": "fx",
+   "priceBasis": "NOT_APPLICABLE",
+   "ppp": false,
+   "baseYear": null,
+   "displayScale": null,
+   "worldBankPage": "https://data.worldbank.org/indicator/PA.NUS.FCRF"
+  },
+  "basis": {
+   "id": "fx_annual_change",
+   "metricKey": "fx_official",
+   "label": "Annual Nominal FX Change",
+   "question": "How did the official nominal exchange rate move against the USD over the year?",
+   "formula": "((ER(t)/ER(t-1)) - 1) * 100",
+   "unit": "%",
+   "rankable": true,
+   "rankDirection": "DESC",
+   "rankWording": "Ranked by greatest nominal depreciation vs USD",
+   "benchmarkType": "median",
+   "note": "Positive = nominal depreciation vs USD; negative = nominal appreciation vs USD."
+  },
+  "focus": {
+   "iso3": "USA",
+   "name": "United States"
+  },
+  "years": {
+   "a": 2004,
+   "b": 2014,
+   "order": "a_is_earlier"
+  },
+  "group": {
+   "type": null,
+   "value": "All"
+  },
+  "nominalNote": "Nominal official bilateral movement vs USD only — not real, PPP, competitiveness, or comprehensive currency-strength measurement.",
+  "continuityNote": "The project stores no authoritative currency-redenomination metadata. Changes are calculated from stored WDI observations as published.",
+  "source": {
+   "provider": "World Bank",
+   "dataset": "World Development Indicators (WDI)",
+   "apiDocumentation": [
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898581",
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"
+   ],
+   "wording": "Rank calculated from World Bank WDI observations.",
+   "disclaimer": "The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.",
+   "focusCountry": {
+    "iso3": "IND",
+    "name": "India"
+   },
+   "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "available": true,
+  "reason": null,
+  "kind": "annual",
+  "observed": [
+   {
+    "year": 2004,
+    "requiredYears": [
+     2003,
+     2004
+    ],
+    "basis": {
+     "id": "fx_annual_change",
+     "label": "Annual Nominal FX Change",
+     "question": "How did the official nominal exchange rate move against the USD over the year?",
+     "formula": "((ER(t)/ER(t-1)) - 1) * 100",
+     "unit": "%",
+     "rankWording": "Ranked by greatest nominal depreciation vs USD",
+     "benchmarkType": "median",
+     "rankDirection": "DESC"
+    },
+    "eligibleCount": 203,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 0,
+     "valueDisplay": "+0.00%",
+     "polarity": "No nominal movement vs USD",
+     "rank": 50,
+     "denominator": 203,
+     "benchmark": -2.9821775358506275,
+     "benchmarkDisplay": "-2.98%",
+     "benchmarkLabel": "Median eligible-economy FX change",
+     "benchmarkPeerCount": 202,
+     "gap": 2.9821775358506275,
+     "gapDisplay": "+2.98 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 0,
+      "rank": 50
+     },
+     {
+      "iso3": "ZWE",
+      "name": "Zimbabwe",
+      "value": 626.7692084403553,
+      "rank": 1
+     },
+     {
+      "iso3": "MDG",
+      "name": "Madagascar",
+      "value": 50.91787768611526,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 202,
+     "type": "median"
+    },
+    "universe": "observed"
+   },
+   {
+    "year": 2014,
+    "requiredYears": [
+     2013,
+     2014
+    ],
+    "basis": {
+     "id": "fx_annual_change",
+     "label": "Annual Nominal FX Change",
+     "question": "How did the official nominal exchange rate move against the USD over the year?",
+     "formula": "((ER(t)/ER(t-1)) - 1) * 100",
+     "unit": "%",
+     "rankWording": "Ranked by greatest nominal depreciation vs USD",
+     "benchmarkType": "median",
+     "rankDirection": "DESC"
+    },
+    "eligibleCount": 210,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 0,
+     "valueDisplay": "+0.00%",
+     "polarity": "No nominal movement vs USD",
+     "rank": 103,
+     "denominator": 210,
+     "benchmark": 0,
+     "benchmarkDisplay": "0.00%",
+     "benchmarkLabel": "Median eligible-economy FX change",
+     "benchmarkPeerCount": 209,
+     "gap": 0,
+     "gapDisplay": "+0.00 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 0,
+      "rank": 103
+     },
+     {
+      "iso3": "UKR",
+      "name": "Ukraine",
+      "value": 48.713366904375064,
+      "rank": 1
+     },
+     {
+      "iso3": "ARG",
+      "name": "Argentina",
+      "value": 47.91636461024697,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 209,
+     "type": "median"
+    },
+    "universe": "observed"
+   }
+  ],
+  "likeForLike": [
+   {
+    "year": 2004,
+    "requiredYears": [
+     2003,
+     2004
+    ],
+    "basis": {
+     "id": "fx_annual_change",
+     "label": "Annual Nominal FX Change",
+     "question": "How did the official nominal exchange rate move against the USD over the year?",
+     "formula": "((ER(t)/ER(t-1)) - 1) * 100",
+     "unit": "%",
+     "rankWording": "Ranked by greatest nominal depreciation vs USD",
+     "benchmarkType": "median",
+     "rankDirection": "DESC"
+    },
+    "eligibleCount": 202,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 0,
+     "valueDisplay": "+0.00%",
+     "polarity": "No nominal movement vs USD",
+     "rank": 49,
+     "denominator": 202,
+     "benchmark": -2.9821775358506275,
+     "benchmarkDisplay": "-2.98%",
+     "benchmarkLabel": "Median eligible-economy FX change",
+     "benchmarkPeerCount": 201,
+     "gap": 2.9821775358506275,
+     "gapDisplay": "+2.98 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 0,
+      "rank": 49
+     },
+     {
+      "iso3": "MDG",
+      "name": "Madagascar",
+      "value": 50.91787768611526,
+      "rank": 1
+     },
+     {
+      "iso3": "DOM",
+      "name": "Dominican Republic",
+      "value": 42.765798845646394,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 201,
+     "type": "median"
+    },
+    "universe": "like-for-like"
+   },
+   {
+    "year": 2014,
+    "requiredYears": [
+     2013,
+     2014
+    ],
+    "basis": {
+     "id": "fx_annual_change",
+     "label": "Annual Nominal FX Change",
+     "question": "How did the official nominal exchange rate move against the USD over the year?",
+     "formula": "((ER(t)/ER(t-1)) - 1) * 100",
+     "unit": "%",
+     "rankWording": "Ranked by greatest nominal depreciation vs USD",
+     "benchmarkType": "median",
+     "rankDirection": "DESC"
+    },
+    "eligibleCount": 202,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 0,
+     "valueDisplay": "+0.00%",
+     "polarity": "No nominal movement vs USD",
+     "rank": 100,
+     "denominator": 202,
+     "benchmark": 0,
+     "benchmarkDisplay": "0.00%",
+     "benchmarkLabel": "Median eligible-economy FX change",
+     "benchmarkPeerCount": 201,
+     "gap": 0,
+     "gapDisplay": "+0.00 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 0,
+      "rank": 100
+     },
+     {
+      "iso3": "UKR",
+      "name": "Ukraine",
+      "value": 48.713366904375064,
+      "rank": 1
+     },
+     {
+      "iso3": "ARG",
+      "name": "Argentina",
+      "value": 47.91636461024697,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 201,
+     "type": "median"
+    },
+    "universe": "like-for-like"
+   }
+  ],
+  "descriptive": null,
+  "verification": {
+   "passed": true,
+   "checks": [
+    {
+     "check": "basis_formula_unchanged_across_universes",
+     "passed": true
+    }
+   ]
+  }
+ },
+ "trade": {
+  "metric": {
+   "key": "exports_current",
+   "subject": "trade",
+   "indicatorCode": "NE.EXP.GNFS.CD",
+   "label": "Exports — current US$",
+   "shortLabel": "Exports, current US$",
+   "unit": "current US$",
+   "unitLong": "current US$",
+   "currencySymbol": "$",
+   "group": "trade",
+   "priceBasis": "current",
+   "ppp": false,
+   "baseYear": null,
+   "displayScale": "trillions",
+   "worldBankPage": "https://data.worldbank.org/indicator/NE.EXP.GNFS.CD"
+  },
+  "basis": {
+   "id": "exp_annual_value",
+   "metricKey": "exports_current",
+   "label": "Annual export value",
+   "question": "How large was this country’s export flow in the selected year?",
+   "formula": "T(i,t) = raw WDI NE.EXP.GNFS.CD",
+   "unit": "current US$",
+   "gapUnit": "current US$",
+   "rankWording": "Ranked by largest annual export value",
+   "rankable": true,
+   "rankDirection": "DESC",
+   "requiresSequence": false
+  },
+  "focus": {
+   "iso3": "USA",
+   "name": "United States"
+  },
+  "years": {
+   "a": 2004,
+   "b": 2014,
+   "order": "a_is_earlier"
+  },
+  "group": {
+   "type": null,
+   "value": "All"
+  },
+  "nominalCaveat": "Current-US$ trade values measure nominal trade values. Changes can reflect quantities, prices, exchange rates and trade composition — not pure real-volume growth.",
+  "source": {
+   "provider": "World Bank",
+   "dataset": "World Development Indicators (WDI)",
+   "apiDocumentation": [
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898581",
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"
+   ],
+   "wording": "Rank calculated from World Bank WDI observations.",
+   "disclaimer": "The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.",
+   "focusCountry": {
+    "iso3": "IND",
+    "name": "India"
+   },
+   "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "available": true,
+  "reason": null,
+  "kind": "annual",
+  "observed": [
+   {
+    "year": 2004,
+    "basis": {
+     "id": "exp_annual_value",
+     "label": "Annual export value",
+     "question": "How large was this country’s export flow in the selected year?",
+     "formula": "T(i,t) = raw WDI NE.EXP.GNFS.CD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual export value"
+    },
+    "eligibleCount": 172,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 1176363000000,
+     "valueDisplay": "$1.18 trillion",
+     "rank": 1,
+     "denominator": 172,
+     "benchmark": 57526400773.906944,
+     "benchmarkDisplay": "$0.06 trillion",
+     "benchmarkPeerCount": 171,
+     "gap": -1118836599226.093,
+     "gapDisplay": "-$1.12 trillion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 1176363000000,
+      "rank": 1
+     },
+     {
+      "iso3": "DEU",
+      "name": "Germany",
+      "value": 967940099859.462,
+      "rank": 2
+     },
+     {
+      "iso3": "JPN",
+      "name": "Japan",
+      "value": 625631972493.599,
+      "rank": 3
+     }
+    ],
+    "universe": "observed"
+   },
+   {
+    "year": 2014,
+    "basis": {
+     "id": "exp_annual_value",
+     "label": "Annual export value",
+     "question": "How large was this country’s export flow in the selected year?",
+     "formula": "T(i,t) = raw WDI NE.EXP.GNFS.CD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual export value"
+    },
+    "eligibleCount": 183,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 2378545000000,
+     "valueDisplay": "$2.38 trillion",
+     "rank": 2,
+     "denominator": 183,
+     "benchmark": 114805488042.64488,
+     "benchmarkDisplay": "$0.11 trillion",
+     "benchmarkPeerCount": 182,
+     "gap": -2263739511957.355,
+     "gapDisplay": "-$2.26 trillion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 2378545000000,
+      "rank": 2
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 2462825804851.16,
+      "rank": 1
+     },
+     {
+      "iso3": "DEU",
+      "name": "Germany",
+      "value": 1653100023449.01,
+      "rank": 3
+     }
+    ],
+    "universe": "observed"
+   }
+  ],
+  "likeForLike": [
+   {
+    "year": 2004,
+    "basis": {
+     "id": "exp_annual_value",
+     "label": "Annual export value",
+     "question": "How large was this country’s export flow in the selected year?",
+     "formula": "T(i,t) = raw WDI NE.EXP.GNFS.CD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual export value"
+    },
+    "eligibleCount": 167,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 1176363000000,
+     "valueDisplay": "$1.18 trillion",
+     "rank": 1,
+     "denominator": 167,
+     "benchmark": 59157275049.39511,
+     "benchmarkDisplay": "$0.06 trillion",
+     "benchmarkPeerCount": 166,
+     "gap": -1117205724950.605,
+     "gapDisplay": "-$1.12 trillion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 1176363000000,
+      "rank": 1
+     },
+     {
+      "iso3": "DEU",
+      "name": "Germany",
+      "value": 967940099859.462,
+      "rank": 2
+     },
+     {
+      "iso3": "JPN",
+      "name": "Japan",
+      "value": 625631972493.599,
+      "rank": 3
+     }
+    ],
+    "universe": "like-for-like"
+   },
+   {
+    "year": 2014,
+    "basis": {
+     "id": "exp_annual_value",
+     "label": "Annual export value",
+     "question": "How large was this country’s export flow in the selected year?",
+     "formula": "T(i,t) = raw WDI NE.EXP.GNFS.CD",
+     "unit": "current US$",
+     "gapUnit": "current US$",
+     "rankWording": "Ranked by largest annual export value"
+    },
+    "eligibleCount": 167,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 2378545000000,
+     "valueDisplay": "$2.38 trillion",
+     "rank": 2,
+     "denominator": 167,
+     "benchmark": 125588708780.87352,
+     "benchmarkDisplay": "$0.13 trillion",
+     "benchmarkPeerCount": 166,
+     "gap": -2252956291219.1265,
+     "gapDisplay": "-$2.25 trillion",
+     "gapUnit": "current US$",
+     "benchmarkLabel": "Average of other eligible economies"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 2378545000000,
+      "rank": 2
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 2462825804851.16,
+      "rank": 1
+     },
+     {
+      "iso3": "DEU",
+      "name": "Germany",
+      "value": 1653100023449.01,
+      "rank": 3
+     }
+    ],
+    "universe": "like-for-like"
+   }
+  ],
+  "descriptive": null,
+  "verification": {
+   "passed": true,
+   "checks": [
+    {
+     "check": "basis_formula_unchanged_across_universes",
+     "passed": true
+    }
+   ]
+  }
+ },
+ "external": {
+  "metric": {
+   "key": "current_account",
+   "subject": "external",
+   "indicatorCode": "BN.CAB.XOKA.CD",
+   "label": "Current account balance — current US$",
+   "shortLabel": "Current account",
+   "unit": "current US$",
+   "unitLong": "current US$",
+   "currencySymbol": "$",
+   "group": "external",
+   "priceBasis": "current",
+   "ppp": false,
+   "baseYear": null,
+   "displayScale": "billions",
+   "worldBankPage": "https://data.worldbank.org/indicator/BN.CAB.XOKA.CD"
+  },
+  "basis": {
+   "id": "ca_annual_gdp",
+   "metricKey": "current_account",
+   "label": "Annual CA / GDP",
+   "question": "What was the current-account balance relative to GDP in the selected year?",
+   "formula": "(CA(t)/GDP(t)) * 100 from BN.CAB.XOKA.CD + NY.GDP.MKTP.CD legs",
+   "unit": "% of GDP",
+   "gapUnit": "percentage points",
+   "benchmarkType": "mean",
+   "rankWording": "Ranked by higher current-account balance relative to GDP",
+   "rankable": true,
+   "rankDirection": "DESC",
+   "requiresSequence": false
+  },
+  "focus": {
+   "iso3": "USA",
+   "name": "United States"
+  },
+  "years": {
+   "a": 2004,
+   "b": 2014,
+   "order": "a_is_earlier"
+  },
+  "group": {
+   "type": null,
+   "value": "All"
+  },
+  "nominalNote": "Current-US$ external values are nominal. Reserve stocks can reflect valuation and exchange-rate effects; rankings measure the stated statistic only — never adequacy, strength, dependency, or welfare.",
+  "source": {
+   "provider": "World Bank",
+   "dataset": "World Development Indicators (WDI)",
+   "apiDocumentation": [
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898581",
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"
+   ],
+   "wording": "Rank calculated from World Bank WDI observations.",
+   "disclaimer": "The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.",
+   "focusCountry": {
+    "iso3": "IND",
+    "name": "India"
+   },
+   "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "available": true,
+  "reason": null,
+  "kind": "annual",
+  "observed": [
+   {
+    "year": 2004,
+    "requiredYears": [
+     2004
+    ],
+    "basis": {
+     "id": "ca_annual_gdp",
+     "label": "Annual CA / GDP",
+     "question": "What was the current-account balance relative to GDP in the selected year?",
+     "formula": "(CA(t)/GDP(t)) * 100 from BN.CAB.XOKA.CD + NY.GDP.MKTP.CD legs",
+     "unit": "% of GDP",
+     "gapUnit": "percentage points",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by higher current-account balance relative to GDP"
+    },
+    "eligibleCount": 160,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": -5.204852242691367,
+     "valueDisplay": "-5.20%",
+     "rank": 111,
+     "denominator": 160,
+     "benchmark": -1.595003730173828,
+     "benchmarkDisplay": "-1.60%",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 159,
+     "gap": -3.609848512517539,
+     "gapDisplay": "-3.61 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": -5.204852242691367,
+      "rank": 111
+     },
+     {
+      "iso3": "BRN",
+      "name": "Brunei Darussalam",
+      "value": 33.4391704190771,
+      "rank": 1
+     },
+     {
+      "iso3": "MAC",
+      "name": "Macao SAR, China",
+      "value": 32.955133794410905,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 159,
+     "type": "mean"
+    },
+    "universe": "observed",
+    "incompleteCount": 54
+   },
+   {
+    "year": 2014,
+    "requiredYears": [
+     2014
+    ],
+    "basis": {
+     "id": "ca_annual_gdp",
+     "label": "Annual CA / GDP",
+     "question": "What was the current-account balance relative to GDP in the selected year?",
+     "formula": "(CA(t)/GDP(t)) * 100 from BN.CAB.XOKA.CD + NY.GDP.MKTP.CD legs",
+     "unit": "% of GDP",
+     "gapUnit": "percentage points",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by higher current-account balance relative to GDP"
+    },
+    "eligibleCount": 189,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": -2.1011761720631674,
+     "valueDisplay": "-2.10%",
+     "rank": 86,
+     "denominator": 189,
+     "benchmark": -2.0826855106353133,
+     "benchmarkDisplay": "-2.08%",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 188,
+     "gap": -0.01849066142785416,
+     "gapDisplay": "-0.02 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": -2.1011761720631674,
+      "rank": 86
+     },
+     {
+      "iso3": "TLS",
+      "name": "Timor-Leste",
+      "value": 76.41671454211269,
+      "rank": 1
+     },
+     {
+      "iso3": "KWT",
+      "name": "Kuwait",
+      "value": 33.179075871217,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 188,
+     "type": "mean"
+    },
+    "universe": "observed",
+    "incompleteCount": 25
+   }
+  ],
+  "likeForLike": [
+   {
+    "year": 2004,
+    "requiredYears": [
+     2004
+    ],
+    "basis": {
+     "id": "ca_annual_gdp",
+     "label": "Annual CA / GDP",
+     "question": "What was the current-account balance relative to GDP in the selected year?",
+     "formula": "(CA(t)/GDP(t)) * 100 from BN.CAB.XOKA.CD + NY.GDP.MKTP.CD legs",
+     "unit": "% of GDP",
+     "gapUnit": "percentage points",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by higher current-account balance relative to GDP"
+    },
+    "eligibleCount": 158,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": -5.204852242691367,
+     "valueDisplay": "-5.20%",
+     "rank": 109,
+     "denominator": 158,
+     "benchmark": -1.678239264204758,
+     "benchmarkDisplay": "-1.68%",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 157,
+     "gap": -3.526612978486609,
+     "gapDisplay": "-3.53 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": -5.204852242691367,
+      "rank": 109
+     },
+     {
+      "iso3": "BRN",
+      "name": "Brunei Darussalam",
+      "value": 33.4391704190771,
+      "rank": 1
+     },
+     {
+      "iso3": "MAC",
+      "name": "Macao SAR, China",
+      "value": 32.955133794410905,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 157,
+     "type": "mean"
+    },
+    "universe": "like-for-like"
+   },
+   {
+    "year": 2014,
+    "requiredYears": [
+     2014
+    ],
+    "basis": {
+     "id": "ca_annual_gdp",
+     "label": "Annual CA / GDP",
+     "question": "What was the current-account balance relative to GDP in the selected year?",
+     "formula": "(CA(t)/GDP(t)) * 100 from BN.CAB.XOKA.CD + NY.GDP.MKTP.CD legs",
+     "unit": "% of GDP",
+     "gapUnit": "percentage points",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by higher current-account balance relative to GDP"
+    },
+    "eligibleCount": 158,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": -2.1011761720631674,
+     "valueDisplay": "-2.10%",
+     "rank": 74,
+     "denominator": 158,
+     "benchmark": -2.357991441042336,
+     "benchmarkDisplay": "-2.36%",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 157,
+     "gap": 0.25681526897916873,
+     "gapDisplay": "+0.26 pp",
+     "gapUnit": "percentage points"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": -2.1011761720631674,
+      "rank": 74
+     },
+     {
+      "iso3": "KWT",
+      "name": "Kuwait",
+      "value": 33.179075871217,
+      "rank": 1
+     },
+     {
+      "iso3": "MAC",
+      "name": "Macao SAR, China",
+      "value": 32.70084746876824,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 157,
+     "type": "mean"
+    },
+    "universe": "like-for-like"
+   }
+  ],
+  "likeForLikeUniverseSize": 158,
+  "descriptive": null,
+  "verification": {
+   "passed": true,
+   "checks": [
+    {
+     "check": "basis_formula_unchanged_across_universes",
+     "passed": true
+    }
+   ]
+  }
+ },
+ "population": {
+  "metric": {
+   "key": "population_total",
+   "subject": "population",
+   "indicatorCode": "SP.POP.TOTL",
+   "label": "Population — total",
+   "shortLabel": "Population",
+   "unit": "people",
+   "unitLong": "people",
+   "currencySymbol": null,
+   "group": "population",
+   "priceBasis": "NOT_APPLICABLE",
+   "ppp": false,
+   "baseYear": null,
+   "displayScale": "billions",
+   "worldBankPage": "https://data.worldbank.org/indicator/SP.POP.TOTL"
+  },
+  "basis": {
+   "id": "pop_annual_value",
+   "metricKey": "population_total",
+   "label": "Annual Population",
+   "question": "How large was the estimated population in the selected year?",
+   "formula": "P(i,t) = raw WDI SP.POP.TOTL",
+   "unit": "people",
+   "gapUnit": "people",
+   "rankWording": "Ranked by largest population size",
+   "rankable": true,
+   "rankDirection": "DESC",
+   "benchmarkType": "mean",
+   "requiresSequence": false
+  },
+  "focus": {
+   "iso3": "USA",
+   "name": "United States"
+  },
+  "years": {
+   "a": 2004,
+   "b": 2014,
+   "order": "a_is_earlier"
+  },
+  "group": {
+   "type": null,
+   "value": "All"
+  },
+  "estimateNote": "SP.POP.TOTL values are annual mid-year estimates (de facto concept), not necessarily exact census headcounts.",
+  "source": {
+   "provider": "World Bank",
+   "dataset": "World Development Indicators (WDI)",
+   "apiDocumentation": [
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898581",
+    "https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"
+   ],
+   "wording": "Rank calculated from World Bank WDI observations.",
+   "disclaimer": "The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.",
+   "focusCountry": {
+    "iso3": "IND",
+    "name": "India"
+   },
+   "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "available": true,
+  "reason": null,
+  "kind": "annual",
+  "observed": [
+   {
+    "year": 2004,
+    "requiredYears": [
+     2004
+    ],
+    "basis": {
+     "id": "pop_annual_value",
+     "label": "Annual Population",
+     "question": "How large was the estimated population in the selected year?",
+     "formula": "P(i,t) = raw WDI SP.POP.TOTL",
+     "unit": "people",
+     "gapUnit": "people",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by largest population size"
+    },
+    "eligibleCount": 217,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 292805298,
+     "valueDisplay": "0.29 billion",
+     "rank": 3,
+     "denominator": 217,
+     "benchmark": 28596801.291666668,
+     "benchmarkDisplay": "0.03 billion",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 216,
+     "gap": 264208496.70833334,
+     "gapDisplay": "+0.26 billion",
+     "gapUnit": "people"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 292805298,
+      "rank": 3
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 1296075000,
+      "rank": 1
+     },
+     {
+      "iso3": "IND",
+      "name": "India",
+      "value": 1135991513,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 216,
+     "type": "mean"
+    },
+    "universe": "observed"
+   },
+   {
+    "year": 2014,
+    "requiredYears": [
+     2014
+    ],
+    "basis": {
+     "id": "pop_annual_value",
+     "label": "Annual Population",
+     "question": "How large was the estimated population in the selected year?",
+     "formula": "P(i,t) = raw WDI SP.POP.TOTL",
+     "unit": "people",
+     "gapUnit": "people",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by largest population size"
+    },
+    "eligibleCount": 217,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 319257560,
+     "valueDisplay": "0.32 billion",
+     "rank": 3,
+     "denominator": 217,
+     "benchmark": 32457789.939814813,
+     "benchmarkDisplay": "0.03 billion",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 216,
+     "gap": 286799770.0601852,
+     "gapDisplay": "+0.29 billion",
+     "gapUnit": "people"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 319257560,
+      "rank": 3
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 1371860000,
+      "rank": 1
+     },
+     {
+      "iso3": "IND",
+      "name": "India",
+      "value": 1312277191,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 216,
+     "type": "mean"
+    },
+    "universe": "observed"
+   }
+  ],
+  "likeForLike": [
+   {
+    "year": 2004,
+    "requiredYears": [
+     2004
+    ],
+    "basis": {
+     "id": "pop_annual_value",
+     "label": "Annual Population",
+     "question": "How large was the estimated population in the selected year?",
+     "formula": "P(i,t) = raw WDI SP.POP.TOTL",
+     "unit": "people",
+     "gapUnit": "people",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by largest population size"
+    },
+    "eligibleCount": 217,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 292805298,
+     "valueDisplay": "0.29 billion",
+     "rank": 3,
+     "denominator": 217,
+     "benchmark": 28596801.291666668,
+     "benchmarkDisplay": "0.03 billion",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 216,
+     "gap": 264208496.70833334,
+     "gapDisplay": "+0.26 billion",
+     "gapUnit": "people"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 292805298,
+      "rank": 3
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 1296075000,
+      "rank": 1
+     },
+     {
+      "iso3": "IND",
+      "name": "India",
+      "value": 1135991513,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 216,
+     "type": "mean"
+    },
+    "universe": "like-for-like"
+   },
+   {
+    "year": 2014,
+    "requiredYears": [
+     2014
+    ],
+    "basis": {
+     "id": "pop_annual_value",
+     "label": "Annual Population",
+     "question": "How large was the estimated population in the selected year?",
+     "formula": "P(i,t) = raw WDI SP.POP.TOTL",
+     "unit": "people",
+     "gapUnit": "people",
+     "benchmarkType": "mean",
+     "rankWording": "Ranked by largest population size"
+    },
+    "eligibleCount": 217,
+    "rankable": true,
+    "focus": {
+     "iso3": "USA",
+     "value": 319257560,
+     "valueDisplay": "0.32 billion",
+     "rank": 3,
+     "denominator": 217,
+     "benchmark": 32457789.939814813,
+     "benchmarkDisplay": "0.03 billion",
+     "benchmarkLabel": "Average of other eligible economies",
+     "benchmarkPeerCount": 216,
+     "gap": 286799770.0601852,
+     "gapDisplay": "+0.29 billion",
+     "gapUnit": "people"
+    },
+    "focusAvailable": true,
+    "ranking": [
+     {
+      "iso3": "USA",
+      "name": "United States",
+      "value": 319257560,
+      "rank": 3
+     },
+     {
+      "iso3": "CHN",
+      "name": "China",
+      "value": 1371860000,
+      "rank": 1
+     },
+     {
+      "iso3": "IND",
+      "name": "India",
+      "value": 1312277191,
+      "rank": 2
+     }
+    ],
+    "benchmarkUniverse": {
+     "peerCount": 216,
+     "type": "mean"
+    },
+    "universe": "like-for-like"
+   }
+  ],
+  "descriptive": null,
+  "verification": {
+   "passed": true,
+   "checks": [
+    {
+     "check": "basis_formula_unchanged_across_universes",
+     "passed": true
+    }
+   ]
+  }
+ }
+}

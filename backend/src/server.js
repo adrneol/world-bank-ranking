@@ -73,6 +73,7 @@ import { isExternalMetric, externalBasesForMetric, EXTERNAL_BASIS_INFO as EXTERN
 import { buildPopulationMovement, listPopulationCountryGroups, POPULATION_ERROR_CODES } from './services/populationMovementService.js';
 import { isPopulationMetric, populationBasesForMetric, POPULATION_BASIS_INFO as POPULATION_BASIS_INFO_REF } from './domain/populationMovement.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
+import { geoCountryForRequest } from './services/geo.js';
 import {
   ensureDataPresent,
   getCacheStatus,
@@ -374,6 +375,17 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       methodology: methodologyBlock(),
     });
   });
+
+  // ---------- default-country geolocation ----------
+  // UX default only (never analytical): resolves the requester's eligible
+  // ISO3 once, or null when detection is unavailable/invalid. Always 200 —
+  // provider outages must never break the frontend bootstrap. Deliberately
+  // excluded from AUTO_REFRESH_PATHS (side-effect free) and carrying no
+  // methodology block (nothing here is economics).
+  app.get('/api/geo/country', ah(async (req, res) => {
+    const iso3 = await geoCountryForRequest(handle(), req);
+    res.json({ iso3, source: iso3 ? 'geoip' : 'fallback' });
+  }));
 
   // ---------- years ----------
   app.get('/api/years', ah(async (req, res) => {

@@ -289,6 +289,10 @@ export const api = {
   populationGroups: (options) => get('/api/population/country-groups', {}, options),
   dataStatus: (options) => get('/api/data-status', {}, options),
   integrity: (options) => get('/api/integrity', {}, options),
+  // Default-country geolocation (Phase 3 UX default only): resolves the
+  // requester's eligible ISO3 once, or null when unavailable. Transport
+  // only — precedence and fallback live in App.jsx.
+  geoCountry: (options) => get('/api/geo/country', {}, options),
   refresh: ({ startYear, endYear, indicators } = {}, options) =>
     request('/api/data/refresh', {
       ...options,

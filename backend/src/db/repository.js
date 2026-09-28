@@ -115,6 +115,18 @@ export function getCountry(db, iso3) {
   );
 }
 
+/**
+ * Country metadata by ISO 3166-1 alpha-2 code (geolocation providers return
+ * alpha-2; the application reasons in ISO3). Case-insensitive. Returns null
+ * for unknown codes — including World Bank aggregate rows, which carry no
+ * usable iso2 and therefore never match.
+ */
+export function getCountryByIso2(db, iso2) {
+  const code = String(iso2 ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return null;
+  return db.prepare('SELECT * FROM countries WHERE UPPER(iso2) = ? LIMIT 1').get(code) ?? null;
+}
+
 /** All metadata rows, aggregates included unless excluded. */
 export function listCountries(db, { includeAggregates = true } = {}) {
   const sql = includeAggregates
