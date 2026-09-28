@@ -532,23 +532,39 @@ export function listYearsWithData(db, indicatorId) {
  * The year filter must be derived from the stored data (specification section 8),
  * never from a hardcoded 2000-2025 range, so a newer World Bank vintage becomes
  * selectable as soon as it has been ingested.
+ *
+ * Single-statement implementation: one GROUP BY over (metric, year) replaces
+ * the historical 1 + N DISTINCT queries (global plus one per indicator) with
+ * byte-identical semantics — same eligible-observation predicate, same
+ * ascending year order, same per-metric key order (indicator-catalog order),
+ * same null min/max on empty. See test/years.test.js for the equivalence
+ * proof and backend/phase4-baseline notes for measured plans.
  */
 export function listAvailableYears(db) {
-  const years = db
-    .prepare(`
-      SELECT DISTINCT o.year AS year
+  const indicators = listIndicators(db);
+  const perMetric = {};
+  for (const indicator of indicators) perMetric[indicator.metric_key] = [];
+
+  const rows = db
+    .prepare(
+      `
+      SELECT i.metric_key AS metric_key, o.year AS year
       FROM observations o
       JOIN countries c ON c.id = o.country_id
+      JOIN indicators i ON i.id = o.indicator_id
       WHERE c.is_aggregate = 0 AND o.value IS NOT NULL
-      ORDER BY o.year
-    `)
-    .all()
-    .map((r) => r.year);
+      GROUP BY i.metric_key, o.year
+      ORDER BY i.metric_key, o.year
+    `,
+    )
+    .all();
 
-  const perMetric = {};
-  for (const indicator of listIndicators(db)) {
-    perMetric[indicator.metric_key] = listYearsWithData(db, indicator.id);
+  const yearSet = new Set();
+  for (const row of rows) {
+    if (Object.hasOwn(perMetric, row.metric_key)) perMetric[row.metric_key].push(row.year);
+    yearSet.add(row.year);
   }
+  const years = [...yearSet].sort((a, b) => a - b);
 
   return {
     years,
@@ -556,6 +572,19 @@ export function listAvailableYears(db) {
     maxYear: years.length ? Math.max(...years) : null,
     perMetric,
   };
+}
+
+/**
+ * Latest upstream World Bank vintage behind the stored dataset: the maximum
+ * non-null `wb_last_updated` across observations (each row carries the WDI
+ * `lastupdated` metadata from its own retrieval). Null when nothing stored.
+ * Read-only derivation — no ingestion semantics involved.
+ */
+export function getMaxWbLastUpdated(db) {
+  return (
+    db.prepare('SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL').get()?.v ??
+    null
+  );
 }
 
 /**

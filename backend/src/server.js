@@ -41,9 +41,9 @@ import {
   getCountry,
   getDatasetFingerprint,
   getIndicatorByMetricKey,
+  getMaxWbLastUpdated,
   getObservation,
   getObservedCountryIds,
-  listAvailableYears,
   listCountries,
   listFetchRuns,
   listIndicators,
@@ -74,6 +74,7 @@ import { buildPopulationMovement, listPopulationCountryGroups, POPULATION_ERROR_
 import { isPopulationMetric, populationBasesForMetric, POPULATION_BASIS_INFO as POPULATION_BASIS_INFO_REF } from './domain/populationMovement.js';
 import { buildFullYoyRanking, buildYoyVerification } from './services/yoyVerification.js';
 import { geoCountryForRequest } from './services/geo.js';
+import { getCachedAvailableYears } from './services/yearsCache.js';
 import {
   ensureDataPresent,
   getCacheStatus,
@@ -404,7 +405,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       });
       return;
     }
-    const available = listAvailableYears(h);
+    const available = getCachedAvailableYears(h);
     res.json({
       ...available,
       defaults: { startYear: config.defaultStartYear, endYear: config.defaultEndYear },
@@ -1181,7 +1182,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         eligible: countEligibleCountries(h),
         aggregates: countAggregateCountries(h),
       },
-      years: listAvailableYears(h),
+      years: getCachedAvailableYears(h),
       methodology: methodologyBlock(),
     });
   }));
@@ -1266,6 +1267,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     }
     res.json({
       ...cache,
+      // Authoritative upstream World Bank vintage: MAX(wb_last_updated)
+      // across stored observations (each row carries the WDI `lastupdated`
+      // from its own retrieval). Distinct from lastSuccessAt below, which
+      // is the LOCAL retrieval timestamp. Additive, read-only, derived —
+      // no ingestion semantics involved.
+      wbLastUpdated: getMaxWbLastUpdated(h),
       inProgress: isRefreshInProgress(),
       progress: getIngestProgress(),
       lock,
@@ -1280,7 +1287,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       // Non-analytical; exposes only whether auth is required, never the token.
       refreshRequiresAuth: config.refreshAdminToken !== '',
       latestRuns: listFetchRuns(h, 5),
-      years: listAvailableYears(h),
+      years: getCachedAvailableYears(h),
       methodology: methodologyBlock(),
     });
   }));

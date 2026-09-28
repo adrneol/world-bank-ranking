@@ -94,6 +94,11 @@ export function siteMetadata(env = null) {
     authorSpecified: authorName !== '' || authorRole !== '',
     lastUpdatedText: formatPartialDate({ year: updatedYear, month: updatedMonth, day: updatedDay }),
     dataText: formatPartialDate({ year: dataYear, month: dataMonth }),
+    // Raw reference-vintage parts for the About page contract: both set →
+    // explicit developer override; one set → invalid partial (About falls
+    // back to automatic with a diagnostic); neither → automatic mode.
+    dataYear,
+    dataMonth,
     sourceName: rawText(source, 'VITE_SITE_SOURCE_NAME') || 'World Bank WDI',
     contactEmail,
     contactSpecified: contactEmail !== '',

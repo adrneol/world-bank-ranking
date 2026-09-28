@@ -4,16 +4,43 @@
  * Who built the site and why — from public display metadata
  * (config/site.js) with neutral fallbacks. Nothing personal is invented:
  * any value not supplied through environment configuration renders as an
- * explicitly documented placeholder. No analytical content lives here;
- * renders fully without backend data.
+ * explicitly documented placeholder. No analytical content lives here.
+ *
+ * Freshness model: the site update date is a manual developer date (never
+ * data-driven). The reference data vintage is an explicit developer
+ * override when fully configured, otherwise the live upstream WDI vintage
+ * from the backend (automatic mode); a partial override is invalid and
+ * falls back to automatic with a diagnostic warning.
  */
 
+import { useEffect } from 'react';
+import { api } from '../api/client.js';
+import { useApi } from '../hooks/useApi.js';
+import { formatVintageMonth } from '../utils/format.js';
 import { Section } from '../components/ui.jsx';
 
 export default function About({ site, onOpenView }) {
   const authorLine = site?.authorSpecified
     ? [site.authorName, site.authorRole].filter(Boolean).join(' · ')
     : 'Author details not specified in this deployment.';
+  const hasOverride = site?.dataYear != null && site?.dataMonth != null;
+  const hasPartialOverride =
+    !hasOverride && (site?.dataYear != null || site?.dataMonth != null);
+  useEffect(() => {
+    if (hasPartialOverride) {
+      console.warn(
+        'About: incomplete VITE_SITE_DATA_* override (year or month missing); using the automatic reference vintage instead.',
+      );
+    }
+  }, [hasPartialOverride]);
+  // Automatic mode reads the authoritative upstream vintage at runtime, so
+  // a newer WDI release appears without rebuilding the frontend. Skipped
+  // entirely under an explicit override; failures keep the neutral fallback.
+  const { data } = useApi((signal) => api.dataStatus({ signal }), 'about:vintage', {
+    enabled: !hasOverride,
+  });
+  const autoVintage = !hasOverride ? formatVintageMonth(data?.wbLastUpdated) : null;
+  const vintageText = hasOverride ? site?.dataText : (autoVintage ?? 'See Status for live vintage');
   return (
     <div role="tabpanel" id="panel-about" aria-labelledby="tab-about">
       <Section
@@ -42,12 +69,12 @@ export default function About({ site, onOpenView }) {
             <dd>{authorLine}</dd>
           </div>
           <div>
-            <dt>Site content updated</dt>
+            <dt>Site update date</dt>
             <dd>{site?.lastUpdatedText ?? 'Update date not specified'}</dd>
           </div>
           <div>
             <dt>Reference data vintage</dt>
-            <dd>{site?.dataText ?? 'See Status for live vintage'}</dd>
+            <dd>{vintageText}</dd>
           </div>
           <div>
             <dt>Source dataset</dt>
@@ -55,7 +82,9 @@ export default function About({ site, onOpenView }) {
           </div>
         </dl>
         <p className="footnote">
-          Author and date labels above are site-content metadata. The authoritative data vintage,
+          The site update date above is the date of the site&apos;s own most recent
+          product/content update. The reference vintage names the World Bank WDI data
+          release represented here. The authoritative data vintage,
           latest available year and dataset freshness always come from the backend — see Status.
         </p>
         <div className="analysis-header-side">

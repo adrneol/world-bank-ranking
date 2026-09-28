@@ -15,6 +15,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
+import { formatUtcDateTime, formatVintageDate } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 /** Full refreshes stream dozens of indicator payloads; bound the POST at 10 min. */
@@ -148,8 +149,12 @@ export default function DataStatus({ onRefreshed }) {
               </dd>
             </div>
             <div>
-              <dt>World Bank vintage</dt>
-              <dd>{data.lastSuccessAt ? `${new Date(data.lastSuccessAt).toLocaleString()} (retrieved)` : '—'}</dd>
+              <dt>World Bank data vintage</dt>
+              <dd>{data.wbLastUpdated ? (formatVintageDate(data.wbLastUpdated) ?? data.wbLastUpdated) : '—'}</dd>
+            </div>
+            <div>
+              <dt>Data retrieved</dt>
+              <dd>{data.lastSuccessAt ? (formatUtcDateTime(data.lastSuccessAt) ?? data.lastSuccessAt) : '—'}</dd>
             </div>
             <div>
               <dt>Cache age / TTL</dt>

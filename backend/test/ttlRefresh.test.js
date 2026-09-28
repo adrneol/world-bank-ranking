@@ -247,6 +247,34 @@ test('e. no duplicate refresh once the cache is fresh again', async () => {
   }
 });
 
+// g. TTL boundary is exact: age < TTL is fresh, age == TTL is due.
+test('g. stale/fresh boundary follows cache age against the configured TTL', async () => {
+  const { createMemoryDb } = await import('../src/db/index.js');
+  const { getCacheStatus } = await import('../src/wb/ingest.js');
+  const db = createMemoryDb();
+  await seedViaStub(db);
+  try {
+    const { lastSuccessAt } = getCacheStatus(db);
+    assert.ok(lastSuccessAt, 'seed records a success time');
+    const base = new Date(lastSuccessAt).getTime();
+    const hour = 3_600_000;
+
+    const justUnder = getCacheStatus(db, { ttlHours: 24, now: base + 24 * hour - 1000 });
+    assert.equal(justUnder.fresh, true, '23:59:59 stays fresh');
+    assert.equal(justUnder.refreshDue, false);
+
+    const exact = getCacheStatus(db, { ttlHours: 24, now: base + 24 * hour });
+    assert.equal(exact.fresh, false, 'exactly 24:00:00 is due (strict < comparison)');
+    assert.equal(exact.refreshDue, true);
+
+    const over = getCacheStatus(db, { ttlHours: 24, now: base + 25 * hour });
+    assert.equal(over.refreshDue, true);
+    assert.ok(over.ageHours > 24 && over.ageHours < 26, 'age derives from retrieval time, not wall clock drift');
+  } finally {
+    db.close();
+  }
+});
+
 // f. empty DB -> boot ingestion still works.
 test('f. empty database ingests on demand via ensureDataPresent', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');

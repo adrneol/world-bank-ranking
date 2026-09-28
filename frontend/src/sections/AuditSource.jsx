@@ -75,7 +75,7 @@ export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita
             <dd>{meta?.unit}</dd>
           </div>
           <div>
-            <dt>World Bank lastupdated</dt>
+            <dt>World Bank data last updated</dt>
             <dd>{obs?.wbLastUpdated ?? '—'}</dd>
           </div>
           <div>

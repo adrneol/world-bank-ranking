@@ -52,6 +52,56 @@ export function readableReason(reason) {
   return String(reason).replace(/_/g, ' ');
 }
 
+const VINTAGE_MONTHS = Object.freeze([
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]);
+
+function vintageParts(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? '').trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!(year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31)) return null;
+  return { year, month, day };
+}
+
+/**
+ * Upstream WDI vintage month for the About reference field: '2026-07-13'
+ * (or a datetime starting the same way) becomes 'July 2026'. Presentation
+ * only; null for anything that is not an ISO-like date — never invented.
+ */
+export function formatVintageMonth(value) {
+  const parts = vintageParts(value);
+  if (!parts) return null;
+  return `${VINTAGE_MONTHS[parts.month - 1]} ${parts.year}`;
+}
+
+/**
+ * Upstream WDI vintage date for Status/Audit display: '2026-07-13' becomes
+ * '13 July 2026'. Presentation only; null when unparseable.
+ */
+export function formatVintageDate(value) {
+  const parts = vintageParts(value);
+  if (!parts) return null;
+  return `${parts.day} ${VINTAGE_MONTHS[parts.month - 1]} ${parts.year}`;
+}
+
+/**
+ * Local retrieval timestamps render explicitly in UTC ('28 September 2026,
+ * 00:25 UTC'), formatted with UTC getters so the text never depends on the
+ * viewer's timezone. The stored canonical value stays UTC ISO; null when
+ * unparseable.
+ */
+export function formatUtcDateTime(value) {
+  const time = new Date(String(value ?? '').trim()).getTime();
+  if (!Number.isFinite(time)) return null;
+  const date = new Date(time);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getUTCDate()} ${VINTAGE_MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}, ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())} UTC`;
+}
+
 /** Real elapsed seconds for the cold-start bootstrap clock (presentation only). */
 export function formatElapsed(sec) {
   const n = Math.max(0, Math.floor(sec ?? 0));
