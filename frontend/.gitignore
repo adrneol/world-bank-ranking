@@ -12,6 +12,16 @@ dist
 dist-ssr
 *.local
 
+# Vite mode env files (non-local flavors are NOT covered by *.local above).
+# frontend/.env.development stays tracked intentionally (it pins the dev
+# proxy default); frontend/.env.example stays tracked (documented defaults).
+# Never commit real hostnames: deployment URLs belong in the hosting
+# environment (e.g. Vercel), not in files.
+.env.production
+.env.staging
+.env.test
+.env.preview
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
