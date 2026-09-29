@@ -42,9 +42,20 @@ async function get(path) {
 }
 
 async function post(path, payload) {
+  // The admin token is ambient configuration (backend/.env when present,
+  // empty otherwise) and is read once by src/config.js at import. Present
+  // valid credentials iff the server requires them, so this input-validation
+  // test reaches the validators in every environment without ever ingesting.
+  // The auth gate itself (401 without/wrong token) is pinned separately in
+  // refreshSecurity.test.js, which injects its own token per process.
+  const { default: runtimeConfig } = await import('../src/config.js');
+  const headers = { 'Content-Type': 'application/json' };
+  if (runtimeConfig.refreshAdminToken) {
+    headers.Authorization = `Bearer ${runtimeConfig.refreshAdminToken}`;
+  }
   const res = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(payload),
   });
   return { status: res.status, body: await res.json() };

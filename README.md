@@ -1,11 +1,18 @@
-# World Bank — India Economic Ranking (GDP, Prices, Trade, Capital Flows, Exchange, External Sector, Population)
+# World Bank WDI Economic Data Analysis
+
+> **Release line: v3.1.0** (previous release: v3.0.1). See `RELEASE_v3.1.0.md`
+> for the release record, verified performance numbers, and the production
+> operator checklist.
 
 A data-verification application that retrieves World Bank World Development
-Indicators (WDI) and independently calculates India's yearly value,
+Indicators (WDI) and independently calculates yearly values,
 year-over-year change, rank, and denominator for twenty indicators grouped
 into eight analysis subjects: GDP per capita (four indicators), Total GDP
 (four indicators), Prices (three), Trade (two), Capital flows (two), Exchange
-rates (one), External sector (three) and Population (one). Every subject flows
+rates (one), External sector (three) and Population (one). The default focus
+country is India, but any eligible country, official World Bank aggregate, or
+user-defined group can be analyzed — the product identity is generic, not
+country-specific. Every subject flows
 through the same generic ranking / YoY / comparison engines; each metric keeps
 its own independent ranking and denominator, and subjects are never mixed in
 one panel. Non-GDP families carry explicit semantic metadata (rate vs
@@ -29,7 +36,8 @@ countries, and the audit trail needed to verify each result. Official
 aggregates never enter country rankings; they are comparable as published
 entities through the generic entity-compare API. A React frontend
 presents the results; an Express API serves backend-calculated numbers;
-SQLite stores the retrieved observations. The frontend's Analysis selector
+Turso Cloud stores the retrieved observations in production, with local
+SQLite as the development and controlled-fallback database. The frontend's Analysis selector
 switches the active subject (metric/subject lists hydrate from backend
 metadata); the metric key
 (`?metric=…`) remains the single source of truth, so existing per-capita URLs
@@ -263,19 +271,110 @@ universes, or growth values:
 ## Architecture
 
 ```
-World Bank WDI API
-  → ingestion (country metadata, indicator metadata, observations)
-  → country metadata filtering (aggregates removed)
-  → SQLite (raw values preserved)
-  → backend ranking / YoY / coverage / verification services
+World Bank WDI API (sole raw-data source)
+  → wb/client.js (paged fetch, retry/backoff, envelope validation)
+  → wb/ingest.js (normalize, classify, validate)
+  → O10 exact unchanged comparison (per indicator)
+  → O7 single outer transaction, indicator by indicator
+  → O1 lazy per-chunk batch writes (only changed indicators)
+  → O2 staged-memory release after each indicator
+  → O8 streaming integrity scan
+  → COMMIT (success) / ROLLBACK (failure, partial)
+  → Turso Cloud (production) / local SQLite file (development, fallback)
+  → db/repository.js (all SQL lives here)
+  → backend services (ranking, YoY, movement, compare, coverage, years)
   → Express JSON API (finished numbers only)
   → React + Vite frontend (display only)
 ```
 
-- Frontend: React + Vite (`frontend/`)
-- Backend: Node.js + Express 5 (`backend/src/server.js`)
-- Database: SQLite via `node:sqlite` (`backend/data/worldbank.db`, created locally by ingestion)
-- Data source: World Bank WDI API (open, no API key)
+- Frontend: React + Vite (`frontend/`). Transport and presentation only:
+  it never queries Turso, never calls the World Bank API, and performs no
+  ranking, YoY, or denominator calculations.
+- Backend: Node.js + Express 5 (`backend/src/server.js`). Sole calculation
+  authority for every analytical number.
+- Database: Turso Cloud primary in production; local SQLite file
+  (`backend/data/worldbank.db`) for development and as a guarded fallback.
+  Both backends are served through one libSQL driver (`backend/src/db/`),
+  so repository and service code never knows which physical database
+  answers. Raw values are stored twice: numeric `REAL` for calculation and
+  canonical decimal `value_raw` text for audit.
+- Data source: World Bank WDI API (open, no API key) — the only raw-data
+  source. No forecasts, no third-party rankings, no synthesized series.
+
+## Refresh Optimization (O1 / O2 / O7 / O8 / O10)
+
+The refresh pipeline produces byte-identical data with less RAM and fewer
+database rewrites. It changes no metric, ranking, movement, comparison,
+analysis, missing-data rule, precision, or source data:
+
+- **O1 — lazy per-chunk batch construction**: bulk-write statements exist
+  only for the chunk in flight (500 rows), never a 230k-entry array.
+- **O2 — progressive staged-data release**: each indicator's staged rows are
+  released immediately after publishing; peak memory is one indicator.
+- **O7 — one outer transaction**: fetch → validate → publish → release runs
+  per indicator inside a single atomic transaction. A failure anywhere rolls
+  everything back; readers always see the previous committed snapshot.
+- **O8 — streaming integrity scan**: value/finiteness validation streams in
+  rowid-ordered batches with a `checked === COUNT(*)` completeness gate —
+  never a full-table in-memory array.
+- **O10 — exact unchanged detection**: each indicator's staged payload is
+  compared element-by-element (identity, value, `value_raw`) against stored
+  rows. Only a proven-identical indicator skips its DELETE/upsert writes.
+  The World Bank `lastupdated` string alone is never treated as proof.
+
+## Refresh Lifecycle
+
+- **Fresh cache**: serve existing data; no refresh is triggered.
+- **TTL expiry** (default 24 h from the last *successful check*): a
+  background refresh/check starts fire-and-forget while current data keeps
+  serving. Concurrent requests share the single run (in-memory flag +
+  database mutex).
+- **Changed indicator**: its year-range DELETE + upserts run; only that
+  indicator is rewritten.
+- **Unchanged indicator**: proven identical, zero observation writes.
+- **All unchanged**: still a successful refresh — `lastSuccessAt` advances
+  and the next 24 h TTL starts at completion. Unchanged data is not failure.
+- **Partial failure** (some indicators fail): the outer transaction rolls
+  back, old data remains byte-identical, `lastSuccessAt` does not advance,
+  the attempt is recorded as `partial`, and (for background refreshes) a
+  retry is scheduled.
+- **Automatic retry** (background refreshes only): 5 min → 15 min → 30 min
+  → 60 min, single-flight, in-process. Any success resets the chain.
+  Manual-refresh failures never schedule automatic retries.
+- **Process crash mid-refresh**: uncommitted writes roll back; the stale
+  refresh lock is recovered on the next boot; the next refresh starts clean.
+
+## Performance (full-scale isolated verification)
+
+Measured against the complete real dataset (349,800 rows retrieved,
+228,776 observations, 20 indicators, 295 entities, 78 aggregates) on an
+isolated scratch database — not on production Render:
+
+- Unchanged full refresh: peak RSS ≈ 244.7 MB, peak heap ≈ 83.2 MB
+  (≈ 10.3 MB retained post-GC), ≈ 12–14 s, zero observation writes.
+- One-indicator rewrite: ≈ 26–28 s (14,481 rows rewritten, rest skipped).
+- Streaming integrity scan: 12/12 checks in ≈ 4 s over 228,776 rows.
+- Previous Phase 6A baseline for comparison: ≈ 275.8 MB RSS, ≈ 141.7 MB
+  heap, ≈ 243 s full refresh.
+
+The worst-case all-20-indicator remote-write run was not directly measured
+against production billing; row-level write accounting is derived from code
+(see `RELEASE_v3.1.0.md`).
+
+## Cold Start, PWA Identity, Geolocation
+
+- **Cold start**: the backend `listen()`s before any data work; `/api/years`
+  answers 503 `DATA_LOADING` while the first dataset seeds. The DataStatus
+  view treats connection refusal/timeout as "Starting the data service…"
+  with controlled auto-retry inside a 120 s window, then falls back to an
+  explicit error with manual retry. Genuine HTTP errors render red at once.
+- **PWA identity** is generic: `World Bank WDI Economic Data Analysis`
+  (`WDI Analysis`), pinned by `frontend/src/identity.test.js`. An
+  already-installed old copy may retain stale install metadata — uninstall
+  and fresh-install from the deployed build.
+- **Focus country**: URL `?country=` > manual/session selection > one-time
+  IP geolocation (`GEO_PROVIDER_URL`, `GEO_TIMEOUT_MS=3000`) > India
+  fallback. Geolocation is a UX default only, never analytical.
 
 ## Local Development
 
@@ -374,62 +473,73 @@ Local-only files (`.env`, `.env.local`) are never committed.
 | `PORT` | backend | API listen port (default 3001). |
 | `REFRESH_ADMIN_TOKEN` | backend | Bearer token for `POST /api/data/refresh`. Empty = open (local dev/tests only). Production refuses to start without it. Never logged or returned. |
 | `CORS_ORIGINS` | backend | Exact-match allowed frontend origins, comma-separated, no wildcards. Unset = permissive dev default. Production refuses to start without it. |
-| `CACHE_TTL_HOURS` | backend | Cache freshness window (default 24). |
-| `DATABASE_FILE` | backend | SQLite file (default `data/worldbank.db`). |
+| `CACHE_TTL_HOURS` | backend | Cache freshness window in hours from the last successful check (default 24). Unchanged successful refreshes renew it. |
+| `DATABASE_FILE` | backend | Local SQLite file (default `data/worldbank.db`). Development database and guarded production fallback. |
+| `DB_MODE` | backend | `turso` or `local` to force the backend; empty = automatic (Turso when configured). Local development sets `DB_MODE=local` so dev work can never touch production Turso. |
+| `TURSO_DATABASE_URL` | backend | Turso Cloud database URL. Secret deployment value — never commit, never log (only the host is logged). |
+| `TURSO_AUTH_TOKEN` | backend | Turso auth token. Secret — never commit, log, or return from any endpoint. |
+| `ALLOW_LOCAL_DB_FALLBACK` | backend | When Turso is unreachable at boot and a valid non-empty local DB exists, serve from it with a loud warning (default true). Never masks an outage with an empty database and never triggers an unattended seed. |
+| `REFRESH_RATE_LIMIT_MAX` / `REFRESH_RATE_LIMIT_WINDOW_MS` | backend | Manual-refresh abuse protection (defaults 10 per 60 s per IP; GET endpoints never limited). |
+| `WB_AUTO_INGEST_ON_EMPTY` / `WB_AUTO_REFRESH_ON_STALE` | backend | Boot empty-ingest and stale-cache background refresh (defaults 1/1; set 0 to require manual refresh). |
+| `WB_PER_PAGE` / `WB_MAX_RETRIES` / `WB_RETRY_BASE_MS` / `WB_TIMEOUT_MS` | backend | World Bank client tuning (defaults 20000 / 5 / 500 ms / 30000 ms). |
+| `GEO_PROVIDER_URL` / `GEO_TIMEOUT_MS` | backend | Keyless IP-geolocation endpoint with `{ip}` placeholder (default `https://ipwho.is/{ip}?fields=country_code`) and single-attempt bound (default 3000 ms). UX default only. |
 | `DEFAULT_START_YEAR` / `DEFAULT_END_YEAR` | backend | Default analysis parameters (currently 2000 / 2025). The available-year selector remains data-driven and is derived from stored World Bank observations. |
 | `INGEST_START_YEAR` / `INGEST_END_YEAR` | backend | Default refresh fetch range (defaults 1960 / current calendar year, so future World Bank years are picked up). |
 
 See `frontend/.env.example` and `backend/.env.example`. Real `.env` /
-`.env.local` files are local-only and never committed. Never commit secrets;
-this project has none to configure.
+`.env.local` files are local-only and never committed. `backend/.env.example`
+covers every code-consumed key (production keys, safe defaults, empty secret
+placeholders, test-only seams); an automated check enforces
+`inCodeNotExample = ∅`. Secrets (`TURSO_AUTH_TOKEN`, `REFRESH_ADMIN_TOKEN`,
+passwords, credentials) are never committed, logged, or embedded in the
+frontend bundle.
 
 ## Testing
 
-- Backend: `npm test` in `backend/` — 568 tests covering configuration,
-  subject/metric registry (twenty metrics, semantic metadata, lifecycle),
-  country universe, ranking, ties, denominators, YoY,
-  YoY ranking, pagination, search (text and exact-rank), World Bank client
-  behavior (retries, pagination completeness, error envelopes), ingestion
-  (all subjects, aggregate storage, historical ranges), refresh locking, cache TTL, coverage
-  cases, services, per-capita regression, Total GDP math parity and API,
-  generic transformations (percent/pp/index-point/CAGR/group/cross-rate/period),
-  entity/group comparison (capability matrix, observed vs like-for-like,
-  weighted ratios, provenance), new-indicator promotion and analytics,
-  flow periods ([A,B) boundaries, completeness, sign guards), chart data
-  adapters (exact passthrough, null preservation),
-  historical year handling, and HTTP endpoints. All pass except one
-  environment-dependent refresh-auth test that expects an open endpoint while
-  the local `.env` configures `REFRESH_ADMIN_TOKEN` (pre-existing, unrelated).
-- Frontend: `npm run lint` and `npm run build` in `frontend/` — both pass.
-  Integration is verified against the running backend (all views, filters,
-  pagination, search, verification, refresh) with headless-browser checks.
+- Backend: `node --test --test-concurrency=1 test/*.test.js` in `backend/` —
+  **609 pass / 0 fail**, covering configuration, registry, universe, ranking,
+  YoY, pagination, search, World Bank client behavior, ingestion, O10
+  unchanged skipping, retry/backoff, failure positions, TTL, cold start,
+  refresh hardening/locks/progress, guardrails, Turso selection, integrity,
+  and HTTP endpoints — plus the `test/equivalence.test.js` harness (3/3:
+  determinism self-proof, sensitivity witness, cross-run equivalence).
+- Frontend: `npm run test` in `frontend/` — **165/165** (vitest), including
+  product-identity pins and data-status cold-start behavior.
+- Lint/build: `oxlint` 0 errors; `vite build` green.
+- Full-scale zero-loss validation (isolated scratch DB, live WDI data):
+  unchanged/mutated/dropped-indicator runs, indicator-17 failure rollback
+  after real writes, 76 clean concurrent reads, SIGKILL-crash rollback with
+  lock recovery — see `RELEASE_v3.1.0.md`.
 
 ## Data / Refresh
 
-SQLite acts as a persistent cache: the application does not query the World
+Turso (production) or the local SQLite file (development/fallback) acts as a
+persistent cache: the application does not query the World
 Bank on every frontend request. Data is refreshed when the database is empty
 (automatic on server start), when the cache exceeds its TTL (automatic
 background refresh, guarded so concurrent requests share one run), or
-manually via `POST /api/data/refresh`. Without explicit years a refresh
+manually via `POST /api/data/refresh` (admin-token protected when
+configured). Without explicit years a refresh
 fetches the historical ingest range (defaults 1960 through the current
 calendar year) for all production metrics, storing only what the World Bank
-returns. Refresh state, lock state, and recent runs are visible through
-`GET /api/data-status`. A failed refresh is recorded
+returns. Refresh state, lock state, retry state, and recent runs are visible
+through `GET /api/data-status`. A failed refresh is recorded
 and the previous valid dataset keeps serving; automatic retries back off
-instead of looping.
+(5/15/30/60 min) instead of looping.
 
-Deployment model: a single backend writer owns each database file (one
-`node` server process per `data/worldbank.db`; the CLI ingest scripts are
-the only other writer and must never run concurrently with the server).
-The SQLite refresh lock serializes refreshes across these local processes,
-and server boot recovers a lock left behind by a crashed holder.
-Multi-host or multi-writer shared-database deployment is intentionally
-unsupported — there is no distributed lease by design.
+Deployment model: one backend writer service owns refreshes; a database-backed
+refresh lock serializes them across processes (the CLI ingest scripts are the
+only other writer and must never run concurrently with the server), and server
+boot recovers a lock left behind by a crashed holder. With a populated Turso
+database, a Render restart reconnects and serves existing rows with no startup
+reseed; only an empty database seeds, and production degraded mode (primary
+unreachable, no usable local database) explicitly never seeds.
 
-Freshness is retrieval-time, not publication-triggered: the TTL window
+Freshness is successful-check time, not vintage time: the TTL window
 (default 24 h via `CACHE_TTL_HOURS`) runs from the last successful
-retrieval. A newly published World Bank vintage is picked up by the next
-refresh after TTL expiry, or immediately via manual refresh. The actual
+retrieval — including successful unchanged checks, which renew it with zero
+observation writes. A newly published World Bank vintage is picked up by the
+next refresh after TTL expiry, or immediately via manual refresh. The actual
 World Bank vintage behind each analysis is always visible in API responses
 (`vintage` / `wbLastUpdated` evidence) and in the UI next to every result.
 
@@ -453,12 +563,39 @@ backend/             Express API + ingestion + ranking engine
   src/services/      ranking, YoY, coverage, verification, integrity
   src/domain/        pure calculation and filtering logic
   src/wb/            World Bank client and ingestion pipeline
-  src/db/            SQLite schema and repository
+  src/db/            libSQL schema and repository (Turso + SQLite file)
   test/              backend test suite and fixtures
 ```
 
 Generated files (`node_modules/`, `dist/`, `backend/data/`, local `.env`
 files) are not part of the repository.
+
+## Production Operator Checklist (v3.1.0)
+
+Operator-side verification (not yet performed — do not claim production
+verification until observed):
+
+1. Confirm Render runs with `DB_MODE=turso`.
+2. Confirm the Turso connection log at boot.
+3. Confirm startup recognizes existing rows ("no startup ingestion needed").
+4. Confirm no startup reseed occurs.
+5. Restart Render and confirm data persistence across the restart.
+6. Test cold-start UI ("Starting the data service…" → automatic recovery).
+7. Fresh-install the PWA after uninstalling any old copy; confirm the
+   generic identity.
+8. Observe the first real automatic 24 h refresh (status, writes, TTL).
+9. Observe Render memory metrics during/after refresh.
+10. Verify production status/data pages serve correct numbers.
+
+## Known Limitations (v3.1.0)
+
+- The worst-case all-20-indicator remote write path was not directly
+  measured against Turso billing; write accounting is row-level from code.
+- A live Turso outage was deliberately never induced; fallback/degraded
+  behavior is verified by code trace and selection tests.
+- Long retry intervals (15/30/60 min) were verified via an accelerated
+  timing seam on the identical code path, not by literal waiting.
+- Production operator verification (above) is pending.
 
 ## Disclaimer / Scope
 
