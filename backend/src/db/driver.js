@@ -43,12 +43,30 @@ export async function queryExec(handle, sql) {
  * Statements run SEQUENTIALLY in array order on any handle — including an
  * explicit transaction object, so atomic-publish semantics are unchanged.
  * SQL text is untouched; only the transport batching differs.
+ *
+ * Phase 6C O1: with the `{ sql, build }` form, callers pass source ROWS and
+ * a per-row args builder, so statement objects exist only for the chunk in
+ * flight — never a 230k-entry statement array. The legacy `{sql, args}`
+ * entry form remains supported (used by tests).
  */
-export async function batchRun(handle, statements, { chunkSize = 500 } = {}) {
-  const list = Array.isArray(statements) ? statements : [];
+export async function batchRun(handle, rows, { chunkSize = 500, sql = null, build = null } = {}) {
+  const total = Array.isArray(rows) ? rows.length : 0;
   let n = 0;
-  for (let i = 0; i < list.length; i += chunkSize) {
-    const chunk = list.slice(i, i + chunkSize).map((s) => ({ sql: s.sql, args: s.args ?? [] }));
+  for (let i = 0; i < total; i += chunkSize) {
+    const chunk = [];
+    const end = Math.min(i + chunkSize, total);
+    for (let j = i; j < end; j += 1) {
+      const entry = rows[j];
+      if (build) {
+        const args = build(entry, j);
+        // A null build result skips the row (e.g. year-less stat rows):
+        // independent upserts, order of the rest preserved.
+        if (args === null || args === undefined) continue;
+        chunk.push({ sql, args });
+      } else {
+        chunk.push({ sql: entry.sql, args: entry.args ?? [] });
+      }
+    }
     if (chunk.length > 0) {
       await handle.batch(chunk);
       n += chunk.length;

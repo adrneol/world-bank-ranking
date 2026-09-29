@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   rows_retrieved          INTEGER DEFAULT 0, -- observation rows RECEIVED from the API
   rows_upserted           INTEGER DEFAULT 0, -- observation rows written
   rows_null_skipped       INTEGER DEFAULT 0, -- null observations skipped
+  rows_skipped_unchanged  INTEGER DEFAULT 0, -- Phase 6C O10: staged rows proven identical to stored rows, left unwritten
   rows_aggregate_excluded INTEGER DEFAULT 0, -- aggregate rows rejected (legacy; aggregates with a usable ISO3 are now STORED, see below)
   rows_aggregate_stored   INTEGER DEFAULT 0, -- official aggregate observations stored (typed by countries.is_aggregate; never ranked)
   rows_blank_iso3_skipped INTEGER DEFAULT 0, -- blank ISO3 rows excluded

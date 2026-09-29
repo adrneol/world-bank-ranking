@@ -131,22 +131,61 @@ export async function runIntegrityChecks(db) {
   checks.push(result('E.invalid_year', invalidYears === 0, { invalidYears }));
 
   // F. Every stored value must be finite (NaN/Infinity rejected at ingest).
-  const stored = await queryAll(db, 'SELECT value, value_raw FROM observations');
+  // Phase 6C O8: streamed in rowid-ordered batches (never a full-table array),
+  // so the check holds a bounded chunk plus three counters regardless of
+  // dataset size. Deterministic and exact: batches tile the table with no
+  // gaps and no overlap (rowid > lastSeen is monotonic under concurrent
+  // inserts only for HIGHER rowids, which a later batch still visits; a
+  // concurrent successful publish replaces the dataset and advances the
+  // integrity memo key, so a mixed-generation scan cannot be mistaken for
+  // the published generation). Completeness: the loop ends only on a
+  // short/empty batch, and `checked` must equal COUNT(*) afterwards —
+  // otherwise the scan is reported, not silently trusted.
+  const O8_BATCH = 20000;
   let nonFinite = 0;
   let rawMismatch = 0;
-  for (const row of stored) {
-    if (typeof row.value !== 'number' || !Number.isFinite(row.value)) {
-      nonFinite += 1;
-      continue;
+  let checked = 0;
+  let lastRowid = 0;
+  for (;;) {
+    const chunk = await queryAll(
+      db,
+      'SELECT rowid AS rowid, value, value_raw FROM observations WHERE rowid > ? ORDER BY rowid LIMIT ?',
+      [lastRowid, O8_BATCH],
+    );
+    if (chunk.length === 0) break;
+    for (const row of chunk) {
+      if (typeof row.value !== 'number' || !Number.isFinite(row.value)) {
+        nonFinite += 1;
+        continue;
+      }
+      // value_raw must round-trip to the stored numeric value when present.
+      if (row.value_raw !== null && row.value_raw !== undefined) {
+        if (Number(row.value_raw) !== row.value) rawMismatch += 1;
+      }
     }
-    // value_raw must round-trip to the stored numeric value when present.
-    if (row.value_raw !== null && row.value_raw !== undefined) {
-      if (Number(row.value_raw) !== row.value) rawMismatch += 1;
-    }
+    checked += chunk.length;
+    lastRowid = chunk[chunk.length - 1].rowid;
+    if (chunk.length < O8_BATCH) break;
   }
-  checks.push(result('F.non_finite_value', nonFinite === 0, { nonFinite, checked: stored.length }));
+  const totalObservations = (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations')).n;
+  const scanComplete = checked === totalObservations;
   checks.push(
-    result('F.raw_round_trip', rawMismatch === 0, { rawMismatch, checked: stored.length }),
+    result('F.non_finite_value', scanComplete && nonFinite === 0, {
+      nonFinite,
+      checked,
+      total: totalObservations,
+      scanComplete,
+      batched: true,
+    }),
+  );
+  checks.push(
+    result('F.raw_round_trip', scanComplete && rawMismatch === 0, {
+      rawMismatch,
+      checked,
+      total: totalObservations,
+      scanComplete,
+      batched: true,
+    }),
   );
 
   // G. Latest successful run must record pagination/provenance counters.

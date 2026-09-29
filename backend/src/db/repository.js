@@ -109,10 +109,7 @@ export async function upsertCountry(db, row) {
 
 /** Bulk upsert metadata without opening a transaction (for use inside a publish transaction). */
 export async function upsertCountriesInner(db, rows) {
-  await batchRun(
-    db,
-    rows.map((row) => ({
-      sql: `
+  const statement = `
     INSERT INTO countries (
       id, iso2, iso3, name, region, region_id, admin_region, income_level,
       lending_type, capital_city, is_aggregate, aggregate_reason, updated_at
@@ -130,24 +127,27 @@ export async function upsertCountriesInner(db, rows) {
       is_aggregate     = excluded.is_aggregate,
       aggregate_reason = excluded.aggregate_reason,
       updated_at       = excluded.updated_at
-  `,
-      args: [
-        row.id,
-        nz(row.iso2),
-        nz(row.iso3 ?? row.id),
-        row.name,
-        nz(row.region),
-        nz(row.regionId),
-        nz(row.adminRegion),
-        nz(row.incomeLevel),
-        nz(row.lendingType),
-        nz(row.capitalCity),
-        row.isAggregate ? 1 : 0,
-        nz(row.aggregateReason),
-        nowIso(),
-      ],
-    })),
-  );
+  `;
+  // Phase 6C O1: rows stream through per-chunk builders; no statement array
+  // for the whole input is ever materialized.
+  await batchRun(db, rows, {
+    build: (row) => [
+      row.id,
+      nz(row.iso2),
+      nz(row.iso3 ?? row.id),
+      row.name,
+      nz(row.region),
+      nz(row.regionId),
+      nz(row.adminRegion),
+      nz(row.incomeLevel),
+      nz(row.lendingType),
+      nz(row.capitalCity),
+      row.isAggregate ? 1 : 0,
+      nz(row.aggregateReason),
+      nowIso(),
+    ],
+    sql: statement,
+  });
   return rows.length;
 }
 
@@ -334,17 +334,17 @@ export async function upsertObservation(db, { countryId, indicatorId, year, valu
   );
 }
 
-/** Bulk upsert observations without opening a transaction (for use inside a publish transaction). Returns rows written. */
-export async function upsertObservationsInner(db, rows) {
-  await batchRun(
-    db,
-    rows.map((row) => {
-      const raw = row.valueRaw ?? (row.value === null || row.value === undefined ? null : String(row.value));
-      // REAL-as-text binding: see upsertObservation (Phase 6A transport note).
-      const numericBinding =
-        typeof row.value === 'number' && Number.isFinite(row.value) ? String(row.value) : row.value;
-      return {
-        sql: `
+/**
+ * Bulk upsert observations without opening a transaction (for use inside a
+ * publish transaction). Returns rows written.
+ *
+ * Phase 6C O1/O2: `mapRow` transforms each row lazily per publish chunk
+ * (never a whole-array pre-copy); callers release input rows once their
+ * upsert completes (the refresh loop clears each indicator's staged rows
+ * right after publishing them).
+ */
+export async function upsertObservationsInner(db, rows, mapRow = null) {
+  const statement = `
     INSERT INTO observations (country_id, indicator_id, year, value, value_raw, wb_last_updated, fetched_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(country_id, indicator_id, year) DO UPDATE SET
@@ -352,19 +352,29 @@ export async function upsertObservationsInner(db, rows) {
       value_raw       = excluded.value_raw,
       wb_last_updated = excluded.wb_last_updated,
       fetched_at      = excluded.fetched_at
-  `,
-        args: [
-          row.countryId,
-          row.indicatorId,
-          row.year,
-          numericBinding,
-          nz(raw),
-          nz(row.wbLastUpdated),
-          nowIso(),
-        ],
-      };
-    }),
-  );
+  `;
+  // Phase 6C O1: rows stream through the per-chunk builder; no statement
+  // array for all rows is ever materialized.
+  await batchRun(db, rows, {
+    sql: statement,
+    build: (row) => {
+      const source = mapRow ? mapRow(row) : row;
+      const raw =
+        source.valueRaw ?? (source.value === null || source.value === undefined ? null : String(source.value));
+      // REAL-as-text binding: see upsertObservation (Phase 6A transport note).
+      const numericBinding =
+        typeof source.value === 'number' && Number.isFinite(source.value) ? String(source.value) : source.value;
+      return [
+        source.countryId,
+        source.indicatorId,
+        source.year,
+        numericBinding,
+        nz(raw),
+        nz(source.wbLastUpdated),
+        nowIso(),
+      ];
+    },
+  });
   return rows.length;
 }
 
@@ -400,6 +410,26 @@ export async function getObservation(db, countryId, indicatorId, year) {
       'SELECT * FROM observations WHERE country_id = ? AND indicator_id = ? AND year = ?',
       [countryId, indicatorId, year],
     )) ?? null
+  );
+}
+
+/**
+ * Stored observation tuples for one indicator across an inclusive year range,
+ * for the Phase 6C O10 unchanged-indicator proof. Minimal columns only
+ * (identity + exact stored value + exact stored raw string); one indicator at
+ * a time, so peak memory stays bounded. Includes aggregate-typed rows: the
+ * comparison must cover everything the publish would rewrite.
+ *
+ * @returns {{countryId:string, year:number, value:number, valueRaw:string|null}[]}
+ */
+export async function getObservationsForCompare(db, indicatorId, startYear, endYear) {
+  return queryAll(
+    db,
+    `SELECT country_id AS countryId, year, value, value_raw AS valueRaw
+       FROM observations
+       WHERE indicator_id = ? AND year BETWEEN ? AND ?
+       ORDER BY country_id, year`,
+    [indicatorId, startYear, endYear],
   );
 }
 
@@ -785,6 +815,7 @@ export async function finishFetchRun(db, id, patch) {
       rows_retrieved          = ?,
       rows_upserted           = ?,
       rows_null_skipped       = ?,
+      rows_skipped_unchanged  = ?,
       rows_aggregate_excluded = ?,
       rows_aggregate_stored   = ?,
       rows_blank_iso3_skipped = ?,
@@ -806,6 +837,7 @@ export async function finishFetchRun(db, id, patch) {
       patch.rowsRetrieved ?? 0,
       patch.rowsUpserted ?? 0,
       patch.rowsNullSkipped ?? 0,
+      patch.rowsSkippedUnchanged ?? 0,
       patch.rowsAggregateExcluded ?? 0,
       patch.rowsAggregateStored ?? 0,
       patch.rowsBlankIso3Skipped ?? 0,
@@ -833,11 +865,7 @@ export async function finishFetchRun(db, id, patch) {
  */
 export async function upsertIngestYearStatsInner(db, runId, rows) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
-  const statements = [];
-  for (const row of rows) {
-    if (row?.year === null || row?.year === undefined) continue;
-    statements.push({
-      sql: `
+  const statement = `
     INSERT INTO ingest_year_stats (
       fetch_run_id, metric_key, indicator_code, year,
       rows_received, rows_with_value, rows_written, rows_null_skipped,
@@ -856,27 +884,42 @@ export async function upsertIngestYearStatsInner(db, runId, rows) {
       rows_aggregate_excluded = excluded.rows_aggregate_excluded,
       rows_aggregate_stored   = excluded.rows_aggregate_stored,
       rows_unknown_country    = excluded.rows_unknown_country
-  `,
-      args: [
-        runId,
-        row.metricKey,
-        nz(row.indicatorCode),
-        row.year,
-        row.rowsReceived ?? 0,
-        row.rowsWithValue ?? 0,
-        row.rowsWritten ?? 0,
-        row.rowsNullSkipped ?? 0,
-        row.rowsNonFiniteSkipped ?? 0,
-        row.rowsInvalidYear ?? 0,
-        row.rowsBlankIso3Skipped ?? 0,
-        row.rowsAggregateExcluded ?? 0,
-        row.rowsAggregateStored ?? 0,
-        row.rowsUnknownCountry ?? 0,
-      ],
-    });
+  `;
+  // Phase 6C O1: rows with missing years are skipped by the builder
+  // (returning null), so no placeholder statements are materialized.
+  // NOTE: batchRun counts executed statements; the return below recounts
+  // writable rows to preserve the historical return contract.
+  let writable = 0;
+  for (const row of rows) {
+    if (row?.year !== null && row?.year !== undefined) writable += 1;
   }
-  await batchRun(db, statements);
-  return statements.length;
+  await batchRun(
+    db,
+    rows,
+    {
+      sql: statement,
+      build: (row) => {
+        if (row?.year === null || row?.year === undefined) return null;
+        return [
+          runId,
+          row.metricKey,
+          nz(row.indicatorCode),
+          row.year,
+          row.rowsReceived ?? 0,
+          row.rowsWithValue ?? 0,
+          row.rowsWritten ?? 0,
+          row.rowsNullSkipped ?? 0,
+          row.rowsNonFiniteSkipped ?? 0,
+          row.rowsInvalidYear ?? 0,
+          row.rowsBlankIso3Skipped ?? 0,
+          row.rowsAggregateExcluded ?? 0,
+          row.rowsAggregateStored ?? 0,
+          row.rowsUnknownCountry ?? 0,
+        ];
+      },
+    },
+  );
+  return writable;
 }
 
 /**

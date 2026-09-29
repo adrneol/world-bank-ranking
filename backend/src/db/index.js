@@ -16,6 +16,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,7 @@ const ADDED_COLUMNS = Object.freeze({
     requests: 'INTEGER DEFAULT 0',
     universe_snapshot: 'TEXT',
     rows_aggregate_stored: 'INTEGER DEFAULT 0',
+    rows_skipped_unchanged: 'INTEGER DEFAULT 0',
   }),
   ingest_year_stats: Object.freeze({
     rows_aggregate_stored: 'INTEGER NOT NULL DEFAULT 0',
@@ -207,12 +209,32 @@ export async function openExistingLocalDb() {
 }
 
 /**
- * Create a brand new in-memory database with the schema applied.
+ * Create a brand new isolated scratch database with the schema applied.
  * Used by unit tests so they never touch the real cache file.
+ *
+ * Backed by a temp FILE (deleted on close), not `:memory:`: the in-memory
+ * libSQL client holds a single connection, so any read on the shared handle
+ * while a write transaction is open throws TRANSACTION_ACTIVE. Temp files
+ * (like Turso remote) serve pre-commit snapshots to concurrent readers, so
+ * tests exercise the same read-during-refresh semantics as production.
  */
 export async function createMemoryDb() {
-  const handle = createClient({ url: ':memory:' });
-  await initDatabase(handle);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-test-'));
+  const file = path.join(dir, 'test.db');
+  const handle = createClient({ url: `file:${file.replace(/\\/g, '/')}` });
+  await initDatabase(handle, { localFile: true });
+  const origClose = handle.close.bind(handle);
+  handle.close = () => {
+    try {
+      origClose();
+    } finally {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // Best-effort temp cleanup; OS reclaims tmp eventually.
+      }
+    }
+  };
   return handle;
 }
 

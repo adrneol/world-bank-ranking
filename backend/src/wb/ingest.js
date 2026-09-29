@@ -1,16 +1,18 @@
 /**
  * INGESTION PIPELINE — FETCH → VALIDATE → ATOMIC PUBLISH.
  *
- * Flow:
+ * Flow (Phase 6C O7):
  *   World Bank API  ->  STAGED country metadata (memory only)
  *                   ->  eligible universe, validated in memory
- *                   ->  STAGED indicator series (memory only, all requested)
- *                   ->  all-or-nothing validation
- *                   ->  ONE SQLite transaction publishes the complete snapshot
+ *                   ->  PER INDICATOR, inside ONE outer transaction:
+ *                        fetch series -> validate -> publish ->
+ *                        release staged rows
+ *                   ->  COMMIT once every requested indicator succeeded
  *
- * The live countries/indicators/observations tables are NEVER written until
- * every requested indicator has been fetched and validated. A partial or
- * failed refresh publishes nothing: the previous dataset stays exactly as it
+ * Peak memory is one indicator, not all twenty. A failure anywhere rolls
+ * the outer transaction back, so the live tables never show a half-written
+ * mix; failed/partial attempts are recorded as audit history outside the
+ * transaction, exactly as before. The previous dataset stays exactly as it
  * was, and only audit rows (fetch_runs, ingest_year_stats) record the attempt.
  *
  * Key behaviours:
@@ -53,6 +55,7 @@ import {
   getIndicatorByMetricKey,
   getLastSuccessfulFetchTime,
   getLatestFetchRun,
+  getObservationsForCompare,
   refreshLockStatus,
   releaseRefreshLock,
   setRefreshLockRunId,
@@ -82,6 +85,9 @@ let refreshInProgress = false;
 /** Last progress snapshot, exposed through /api/data-status. */
 let lastProgress = null;
 
+/** Shared tombstone for released staged-row arrays (Phase 6C O2). */
+const EMPTY_RELEASED_ROWS = Object.freeze([]);
+
 /**
  * Cooldown between automatic refresh attempts after a recorded failure.
  * Manual refreshes (POST /api/data/refresh) always attempt immediately;
@@ -89,6 +95,102 @@ let lastProgress = null;
  * refresh loop while still allowing recovery on the next window.
  */
 export const AUTO_REFRESH_FAIL_COOLDOWN_MS = 15 * 60 * 1000;
+
+/**
+ * Conservative retry schedule for FAILED automatic refreshes (Phase 6C,
+ * Part 7). Delays grow 5m → 15m → 30m → 60m and stay at 60m afterwards.
+ * Override in tests with WB_REFRESH_RETRY_DELAYS_MS="100,200" (comma-separated ms).
+ *
+ * Semantics (separate from the 24h TTL):
+ *   TTL   decides when a refresh/check becomes DUE (getCacheStatus).
+ *   Retry decides when a FAILED automatic attempt gets another opportunity.
+ * A retry fires only through maybeAutoRefresh(), so all single-flight guards
+ * (fresh cache, in-process flag, SQLite lock) still apply: a retry can never
+ * overlap another refresh, and if the cache became fresh meanwhile the retry
+ * is a no-op. lastSuccessAt advances only on fully successful runs.
+ *
+ * Durability: IN-PROCESS ONLY. A Render restart drops the timer; recovery
+ * then comes from the boot stale-check (maybeAutoRefresh on stale cache),
+ * never from a duplicated loop — at most one timer exists per process
+ * (scheduleRefreshRetry is a no-op while one is pending).
+ */
+export const REFRESH_RETRY_DELAYS_MS = Object.freeze([5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]);
+let refreshRetryTimer = null;
+let consecutiveAutoFailures = 0;
+
+/** Parse the retry schedule: env override (tests) or the default ladder. */
+export function refreshRetryDelays() {
+  const raw = process.env.WB_REFRESH_RETRY_DELAYS_MS;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    const parsed = String(raw)
+      .split(',')
+      .map((s) => Number(String(s).trim()))
+      .filter((n) => Number.isFinite(n) && n >= 0);
+    if (parsed.length > 0) return parsed;
+  }
+  return [...REFRESH_RETRY_DELAYS_MS];
+}
+
+/** Delay before the Nth consecutive-failure retry (0-based; capped at the last rung). */
+export function getRefreshRetryDelayMs(failureIndex) {
+  const ladder = refreshRetryDelays();
+  const i = Math.max(0, Math.min(Number(failureIndex) || 0, ladder.length - 1));
+  return ladder[i];
+}
+
+/** Observable retry state (for /api/data-status futures and tests). */
+export function getRefreshRetryState() {
+  return {
+    scheduled: refreshRetryTimer !== null,
+    consecutiveFailures: consecutiveAutoFailures,
+    nextDelayMs: refreshRetryTimer !== null ? getRefreshRetryDelayMs(consecutiveAutoFailures) : null,
+  };
+}
+
+/** Cancel a pending retry, if any. Idempotent. */
+export function cancelScheduledRefreshRetry() {
+  if (refreshRetryTimer !== null) {
+    clearTimeout(refreshRetryTimer);
+    refreshRetryTimer = null;
+  }
+}
+
+/**
+ * Reset the consecutive-failure count (called on every successful refresh)
+ * and drop any pending retry: fresh data needs no retry.
+ */
+export function noteRefreshSuccess() {
+  consecutiveAutoFailures = 0;
+  cancelScheduledRefreshRetry();
+}
+
+/**
+ * Schedule one background retry of a failed AUTOMATIC refresh. Single-flight:
+ * at most one timer per process; overlapping fires re-enter through
+ * maybeAutoRefresh() guards. Manual/script callers never schedule (their
+ * caller owns retrying); tests can force tiny delays via
+ * WB_REFRESH_RETRY_DELAYS_MS.
+ *
+ * @returns the retry state after scheduling (or the existing pending state).
+ */
+export function scheduleRefreshRetry(db, { trigger = 'ttl', onWarn = null } = {}) {
+  // Test kill-switch (teardown only): never set in production.
+  if (process.env.WB_REFRESH_RETRY_DISABLED === '1') return getRefreshRetryState();
+  if (refreshRetryTimer !== null) return getRefreshRetryState();
+  const delay = getRefreshRetryDelayMs(consecutiveAutoFailures);
+  consecutiveAutoFailures += 1;
+  refreshRetryTimer = setTimeout(() => {
+    refreshRetryTimer = null;
+    maybeAutoRefresh(db, { onWarn, ignoreCooldown: true }).then(
+      () => {},
+      (error) => {
+        onWarn?.({ message: `Scheduled refresh retry failed to launch: ${error.message}` });
+      },
+    );
+  }, delay);
+  if (typeof refreshRetryTimer.unref === 'function') refreshRetryTimer.unref();
+  return getRefreshRetryState();
+}
 
 export function isRefreshInProgress() {
   return refreshInProgress;
@@ -350,62 +452,61 @@ export async function recoverRefreshLock(db, reason = 'boot recovery') {
 }
 
 /**
- * Publish ONE fully staged and validated refresh in a single transaction.
+ * Phase 6C O10: exact unchanged-indicator proof.
  *
- * This is the ONLY place that mutates the published dataset during a
- * refresh. Everything it writes was already fetched and validated in memory,
- * so a crash during fetching can never leave a half-written mix behind, and
- * a crash during publication is contained by the SQLite transaction.
+ * Compares the freshly fetched+validated staged rows against what is already
+ * stored for the same indicator and year range. Returns true ONLY when the
+ * two sets are element-identical: same row count, same (country, year)
+ * identities, same numeric value AND same value_raw string on every row.
  *
- * Within the transaction, in order:
- *   1. upsert country metadata (global; same universe the payload used)
- *   2. per refreshed metric: upsert indicator metadata, reconcile that
- *      metric's fetched year range (DELETE old rows, INSERT staged rows so a
- *      newly absent World Bank value removes stale data instead of lingering),
- *      then persist that metric's per-year counters
- *   3. mark the fetch run "success" with the universe snapshot + counters
+ * False-positive direction is safe by construction: ANY doubt (count
+ * mismatch, missing row, extra row, changed value, changed raw string,
+ * non-string raw forms) returns false, i.e. "cannot prove unchanged" means
+ * PROCESS THE INDICATOR. Only an exact match skips the delete+upsert writes.
  *
- * Metrics and year ranges NOT part of this refresh are never touched.
- * fetch_runs rows for failed/partial attempts are audit history and are
- * written outside this transaction (they must survive failures).
+ * What this evidence proves: the World Bank payload for this indicator and
+ * range, after the canonical classification/normalization in
+ * fetchIndicatorPayload, is byte-identical to the stored dataset — so
+ * rewriting it would be a no-op (same rows, same values; a delete+reinsert
+ * of identical rows included). It does NOT rely on the `lastupdated`
+ * metadata string, which alone can never prove content equality.
+ *
+ * @param {{countryId:string, year:number, value:number, valueRaw:string|null}[]} stored
+ * @param {{countryId:string, year:number, value:number, valueRaw:string|null}[]} staged
  */
-function publishStagedRefresh(db, {
-  runId,
-  stagedCountries,
-  stagedMetrics,
-  yearStats,
-  totals,
-  universeSnapshot,
-  wbLastUpdated,
-  fetchedStartYear,
-  fetchedEndYear,
-}) {
-  return transaction(db, async (tx) => {
-    await upsertCountriesInner(tx, stagedCountries);
-    for (const staged of stagedMetrics) {
-      const metric = METRICS[staged.metricKey];
-      await upsertIndicator(tx, {
-        ...metric,
-        name: staged.indicatorName,
-        unit: staged.indicatorUnit,
-        source: staged.indicatorSource,
-        sourceNote: staged.indicatorSourceNote,
-      });
-      const indicator = await getIndicatorByMetricKey(tx, staged.metricKey);
-      await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
-      await upsertObservationsInner(
-        tx,
-        staged.stagedRows.map((row) => ({ ...row, indicatorId: indicator.id })),
-      );
-    }
-    await upsertIngestYearStatsInner(tx, runId, yearStats);
-    await finishFetchRun(tx, runId, {
-      status: 'success',
-      wbLastUpdated,
-      universeSnapshot,
-      ...totals,
-    });
-  });
+export function isIndicatorPayloadUnchanged(stored, staged) {
+  if (!Array.isArray(stored) || !Array.isArray(staged)) return false;
+  if (stored.length !== staged.length) return false;
+  const byKey = new Map();
+  for (const row of stored) {
+    const key = `${row.countryId}\n${row.year}`;
+    if (byKey.has(key)) return false; // stored duplicates: cannot prove; process.
+    byKey.set(key, row);
+  }
+  for (const row of staged) {
+    const key = `${row.countryId}\n${row.year}`;
+    const match = byKey.get(key);
+    if (!match) return false;
+    if (!Object.is(match.value, row.value) && match.value !== row.value) return false;
+    if ((match.valueRaw ?? null) !== (row.valueRaw ?? null)) return false;
+    byKey.delete(key);
+  }
+  return byKey.size === 0;
+}
+
+/**
+ * Partial-refresh signal (Phase 6C O7): thrown INSIDE the outer publish
+ * transaction when some indicators failed, so everything published so far
+ * in this attempt rolls back. The refreshData catch below records the
+ * attempt exactly like the pre-O7 staged design did (per-indicator
+ * failures, audit stats, 'partial' run) and returns the same summary shape
+ * instead of throwing to the caller.
+ */
+function partialRollbackError(failureSummary) {
+  const error = new Error(failureSummary);
+  error.code = 'REFRESH_PARTIAL_ROLLBACK';
+  error.failureSummary = failureSummary;
+  return error;
 }
 
 export async function refreshData(options = {}) {
@@ -473,6 +574,7 @@ export async function refreshData(options = {}) {
     rowsRetrieved: 0,
     rowsWithValue: 0,
     rowsUpserted: 0,
+    rowsSkippedUnchanged: 0,
     rowsNullSkipped: 0,
     rowsNonFiniteSkipped: 0,
     rowsInvalidYear: 0,
@@ -497,12 +599,12 @@ export async function refreshData(options = {}) {
   // Regression: the lock used to be acquired before the try and could stay stuck
   // forever when startFetchRun() threw.
   //
-  // STAGING INVARIANT: until publishStagedRefresh runs, this function performs
-  // ZERO writes to countries/indicators/observations. fetch_runs rows and
-  // ingest_year_stats for the attempt are audit history (written outside the
-  // publish transaction) and must survive failures. A failed or partial
-  // refresh therefore cannot publish a mixed dataset: the previous dataset
-  // stays exactly as it was.
+  // PUBLISH INVARIANT (Phase 6C O7): all dataset writes happen inside ONE
+  // outer transaction spanning the per-indicator loop below. fetch_runs rows
+  // and ingest_year_stats for non-published attempts are audit history
+  // (written outside the transaction) and must survive failures. A failed or
+  // partial refresh therefore cannot publish a mixed dataset: the outer
+  // transaction rolls back and the previous dataset stays exactly as it was.
   try {
     // (Attempt flag and initial 'starting' progress were published
     // synchronously on entry, above.)
@@ -567,30 +669,52 @@ export async function refreshData(options = {}) {
       aggregateUniverse: meta.universe.aggregateCount,
     };
 
-    const stagedMetrics = [];
-    for (const metricKey of metricKeys) {
-      lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
+    // Phase 6C O7: ONE outer atomic transaction spans per-indicator
+    // fetch → validate → publish → release. Peak memory is a single
+    // indicator instead of all twenty at once; a failure anywhere rolls
+    // back everything published so far, preserving the all-or-nothing
+    // contract exactly (partial runs still record nothing to live tables —
+    // see the REFRESH_PARTIAL_ROLLBACK branch in the catch below).
+    lastProgress = { ...lastProgress, stage: 'publishing' };
+    totals.countriesRows = countriesRows;
+    await transaction(db, async (tx) => {
+      await upsertCountriesInner(tx, meta.countries);
+      // Countries are published; the staged copy is now provably unneeded.
+      meta.countries = EMPTY_RELEASED_ROWS;
+      let succeededCount = 0;
+      for (const metricKey of metricKeys) {
+        lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
 
-      // A single indicator failing must not discard the others; the failure is
-      // recorded and publication is refused unless EVERY requested indicator
-      // succeeded (all-or-nothing publish).
-      try {
-        const result = await fetchIndicatorPayload(
-          metricKey,
-          fetchedStartYear,
-          fetchedEndYear,
-          { eligibleIso3Set, aggregateIso3Set },
-          {
-            onProgress: (p) => options.onProgress?.({ stage: `indicator:${metricKey}`, ...p }),
-            onWarn: (w) => options.onWarn?.(w),
-          },
-        );
+        // A single indicator failing must not discard the others; the failure is
+        // recorded and publication is refused unless EVERY requested indicator
+        // succeeded (the throw below rolls the outer transaction back).
+        let result = null;
+        try {
+          result = await fetchIndicatorPayload(
+            metricKey,
+            fetchedStartYear,
+            fetchedEndYear,
+            { eligibleIso3Set, aggregateIso3Set },
+            {
+              onProgress: (p) => options.onProgress?.({ stage: `indicator:${metricKey}`, ...p }),
+              onWarn: (w) => options.onWarn?.(w),
+            },
+          );
+        } catch (indicatorError) {
+          perIndicator.push({
+            metricKey,
+            indicatorCode: METRICS[metricKey].indicatorCode,
+            error: indicatorError.message,
+          });
+          options.onWarn?.({
+            message: `Indicator ${metricKey} failed: ${indicatorError.message}`,
+          });
+          continue;
+        }
 
-        stagedMetrics.push(result);
         perIndicator.push(result);
         totals.rowsRetrieved += result.rowsRetrieved;
         totals.rowsWithValue += result.rowsWithValue;
-        totals.rowsUpserted += result.rowsUpserted;
         totals.rowsNullSkipped += result.rowsNullSkipped;
         totals.rowsNonFiniteSkipped += result.rowsNonFiniteSkipped;
         totals.rowsInvalidYear += result.rowsInvalidYear;
@@ -608,78 +732,79 @@ export async function refreshData(options = {}) {
           });
         }
         if (result.lastUpdated) wbLastUpdated = result.lastUpdated;
-      } catch (indicatorError) {
-        perIndicator.push({
-          metricKey,
-          indicatorCode: METRICS[metricKey].indicatorCode,
-          error: indicatorError.message,
+
+        // Phase 6C O10: skip the delete+upsert writes when the staged payload
+        // is proven element-identical to what is already stored. The run is
+        // still a SUCCESS (freshness advances via finishFetchRun below); only
+        // the redundant observation writes are omitted. rowsUpserted counts
+        // rows physically written; rowsSkippedUnchanged counts rows proven
+        // identical and left untouched.
+        const metric = METRICS[metricKey];
+        const existingIndicator = await getIndicatorByMetricKey(tx, metricKey);
+        let unchanged = false;
+        if (existingIndicator) {
+          const stored = await getObservationsForCompare(
+            tx,
+            existingIndicator.id,
+            fetchedStartYear,
+            fetchedEndYear,
+          );
+          unchanged = isIndicatorPayloadUnchanged(stored, result.stagedRows);
+        }
+        if (unchanged) {
+          result.skippedUnchanged = true;
+          totals.rowsSkippedUnchanged += result.rowsUpserted;
+          result.stagedRows = EMPTY_RELEASED_ROWS;
+          succeededCount += 1;
+          continue;
+        }
+
+        // Publish THIS indicator now, inside the outer transaction, then
+        // release its staged rows immediately (O2): nothing later in the
+        // publish reads them (the refresh summary keeps metadata plus an
+        // empty row list, counters untouched).
+        totals.rowsUpserted += result.rowsUpserted;
+        await upsertIndicator(tx, {
+          ...metric,
+          name: result.indicatorName,
+          unit: result.indicatorUnit,
+          source: result.indicatorSource,
+          sourceNote: result.indicatorSourceNote,
         });
-        options.onWarn?.({
-          message: `Indicator ${metricKey} failed: ${indicatorError.message}`,
-        });
+        const indicator = await getIndicatorByMetricKey(tx, metricKey);
+        await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
+        await upsertObservationsInner(tx, result.stagedRows, (row) => ({ ...row, indicatorId: indicator.id }));
+        result.stagedRows = EMPTY_RELEASED_ROWS;
+        succeededCount += 1;
       }
-    }
 
-    const failedMetrics = perIndicator.filter((r) => r.error);
-    if (stagedMetrics.length === 0) {
-      throw new Error(
-        `Every indicator failed during ingestion: ${perIndicator
-          .map((r) => `${r.metricKey}: ${r.error}`)
-          .join(' | ')}`,
-      );
-    }
+      const failedMetrics = perIndicator.filter((r) => r.error);
+      if (succeededCount === 0) {
+        throw new Error(
+          `Every indicator failed during ingestion: ${perIndicator
+            .map((r) => `${r.metricKey}: ${r.error}`)
+            .join(' | ')}`,
+        );
+      }
 
-    if (failedMetrics.length > 0) {
-      // PARTIAL refresh: publish NOTHING. The previous dataset stays exactly
-      // as it was; the attempt is recorded with its per-indicator failures so
-      // the audit trail shows what happened. Last-success freshness does not
-      // advance (only 'success' runs move it). Per-year counters below describe
-      // this attempt only; authoritative coverage reads use successful runs.
-      lastProgress = { ...lastProgress, stage: 'partial' };
-      const failureSummary =
-        `Partial refresh: ${stagedMetrics.length} of ${perIndicator.length} indicators staged; ` +
-        `failures: ${failedMetrics.map((r) => `${r.metricKey}: ${r.error}`).join(' | ')}`;
-      await upsertIngestYearStats(db, runId, yearStats);
-      await finishFetchRun(db, runId, {
-        status: 'partial',
+      if (failedMetrics.length > 0) {
+        // PARTIAL refresh: roll EVERYTHING back (including the indicators
+        // published above in this transaction) and let the catch below
+        // record the attempt without publishing anything — identical
+        // observable outcome to the pre-O7 staged design.
+        const failureSummary =
+          `Partial refresh: ${succeededCount} of ${perIndicator.length} indicators staged; ` +
+          `failures: ${failedMetrics.map((r) => `${r.metricKey}: ${r.error}`).join(' | ')}`;
+        throw partialRollbackError(failureSummary);
+      }
+
+      await upsertIngestYearStatsInner(tx, runId, yearStats);
+      await finishFetchRun(tx, runId, {
+        status: 'success',
         wbLastUpdated,
         universeSnapshot,
-        errorMessage: failureSummary,
         ...totals,
       });
-      const summary = {
-        status: 'partial',
-        runId,
-        trigger,
-        requestedStartYear,
-        requestedEndYear,
-        fetchedStartYear,
-        fetchedEndYear,
-        wbLastUpdated,
-        eligibleUniverse: eligibleUniverseSize,
-        aggregateUniverse: aggregateUniverseSize,
-        universeSnapshot,
-        yearStats,
-        errorMessage: failureSummary,
-        ...totals,
-        perIndicator,
-      };
-      lastProgress = { ...lastProgress, stage: 'complete', summary };
-      return summary;
-    }
-
-    lastProgress = { ...lastProgress, stage: 'publishing' };
-    totals.countriesRows = countriesRows;
-    await publishStagedRefresh(db, {
-      runId,
-      stagedCountries: meta.countries,
-      stagedMetrics,
-      yearStats,
-      totals,
-      universeSnapshot,
-      wbLastUpdated,
-      fetchedStartYear,
-      fetchedEndYear,
     });
 
     const summary = {
@@ -699,8 +824,51 @@ export async function refreshData(options = {}) {
       perIndicator,
     };
     lastProgress = { ...lastProgress, stage: 'complete', summary };
+    // Any fully successful refresh/check ends the stale state: the
+    // consecutive-failure chain resets and no retry is needed — including an
+    // all-unchanged success (zero writes still renews lastSuccessAt via the
+    // success run recorded above, so the 24h TTL restarts here).
+    noteRefreshSuccess();
     return summary;
   } catch (error) {
+    // PARTIAL refresh (Phase 6C O7): some indicators failed, so the outer
+    // transaction above rolled back EVERYTHING published in this attempt
+    // (including the indicators that had already been written inside it).
+    // The attempt is recorded exactly as the pre-O7 staged design recorded
+    // it — per-indicator failures, no live-table changes — and the previous
+    // dataset stays exactly as it was. Last-success freshness does not
+    // advance (only 'success' runs move it).
+    if (error?.code === 'REFRESH_PARTIAL_ROLLBACK') {
+      lastProgress = { ...lastProgress, stage: 'partial' };
+      await upsertIngestYearStats(db, runId, yearStats);
+      await finishFetchRun(db, runId, {
+        status: 'partial',
+        wbLastUpdated,
+        universeSnapshot,
+        errorMessage: error.failureSummary,
+        ...totals,
+      });
+      const summary = {
+        status: 'partial',
+        runId,
+        trigger,
+        requestedStartYear,
+        requestedEndYear,
+        fetchedStartYear,
+        fetchedEndYear,
+        wbLastUpdated,
+        eligibleUniverse: eligibleUniverseSize,
+        aggregateUniverse: aggregateUniverseSize,
+        universeSnapshot,
+        yearStats,
+        errorMessage: error.failureSummary,
+        ...totals,
+        perIndicator,
+      };
+      lastProgress = { ...lastProgress, stage: 'complete', summary };
+      return summary;
+    }
+
     lastProgress = { ...lastProgress, stage: 'failed', error: error.message };
 
     // Total failure (zero indicators staged, or metadata/bootstrapping
@@ -790,7 +958,9 @@ export async function ensureDataPresent(db, options = {}) {
  *    Manual refreshes are unaffected by the cooldown.
  *
  * @param {object} [db]
- * @param {{ ttlHours?:number, autoStale?:boolean, autoEmpty?:boolean, onWarn?:Function }} [options]
+ * @param {{ ttlHours?:number, autoStale?:boolean, autoEmpty?:boolean, onWarn?:Function, ignoreCooldown?:boolean }} [options]
+ * `ignoreCooldown` is for the scheduled-retry timer only: the retry ladder
+ * already spaces attempts, so the post-failure cooldown must not block it.
  * @returns {Promise<{ triggered:boolean, reason:string }>}
  */
 export async function maybeAutoRefresh(db, options = {}) {
@@ -817,9 +987,12 @@ export async function maybeAutoRefresh(db, options = {}) {
   }
 
   // Post-failure cooldown (automatic triggers only): the failed run is already
-  // in fetch_runs, so consult it instead of hammering a down API.
+  // in fetch_runs, so consult it instead of hammering a down API. The
+  // scheduled-retry timer bypasses this via ignoreCooldown: the retry ladder
+  // itself is the backoff, and re-applying the cooldown would wedge the
+  // first 5-minute retry behind a 15-minute gate.
   const lastRun = status.lastRun;
-  if (lastRun && lastRun.status === 'failed') {
+  if (!options.ignoreCooldown && lastRun && lastRun.status === 'failed') {
     const startedAt = new Date(lastRun.started_at).getTime();
     if (Number.isFinite(startedAt) && Date.now() - startedAt < AUTO_REFRESH_FAIL_COOLDOWN_MS) {
       return { triggered: false, reason: 'cooldown-after-failure' };
@@ -828,10 +1001,18 @@ export async function maybeAutoRefresh(db, options = {}) {
 
   const trigger = status.empty ? 'boot' : 'ttl';
   refreshData({ db: handle, trigger, onWarn: options.onWarn }).then(
-    () => {},
+    (summary) => {
+      // A partial run publishes nothing, so the stale state persists: give
+      // the failure a timed second chance (single-flight, backed off).
+      if (summary?.status !== 'success') {
+        scheduleRefreshRetry(handle, { trigger, onWarn: options.onWarn });
+      }
+    },
     (error) => {
-      // Recorded in fetch_runs by refreshData itself; log without crashing.
+      // Recorded in fetch_runs by refreshData itself; log without crashing,
+      // then schedule the backed-off retry.
       options.onWarn?.({ message: `Automatic ${trigger} refresh failed: ${error.message}` });
+      scheduleRefreshRetry(handle, { trigger, onWarn: options.onWarn });
     },
   );
   return { triggered: true, reason: status.empty ? 'empty' : 'stale' };
