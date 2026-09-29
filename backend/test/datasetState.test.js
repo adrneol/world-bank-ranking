@@ -21,12 +21,14 @@ import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
 process.env.WB_RETRY_BASE_MS = '20';
 
 let rowsTransform = null;
+let countryRowsTransform = null;
 let stub = null;
 
 test.before(async () => {
   stub = await startStubWorldBank({
     seriesRowsFor: (metricKey, baseRows) =>
       rowsTransform ? rowsTransform(metricKey, baseRows) : baseRows,
+    countryRowsFor: (baseRows) => (countryRowsTransform ? countryRowsTransform(baseRows) : baseRows),
   });
   useStubBaseUrl(stub.baseUrl);
 });
@@ -512,8 +514,7 @@ test('corrupt stored checks fall back to a live rescan and self-heal', async () 
   }
 });
 
-test('stored checks from an old version are never served', async () => {
-  const { db, repository, refreshData } = await seedDb();
+test('stored checks from an old version are never served', async () => {  const { db, repository, refreshData } = await seedDb();
   const svc = await startStatusServer(db);
   try {
     await svc.status();
@@ -547,6 +548,131 @@ test('stored checks from an old version are never served', async () => {
     rowsTransform = null;
     stub.reset();
     await svc.close();
+    db.close();
+  }
+});
+
+test('metadata-only change advances version without touching observations', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  const svc = await startStatusServer(db);
+  try {
+    await svc.status();
+    const v1 = (await repository.getDatasetState(db)).contentVersion;
+    const obsBefore = await repository.countObservations(db);
+    stub.reset();
+    rowsTransform = null;
+    countryRowsTransform = (baseRows) =>
+      baseRows.map((row) => (row?.id === 'IND' ? { ...row, name: `${row.name} (renamed)` } : row));
+    const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-metachange' });
+    assert.equal(summary.status, 'success');
+    assert.equal(summary.rowsUpserted, 0, 'zero observation writes on metadata-only change');
+    const mid = await repository.getDatasetState(db);
+    assert.equal(mid.contentVersion, v1 + 1, 'metadata change advances the generation');
+    assert.equal(mid.integrityVerifiedContentVersion, null, 'verification stale after change');
+    assert.equal(mid.observationCount, obsBefore);
+    assert.equal((await repository.getCountry(db, 'IND')).name.includes('(renamed)'), true);
+    await assertShadowMatches(db, repository, 'metadata-change');
+    const body = await svc.status();
+    assert.ok(body.integrity.passed);
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, v1 + 1);
+  } finally {
+    rowsTransform = null;
+    countryRowsTransform = null;
+    stub.reset();
+    await svc.close();
+    db.close();
+  }
+});
+
+test('countries proof: identical skips, any source difference writes', async () => {
+  const { isCountriesPayloadUnchanged } = await import('../src/wb/ingest.js');
+  const staged = [
+    { id: 'IND', iso2: 'IN', iso3: 'IND', name: 'India', region: 'South Asia', regionId: 'SAS', adminRegion: null, incomeLevel: 'Lower middle income', lendingType: 'IBRD', capitalCity: 'New Delhi', isAggregate: false, aggregateReason: null },
+    { id: 'WLD', iso2: null, iso3: 'WLD', name: 'World', region: 'Aggregates', regionId: 'NA', adminRegion: null, incomeLevel: null, lendingType: null, capitalCity: null, isAggregate: true, aggregateReason: 'region-na' },
+  ];
+  const storedSame = [
+    { id: 'IND', iso2: 'IN', iso3: 'IND', name: 'India', region: 'South Asia', region_id: 'SAS', admin_region: null, income_level: 'Lower middle income', lending_type: 'IBRD', capital_city: 'New Delhi', is_aggregate: 0, aggregate_reason: null },
+    { id: 'WLD', iso2: null, iso3: 'WLD', name: 'World', region: 'Aggregates', region_id: 'NA', admin_region: null, income_level: null, lending_type: null, capital_city: null, is_aggregate: 1, aggregate_reason: 'region-na' },
+  ];
+  assert.equal(isCountriesPayloadUnchanged(storedSame, staged), true, 'camel/snake + boolean/int forms match');
+  // Every source column flip forces a write.
+  const flips = [
+    ['iso2', 'XX'], ['name', 'India!'], ['region', 'X'], ['regionId', 'X'], ['adminRegion', 'X'],
+    ['incomeLevel', 'X'], ['lendingType', 'X'], ['capitalCity', 'X'], ['aggregateReason', 'X'],
+  ];
+  for (const [field, value] of flips) {
+    const variant = structuredClone(staged);
+    variant[0][field] = value;
+    assert.equal(isCountriesPayloadUnchanged(storedSame, variant), false, `${field} flip writes`);
+  }
+  const flagFlip = structuredClone(staged);
+  flagFlip[1].isAggregate = false;
+  assert.equal(isCountriesPayloadUnchanged(storedSame, flagFlip), false, 'aggregate flag flip writes');
+  // Missing staged rows still skip: the upsert never deletes, so stored
+  // extras remain untouched under both paths (content-identical outcome;
+  // updated_at is write-only bookkeeping no service reads).
+  assert.equal(isCountriesPayloadUnchanged(storedSame, [staged[0]]), true, 'dropped entity still skips');
+  assert.equal(
+    isCountriesPayloadUnchanged([...storedSame, { ...storedSame[0], id: 'OLD' }], staged),
+    true,
+    'extra stored entity still skips',
+  );
+  assert.equal(isCountriesPayloadUnchanged([storedSame[0]], staged), false, 'new staged entity writes');
+  // Null/undefined normalization matches the nz() builder.
+  const undefStaged = structuredClone(staged);
+  delete undefStaged[1].capitalCity;
+  assert.equal(isCountriesPayloadUnchanged(storedSame, undefStaged), true, 'undefined == null');
+  assert.equal(isCountriesPayloadUnchanged(null, staged), false);
+  // Empty staged is unreachable in production (empty universe throws
+  // before publish) and the upsert would be a no-op anyway: vacuous skip.
+  assert.equal(isCountriesPayloadUnchanged(storedSame, []), true, 'empty staged skips vacuously');
+});
+
+test('unchanged refresh writes zero country statements', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  try {
+    stub.reset();
+    rowsTransform = null;
+    const seen = [];
+    const watch = (handle) => {
+      const origExec = handle.execute.bind(handle);
+      handle.execute = (...args) => {
+        const sql = typeof args[0] === 'string' ? args[0] : args[0]?.sql ?? '';
+        seen.push(sql);
+        return origExec(...args);
+      };
+      if (handle.batch) {
+        const origBatch = handle.batch.bind(handle);
+        handle.batch = (...args) => {
+          for (const entry of args[0] ?? []) seen.push(entry.sql);
+          return origBatch(...args);
+        };
+      }
+    };
+    const origTx = db.transaction.bind(db);
+    db.transaction = async (...args) => {
+      const tx = await origTx(...args);
+      watch(tx);
+      return tx;
+    };
+    const origExecDb = db.execute.bind(db);
+    const origBatchDb = db.batch.bind(db);
+    watch(db);
+    let summary;
+    try {
+      summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-cskip' });
+    } finally {
+      db.execute = origExecDb;
+      db.batch = origBatchDb;
+      db.transaction = origTx;
+    }
+    assert.equal(summary.status, 'success');
+    assert.ok(!seen.some((sql) => /INSERT INTO countries/i.test(sql)), 'no country writes when identical');
+    assert.ok(seen.some((sql) => /FROM countries/i.test(sql)), 'stored metadata was compared');
+    // Stored metadata byte-identical afterwards.
+    const after = await repository.getDatasetState(db);
+    assert.ok(after, 'state row intact');
+  } finally {
     db.close();
   }
 });

@@ -14,7 +14,7 @@
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
   countCountryGroupsByColumn,
-  getEligibleObservationsRange,
+  getEligibleObservationsForYears,
   getIndicatorByMetricKey,
   listCountryIdsByColumn,
   listDistinctCountryColumn,
@@ -232,9 +232,10 @@ export async function buildFxMovement(db, options = {}) {
   // ---- Basis A: annual level (descriptive only; never ranked/benchmarked)
   if (basisId === FX_BASES.LEVEL) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = (
-      await getEligibleObservationsRange(db, indicator.id, Math.min(...years), Math.max(...years))
-    ).filter((r) => years.includes(Number(r.year)));
+    // Phase 7D: endpoint years only (this panel never reads interiors;
+    // getEligibleObservationsForYears returns the identical row multiset in
+    // the same ORDER BY as the filtered range did).
+    const rows = await getEligibleObservationsForYears(db, indicator.id, years);
     const byIsoYear = indexByIsoYear(rows);
     const grouped = applyGroup([...byIsoYear.keys()]);
     const pick = (isoList, y) => isoList
@@ -267,7 +268,10 @@ export async function buildFxMovement(db, options = {}) {
   // ---- Basis B: annual change (needs t-1 and t)
   if (basisId === FX_BASES.ANNUAL_CHANGE) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = await getEligibleObservationsRange(db, indicator.id, Math.min(...years) - 1, Math.max(...years));
+    // Phase 7D: predecessor pairs only (no arbitrary interiors are ever
+    // consumed; same row multiset and order as the filtered range).
+    const needed = [...new Set(years.flatMap((y) => [y - 1, y]))].sort((a, b) => a - b);
+    const rows = await getEligibleObservationsForYears(db, indicator.id, needed);
     const byIsoYear = indexByIsoYear(rows);
     const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
     const grouped = applyGroup([...byIsoYear.keys()]);
@@ -302,9 +306,9 @@ export async function buildFxMovement(db, options = {}) {
     ? [{ label: `${S}→${M}`, s: S, e: M }, { label: `${M}→${E}`, s: M, e: E }, { label: `${S}→${E}`, s: S, e: E }]
     : [{ label: `${S}→${E}`, s: S, e: E }];
   const needYears = [...new Set(periods.flatMap((p) => [p.s, p.e]))].sort((a, b) => a - b);
-  const rows = (
-    await getEligibleObservationsRange(db, indicator.id, Math.min(...needYears), Math.max(...needYears))
-  ).filter((r) => needYears.includes(Number(r.year)));
+  // Phase 7D: endpoints only (period change consumes get(s)/get(e) alone;
+  // identical row multiset and order to the filtered range).
+  const rows = await getEligibleObservationsForYears(db, indicator.id, needYears);
   const byIsoYear = indexByIsoYear(rows);
   const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
   const groupedIsos = applyGroup([...byIsoYear.keys()]);

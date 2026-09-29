@@ -18,6 +18,7 @@
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
   countCountryGroupsByColumn,
+  getEligibleObservationsForYears,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
   listCountryIdsByColumn,
@@ -327,10 +328,16 @@ export async function buildCapitalMovement(db, options = {}) {
   if (needLegs && (!fdiLevelIndicator || !gdpIndicator)) {
     return { ...base, available: false, reason: 'denominator_not_ingested', observed: null, likeForLike: null, verification: { passed: false, checks: [] } };
   }
-  // Read the full [S, E] span (inclusive). Period completeness is still
-  // enforced strictly via requiredYears (S+1..E); the extra boundary year
-  // only feeds the unranked endpoint diagnostic (F_E − F_S).
-  const rows = await getEligibleObservationsRange(db, indicator.id, S, E);
+  // Read the full [S, E] span (inclusive) for period bases. Period
+  // completeness is still enforced strictly via requiredYears (S+1..E); the
+  // extra boundary year only feeds the unranked endpoint diagnostic
+  // (F_E − F_S). Annual bases need endpoints only (Phase 7D: identical row
+  // multiset and order to the filtered range).
+  const annualYears = hasMid ? [S, M, E] : [S, E];
+  const isAnnual = isAnnualCapitalBasis(basisId);
+  const rows = isAnnual
+    ? await getEligibleObservationsForYears(db, indicator.id, annualYears)
+    : await getEligibleObservationsRange(db, indicator.id, S, E);
   const fdiLevelRows = needLegs ? await getEligibleObservationsRange(db, fdiLevelIndicator.id, S + 1, E) : [];
   const gdpRows = needLegs ? await getEligibleObservationsRange(db, gdpIndicator.id, S + 1, E) : [];
   const fdiByIsoYear = indexByIsoYear(needLegs ? fdiLevelRows : rows);

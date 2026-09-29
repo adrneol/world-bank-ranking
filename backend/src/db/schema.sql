@@ -203,10 +203,12 @@ INSERT OR IGNORE INTO refresh_locks (id, locked, updated_at)
 --     the same grouping as listAvailableYears(): eligible observations only,
 --     per-metric ascending, global = exact union of the per-metric sets.
 --   content_version: increments by exactly one per successful publish that
---     rewrote ≥1 observation; unchanged on unchanged/failed/partial
---     refreshes. Starts at 1 on first bootstrap. This is the DATA-CONTENT
---     generation and MUST NOT be confused with lastSuccessAt (retrieval
---     freshness, owned by fetch_runs) or the source vintage.
+--     rewrote observations OR country metadata (both are content for
+--     version-keyed consumers: years universe and aggregate typing depend
+--     on flags/membership as well as rows). Unchanged on unchanged/failed/
+--     partial refreshes. Starts at 1 on first bootstrap. This is the
+--     DATA-CONTENT generation and MUST NOT be confused with lastSuccessAt
+--     (retrieval freshness, owned by fetch_runs) or the source vintage.
 --   integrity_verified_content_version: the content_version that last passed
 --     the full expensive integrity battery, or NULL when unverified/stale.
 --     Set only after an actual verification run, conditional on the version

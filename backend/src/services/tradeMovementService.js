@@ -12,6 +12,7 @@
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
   countCountryGroupsByColumn,
+  getEligibleObservationsForYears,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
   listCountryIdsByColumn,
@@ -310,9 +311,9 @@ export async function buildTradeMovement(db, options = {}) {
 
   if (isAnnualBasis(basisId)) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = (
-      await getEligibleObservationsRange(db, indicator.id, Math.min(...years), Math.max(...years))
-    ).filter((r) => years.includes(Number(r.year)));
+    // Phase 7D: endpoint years only (annual panels consume has/get per
+    // endpoint alone; identical row multiset and order to the filtered range).
+    const rows = await getEligibleObservationsForYears(db, indicator.id, years);
     const byIsoYear = indexByIsoYear(rows);
     const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
     const grouped = applyGroup([...byIsoYear.keys()]);

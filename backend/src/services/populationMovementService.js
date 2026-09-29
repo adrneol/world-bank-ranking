@@ -13,6 +13,7 @@
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
   countCountryGroupsByColumn,
+  getEligibleObservationsForYears,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
   listCountryIdsByColumn,
@@ -257,7 +258,13 @@ export async function buildPopulationMovement(db, options = {}) {
   const S = lo;
   const E = hi;
   const M = hasMid ? yearMid : null;
-  const rows = await getEligibleObservationsRange(db, indicator.id, S, E);
+  // Phase 7D: annual bases consume endpoint years only; the period path
+  // below still reads the full span (its incompleteCount counts
+  // interior-only entities, which is part of the API response).
+  const annualYears = hasMid ? [S, M, E] : [S, E];
+  const rows = isAnnualPopulationBasis(basisId)
+    ? await getEligibleObservationsForYears(db, indicator.id, annualYears)
+    : await getEligibleObservationsRange(db, indicator.id, S, E);
   const byIsoYear = indexByIsoYear(rows);
   const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
   const applyGroup = (isos) => (groupSet ? isos.filter((iso) => groupSet.members.has(String(iso).toUpperCase())) : isos);

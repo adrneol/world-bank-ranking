@@ -76,6 +76,36 @@ export async function batchRun(handle, rows, { chunkSize = 500, sql = null, buil
 }
 
 /**
+ * Batched reads for independent SELECTs (Phase 7D-4).
+ *
+ * One network round trip for the whole list instead of one per statement:
+ * against a remote database, a dozen tiny metadata reads cost a dozen
+ * latencies. Statements MUST be independent (no statement may depend on
+ * another's rows) and read-only in intent; results return in input order
+ * with the identical row shape as queryAll/queryGet (rows as objects keyed
+ * by column/alias names — verified same on local SQLite and Turso).
+ *
+ * @param {object} handle libSQL client or transaction
+ * @param {{sql:string, args?:unknown[]}[]} statements
+ * @returns {Promise<object[][]>} rows per statement, in order
+ */
+export async function batchGet(handle, statements) {
+  const list = statements.map(({ sql, args = [] }) => ({ sql, args }));
+  // Handles without batch support (exotic test doubles) degrade to the
+  // equivalent sequential reads — same statements, same order, same shapes.
+  if (typeof handle.batch !== 'function') {
+    const out = [];
+    for (const { sql, args } of list) {
+      const result = await handle.execute({ sql, args });
+      out.push(result.rows);
+    }
+    return out;
+  }
+  const results = await handle.batch(list);
+  return results.map((result) => result.rows);
+}
+
+/**
  * Run `fn` inside a transaction on any handle (database or explicit
  * transaction-capable object is NOT re-wrapped: callers inside a publish
  * transaction must use the Inner repository variants, as before).

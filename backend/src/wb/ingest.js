@@ -45,6 +45,7 @@
 
 import { METRICS, PRODUCTION_METRIC_KEYS, config, isProductionMetric } from '../config.js';
 import { getDb } from '../db/index.js';
+import { batchGet } from '../db/driver.js';
 import {
   acquireRefreshLock,
   canonicalDecimalString,
@@ -55,9 +56,9 @@ import {
   forceReleaseRefreshLock,
   getDatasetState,
   getIndicatorByMetricKey,
-  getLastSuccessfulFetchTime,
   getLatestFetchRun,
   getObservationsForCompare,
+  listCountries,
   refreshLockStatus,
   releaseRefreshLock,
   setRefreshLockRunId,
@@ -498,6 +499,56 @@ export function isIndicatorPayloadUnchanged(stored, staged) {
 }
 
 /**
+ * Phase 7D-2: exact country-metadata unchanged proof.
+ *
+ * Compares staged country rows against stored rows with the EXACT
+ * normalization the publish builder (upsertCountriesInner) applies, so a
+ * skip means the upsert would rewrite identical values. `updated_at` is
+ * excluded: it is write-time bookkeeping, not source data (comparing it
+ * would force a rewrite every refresh).
+ *
+ * False-positive direction is safe by construction: ANY doubt (missing
+ * row, extra staged row, changed source field, non-array input) returns
+ * false, i.e. "cannot prove unchanged" means WRITE. Extra stored rows
+ * (entities the source no longer lists) are left untouched by both paths —
+ * the upsert never deletes — so they never force a write.
+ */
+export function isCountriesPayloadUnchanged(stored, staged) {
+  if (!Array.isArray(stored) || !Array.isArray(staged)) return false;
+  const norm = (row, fallbackIso) => [
+    row.id,
+    row.iso2 ?? null,
+    row.iso3 ?? fallbackIso ?? row.id ?? null,
+    row.name ?? null,
+    row.region ?? null,
+    row.regionId ?? row.region_id ?? null,
+    row.adminRegion ?? row.admin_region ?? null,
+    row.incomeLevel ?? row.income_level ?? null,
+    row.lendingType ?? row.lending_type ?? null,
+    row.capitalCity ?? row.capital_city ?? null,
+    row.isAggregate !== undefined ? (row.isAggregate ? 1 : 0) : (row.is_aggregate ?? 0),
+    row.aggregateReason ?? row.aggregate_reason ?? null,
+  ];
+  const byId = new Map();
+  for (const row of stored) {
+    if (row == null || row.id == null) return false;
+    if (byId.has(row.id)) return false; // stored duplicates: process.
+    byId.set(row.id, norm(row));
+  }
+  for (const row of staged) {
+    if (row == null || row.id == null) return false;
+    const match = byId.get(row.id);
+    if (!match) return false;
+    const stagedNorm = norm(row, row.iso3 ?? row.id);
+    if (stagedNorm.length !== match.length) return false;
+    for (let i = 0; i < stagedNorm.length; i += 1) {
+      if (!Object.is(match[i], stagedNorm[i]) && match[i] !== stagedNorm[i]) return false;
+    }
+    byId.delete(row.id);
+  }
+  return true;
+}
+/**
  * Partial-refresh signal (Phase 6C O7): thrown INSIDE the outer publish
  * transaction when some indicators failed, so everything published so far
  * in this attempt rolls back. The refreshData catch below records the
@@ -681,14 +732,30 @@ export async function refreshData(options = {}) {
     lastProgress = { ...lastProgress, stage: 'publishing' };
     totals.countriesRows = countriesRows;
     await transaction(db, async (tx) => {
-      await upsertCountriesInner(tx, meta.countries);
-      // Countries are published; the staged copy is now provably unneeded.
+      // Phase 7D-2: country metadata is rewritten only when it actually
+      // differs. The staged payload is compared against stored rows with the
+      // exact publish normalization; a skip leaves every byte untouched
+      // (extra stored entities are left in place by both paths — the upsert
+      // never deletes). totals.countriesRows keeps counting staged rows.
+      // The outcome (written vs skipped) drives content_version below: a
+      // metadata-only change is still a content change for every
+      // version-keyed consumer (years universe, aggregate typing).
+      const storedCountries = await listCountries(tx);
+      const metadataChanged = !isCountriesPayloadUnchanged(storedCountries, meta.countries);
+      if (metadataChanged) {
+        await upsertCountriesInner(tx, meta.countries);
+      }
+      // Countries are published (or proven identical); the staged copy is
+      // now provably unneeded.
       meta.countries = EMPTY_RELEASED_ROWS;
       let succeededCount = 0;
-      // Phase 7B: true once ≥1 indicator's observations were rewritten in
-      // this attempt. Drives content_version (data-content generation):
-      // value mutations with a stable row count still advance it, while an
-      // all-unchanged attempt provably leaves every byte untouched.
+      // Phase 7B/7D: true once this attempt rewrote observations
+      // (contentChanged) or country metadata (metadataChanged). Either one
+      // advances content_version exactly once: value mutations with a stable
+      // row count still advance it, while a fully-unchanged attempt provably
+      // leaves every byte untouched. Metadata counts as content because
+      // version-keyed consumers (years universe, aggregate typing) depend on
+      // flags and membership, not just observation rows.
       let contentChanged = false;
       for (const metricKey of metricKeys) {
         lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
@@ -811,15 +878,15 @@ export async function refreshData(options = {}) {
       // Phase 7B dataset_state: maintained INSIDE the same atomic publish
       // transaction, so observations and metadata commit or roll back
       // together — a partial/failed attempt can never leave a half-updated
-      // row behind. Changed content recomputes the exact scan-derived values
-      // (rare: only when observations actually changed) and advances
-      // content_version exactly once; an all-unchanged attempt leaves every
-      // field untouched (freshness still advances via the success run below).
-      // A missing row (legacy database) is bootstrapped once, starting at
-      // content_version 1.
+      // row behind. A content change (observations rewritten OR country
+      // metadata rewritten) recomputes the exact scan-derived values (rare:
+      // only on real change) and advances content_version exactly once; an
+      // all-unchanged attempt leaves every field untouched (freshness still
+      // advances via the success run below). A missing row (legacy database)
+      // is bootstrapped once, starting at content_version 1.
       {
         const previous = await getDatasetState(tx);
-        if (contentChanged || !previous) {
+        if (contentChanged || metadataChanged || !previous) {
           const computed = await computeDatasetState(tx);
           await upsertDatasetStateInner(tx, {
             ...computed,
@@ -1063,7 +1130,13 @@ export async function maybeAutoRefresh(db, options = {}) {
 export async function getCacheStatus(db, options = {}) {
   const ttlHours = Number(options.ttlHours ?? config.cacheTtlHours);
   const now = options.now ?? Date.now();
-  const lastSuccessAt = await getLastSuccessfulFetchTime(db);
+  // Phase 7D-4: the two independent fetch_runs reads share one round trip
+  // (same values as the sequential version).
+  const [[lastSuccessRow], [lastRunRow]] = await batchGet(db, [
+    { sql: "SELECT MAX(completed_at) AS t FROM fetch_runs WHERE status = 'success'" },
+    { sql: 'SELECT * FROM fetch_runs ORDER BY id DESC LIMIT 1' },
+  ]);
+  const lastSuccessAt = lastSuccessRow?.t ?? null;
   // Phase 7B: the observation count is metadata when derived (1 row read);
   // absent row falls back to the legacy COUNT(*) scan. TTL arithmetic is
   // unchanged: strict ageHours < ttlHours on the success-run timestamp.
@@ -1091,7 +1164,7 @@ export async function getCacheStatus(db, options = {}) {
     ttlHours: Number.isFinite(ttlHours) ? ttlHours : null,
     fresh,
     refreshDue: !fresh,
-    lastRun: await getLatestFetchRun(db, { status: null }),
+    lastRun: lastRunRow ?? null,
   };
 }
 

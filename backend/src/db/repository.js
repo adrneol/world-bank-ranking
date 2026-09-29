@@ -21,7 +21,7 @@
  */
 
 import { getDb } from './index.js';
-import { batchRun, queryAll, queryGet, queryRun, transaction } from './driver.js';
+import { batchGet, batchRun, queryAll, queryGet, queryRun, transaction } from './driver.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -619,8 +619,14 @@ export async function getVintageForIndicatorYears(db, indicatorId, years) {
  * values and shape; absent row falls back to the legacy scans exactly.
  */
 export async function getDatasetFingerprint(db) {
-  const lastSuccessAt = await getLastSuccessfulFetchTime(db);
-  const latestRun = await getLatestFetchRun(db, { status: 'success' });
+  // Phase 7D-4: the two fetch_runs reads share one round trip; the state
+  // row keeps its tolerant reader (legacy-DB fallbacks).
+  const [[lastSuccessRow], [latestRunRow]] = await batchGet(db, [
+    { sql: "SELECT MAX(completed_at) AS t FROM fetch_runs WHERE status = 'success'" },
+    { sql: "SELECT * FROM fetch_runs WHERE status = 'success' ORDER BY id DESC LIMIT 1" },
+  ]);
+  const lastSuccessAt = lastSuccessRow?.t ?? null;
+  const latestRun = latestRunRow ?? null;
   const state = await getDatasetState(db);
   if (state) {
     return {

@@ -59,6 +59,7 @@ export async function startStubWorldBank(options = {}) {
     failMatching: null,
     metaTotalOffset: options.metaTotalOffset ?? 0,
     seriesRowsFor: options.seriesRowsFor ?? null,
+    countryRowsFor: options.countryRowsFor ?? null,
     invalidJson: false,
   };
 
@@ -145,8 +146,12 @@ export async function startStubWorldBank(options = {}) {
     const path = url.pathname.replace(/^\/v2/, '');
 
     if (path === '/country') {
-      const [meta, rows] = countryMetadataEnvelope();
-      send([{ ...meta, total: meta.total + state.metaTotalOffset }, rows]);
+      const [meta, baseRows] = countryMetadataEnvelope();
+      // Transformed row sets report their own length so the completeness
+      // check still passes; untransformed behavior is byte-identical.
+      const rows = state.countryRowsFor ? state.countryRowsFor(baseRows) : baseRows;
+      const total = (state.countryRowsFor ? rows.length : meta.total) + state.metaTotalOffset;
+      send([{ ...meta, total }, rows]);
       return;
     }
 
