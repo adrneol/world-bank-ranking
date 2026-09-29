@@ -1,14 +1,19 @@
 /**
- * AVAILABLE-YEARS CACHE (Phase 4, Part A).
+ * AVAILABLE-YEARS CACHE (Phase 4, Part A; Phase 7B metadata key).
  *
  * listAvailableYears() scans the observations table, so it is memoized per
- * database handle and keyed by the published dataset generation — the latest
- * successful fetch-run id plus the observation count. Both advance if and
- * only if a refresh successfully publishes (staged, single-transaction
- * publish in wb/ingest.js); failed or partial refreshes write no success
- * row and touch no observations, so the key — and the cached result — stay
- * valid. No TTL, no second versioning system: the existing refresh
- * generation is the invalidation signal, and a new process starts empty.
+ * database handle and keyed by the data-content generation. Failed, partial
+ * and unchanged refreshes never change observation content, so the key — and
+ * the cached result — stay valid across them; only a content-changing publish
+ * (content_version advance) invalidates. No TTL, no second versioning
+ * system: content_version is the invalidation signal, and a new process
+ * starts empty.
+ *
+ * Phase 7B: when dataset_state is derived, the years payload itself comes
+ * from the stored years_json (built by the same grouping as
+ * listAvailableYears, so byte-identical); the legacy scan path runs only
+ * when the row is absent. lastSuccessAt advances do NOT invalidate: an
+ * unchanged refresh renews freshness without touching content.
  *
  * Entries live in a WeakMap keyed by database handle: distinct handles
  * (tests, CLI scripts) can never share a result, while the server's single
@@ -20,7 +25,13 @@
  */
 
 import { getDb } from '../db/index.js';
-import { countObservations, getLatestFetchRun, listAvailableYears } from '../db/repository.js';
+import {
+  countObservations,
+  getDatasetState,
+  getLatestFetchRun,
+  listAvailableYears,
+  parseDatasetYears,
+} from '../db/repository.js';
 
 let entries = new WeakMap();
 
@@ -29,11 +40,29 @@ export function resetYearsCache() {
   entries = new WeakMap();
 }
 
-/** Generation identity: cheap, indexed reads only (no table scans). */
+/**
+ * Generation identity: the observation-content version when derived
+ * (no table scan); legacy run-id + observation count otherwise.
+ */
 export async function yearsCacheKey(db) {
   const handle = db ?? getDb();
+  const state = await getDatasetState(handle);
+  if (state) return `cv:${state.contentVersion ?? 'none'}`;
   const run = await getLatestFetchRun(handle, { status: 'success' });
-  return `${run?.id ?? 'none'}:${await countObservations(handle)}`;
+  return `run:${run?.id ?? 'none'}:${await countObservations(handle)}`;
+}
+
+/** Rebuild the listAvailableYears() shape from stored years metadata. */
+function yearsFromState(state) {
+  const stored = parseDatasetYears(state);
+  if (!stored || !Object.values(stored.perMetric).every((years) => Array.isArray(years))) return null;
+  const years = [...stored.years].sort((a, b) => a - b);
+  return {
+    years,
+    minYear: years.length ? years[0] : null,
+    maxYear: years.length ? years[years.length - 1] : null,
+    perMetric: stored.perMetric,
+  };
 }
 
 export async function getCachedAvailableYears(db = null) {
@@ -41,7 +70,9 @@ export async function getCachedAvailableYears(db = null) {
   const key = await yearsCacheKey(handle);
   const entry = entries.get(handle);
   if (entry && entry.key === key) return entry.result;
-  const result = await listAvailableYears(handle);
+  const state = await getDatasetState(handle);
+  const stored = state ? yearsFromState(state) : null;
+  const result = stored ?? (await listAvailableYears(handle));
   entries.set(handle, { key, result });
   return result;
 }

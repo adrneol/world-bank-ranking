@@ -264,7 +264,10 @@ export async function explainTotalChange(db, options = {}) {
     };
   }
 
-  const stored = await getYearRange(db, indicator.id);
+  const stored =
+    options.fromYear === undefined || options.toYear === undefined
+      ? await getYearRange(db, indicator.id)
+      : null;
   const fromYear = options.fromYear ?? stored.minYear;
   const toYear = options.toYear ?? stored.maxYear;
 

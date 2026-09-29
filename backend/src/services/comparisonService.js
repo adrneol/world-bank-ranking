@@ -17,7 +17,7 @@ import {
   getEligibleObservationsForYears,
   getIndicatorByMetricKey,
   getLatestFetchRun,
-  listYearsWithData,
+  getMetricYears,
 } from '../db/repository.js';
 import {
   COMPARISON_POPULATION_LABEL,
@@ -246,7 +246,9 @@ export async function buildLevelComparisonResponse(db, options = {}) {
     };
   }
 
-  const yearsWithData = new Set(await listYearsWithData(db, indicator.id));
+  // Phase 7B: year gate from derived years metadata when available (0
+  // observation reads); identical set, identical unavailable outcome.
+  const yearsWithData = new Set(await getMetricYears(db, metricKey));
   if (!yearsWithData.has(yearA) || !yearsWithData.has(yearB)) {
     return {
       comparison: {
@@ -602,7 +604,9 @@ export async function buildThreeYearComparisonResponse(db, options = {}) {
     };
   }
 
-  const yearsWithData = new Set(await listYearsWithData(db, indicator.id));
+  // Phase 7B: year gate from derived years metadata when available (0
+  // observation reads); identical set, identical unavailable outcome.
+  const yearsWithData = new Set(await getMetricYears(db, metricKey));
   if (!yearsWithData.has(yearA) || !yearsWithData.has(yearMid) || !yearsWithData.has(yearB)) {
     return {
       comparison: {

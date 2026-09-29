@@ -92,12 +92,26 @@ export async function canonicalDatasetDigest(db) {
             universe_snapshot, error_message
      FROM fetch_runs ORDER BY id`,
   );
+  // Phase 7B derived metadata (absent on databases that never published).
+  let stateRows = [];
+  try {
+    stateRows = await queryAll(
+      db,
+      `SELECT observation_count, max_fetched_at, max_wb_last_updated,
+              years_json, content_version, integrity_verified_content_version,
+              updated_run_id
+         FROM dataset_state ORDER BY id`,
+    );
+  } catch {
+    stateRows = [];
+  }
   const tables = {
     observations: digestRows(observations),
     countries: digestRows(countries),
     indicators: digestRows(indicators),
     ingest_year_stats: digestRows(stats),
     fetch_runs: digestRows(normalizeTimestamps(runsRaw)),
+    dataset_state: digestRows(normalizeTimestamps(stateRows)),
   };
   return {
     tables,

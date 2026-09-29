@@ -21,6 +21,7 @@ import {
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
   getYearRange,
+  hasEligibleObservationsForIndicator,
 } from '../db/repository.js';
 import { describeMetric, formatPercent, formatValue } from '../domain/format.js';
 import { directionFor, rankByValue } from '../domain/ranking.js';
@@ -75,10 +76,21 @@ export async function buildIndiaYearlyRows(db, options = {}) {
       continue;
     }
 
-    const stored = await getYearRange(db, indicator.id);
+    // Stored bounds are needed only when the caller did not supply them.
+    // With explicit bounds, a 1-row eligible-existence probe replaces the
+    // full-metric MIN/MAX scan: a never-ingested metric still yields null
+    // cells, exactly as before.
+    const stored =
+      options.startYear === undefined || options.endYear === undefined
+        ? await getYearRange(db, indicator.id)
+        : null;
     const startYear = options.startYear ?? stored.minYear;
     const endYear = options.endYear ?? stored.maxYear;
     if (startYear === null || startYear === undefined || endYear === null || endYear === undefined) {
+      cellsByMetric[metricKey] = null;
+      continue;
+    }
+    if (!stored && !(await hasEligibleObservationsForIndicator(db, indicator.id))) {
       cellsByMetric[metricKey] = null;
       continue;
     }

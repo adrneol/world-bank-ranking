@@ -12,9 +12,7 @@
 import {
   countObservations,
   getDatasetFingerprint,
-  getLatestFetchRun,
-  getLatestSuccessfulIngestYearStat,
-  getLastSuccessfulFetchTime,
+  getLatestSuccessfulIngestYearStats,
   getVintageForIndicatorYears,
 } from '../db/repository.js';
 import { getCacheStatus } from '../wb/ingest.js';
@@ -33,16 +31,21 @@ import { getCacheStatus } from '../wb/ingest.js';
 export async function buildComparisonVintage(db, { metricKey, indicatorId, yearA, yearB, yearMid = null }) {
   // Authoritative coverage evidence: only successfully PUBLISHED runs count.
   // Failed/partial attempts stay in the audit trail but never describe the
-  // current dataset.
-  const statA = await getLatestSuccessfulIngestYearStat(db, metricKey, yearA);
-  const statB = await getLatestSuccessfulIngestYearStat(db, metricKey, yearB);
+  // current dataset. One round trip for all requested years (same contract
+  // as the per-year lookup).
   const hasMid = Number.isInteger(yearMid);
-  const statMid = hasMid ? await getLatestSuccessfulIngestYearStat(db, metricKey, yearMid) : null;
   const vintageYears = hasMid ? [yearA, yearMid, yearB] : [yearA, yearB];
+  const statsByYear = await getLatestSuccessfulIngestYearStats(db, metricKey, vintageYears);
+  const statA = statsByYear.get(yearA) ?? null;
+  const statB = statsByYear.get(yearB) ?? null;
+  const statMid = hasMid ? (statsByYear.get(yearMid) ?? null) : null;
   const vintageRows = await getVintageForIndicatorYears(db, indicatorId, vintageYears);
   const cache = await getCacheStatus(db);
   const fingerprint = await getDatasetFingerprint(db);
-  const lastRun = await getLatestFetchRun(db, { status: null });
+  // getCacheStatus already resolved these from the same sources; reuse them
+  // instead of re-querying (identical values, two fewer round trips).
+  const lastRun = cache.lastRun;
+  const lastSuccessAt = cache.lastSuccessAt;
 
   const lastUpdatedValues = vintageRows?.lastUpdatedValues ?? [];
   const distinctVintages = [...new Set(lastUpdatedValues.filter((v) => v !== null))];
@@ -103,7 +106,7 @@ export async function buildComparisonVintage(db, { metricKey, indicatorId, yearA
         : 'All rows used share one World Bank vintage.',
     },
     retrieval: {
-      lastSuccessAt: await getLastSuccessfulFetchTime(db),
+      lastSuccessAt,
       runIdA: statA?.fetch_run_id ?? null,
       runIdB: statB?.fetch_run_id ?? null,
       ...(hasMid ? { runIdMid: statMid?.fetch_run_id ?? null } : {}),

@@ -105,6 +105,9 @@ export async function upsertCountry(db, row) {
       nowIso(),
     ],
   );
+  // Outside the O7 publish: derived metadata cannot be maintained, so it is
+  // invalidated (readers fall back to exact scans while absent).
+  await invalidateDatasetState(db);
 }
 
 /** Bulk upsert metadata without opening a transaction (for use inside a publish transaction). */
@@ -153,7 +156,11 @@ export async function upsertCountriesInner(db, rows) {
 
 /** Bulk upsert metadata inside a single transaction. */
 export function upsertCountries(db, rows) {
-  return transaction(db, async (tx) => upsertCountriesInner(tx, rows));
+  return transaction(db, async (tx) => {
+    const n = await upsertCountriesInner(tx, rows);
+    await invalidateDatasetState(tx);
+    return n;
+  });
 }
 
 export async function getCountry(db, iso3) {
@@ -257,7 +264,7 @@ export async function countCountryGroupsByColumn(db, col) {
 // indicators
 // ============================================================
 
-export async function upsertIndicator(db, metric) {
+export async function upsertIndicatorInner(db, metric) {
   await queryRun(
     db,
     `
@@ -283,6 +290,18 @@ export async function upsertIndicator(db, metric) {
   );
 }
 
+/**
+ * Standalone indicator upsert (own statement, outside the O7 publish).
+ * Invalidates derived metadata like the other standalone writers: the
+ * publish loop uses upsertIndicatorInner so mid-transaction invalidation
+ * can never wipe the row being maintained.
+ */
+export async function upsertIndicator(db, metric) {
+  await upsertIndicatorInner(db, metric);
+  // Outside the O7 publish: invalidate derived metadata (see upsertCountry).
+  await invalidateDatasetState(db);
+}
+
 export async function getIndicatorByMetricKey(db, metricKey) {
   return (await queryGet(db, 'SELECT * FROM indicators WHERE metric_key = ?', [metricKey])) ?? null;
 }
@@ -305,6 +324,13 @@ export async function listIndicators(db) {
  * with its canonical decimal string (value_raw TEXT, for audit). Callers may
  * omit valueRaw, in which case it defaults to String(value).
  *
+  * Phase 7B note: direct observation writes outside the O7 publish in
+  * wb/ingest.js invalidate (delete) dataset_state instead of maintaining
+  * it — readers fall back to exact scans while the row is absent, so a
+  * derived row can never go stale. All production writes flow through
+  * refreshData (which maintains the row atomically); standalone calls
+  * exist for tests/seeds.
+  *
  * Transport note (Phase 6A): REAL values are bound as canonical decimal
  * STRINGS, never as JSON numbers. Remote database protocols can serialize
  * JSON numbers with fewer than 17 significant digits, silently shifting
@@ -332,6 +358,8 @@ export async function upsertObservation(db, { countryId, indicatorId, year, valu
   `,
     [countryId, indicatorId, year, numericBinding, nz(raw), nz(wbLastUpdated), nowIso()],
   );
+  // Outside the O7 publish: invalidate derived metadata (see upsertCountry).
+  await invalidateDatasetState(db);
 }
 
 /**
@@ -380,7 +408,12 @@ export async function upsertObservationsInner(db, rows, mapRow = null) {
 
 /** Bulk upsert observations in one transaction. Returns rows written. */
 export function upsertObservations(db, rows) {
-  return transaction(db, async (tx) => upsertObservationsInner(tx, rows));
+  return transaction(db, async (tx) => {
+    const n = await upsertObservationsInner(tx, rows);
+    // Outside the O7 publish: invalidate derived metadata (see upsertCountry).
+    await invalidateDatasetState(tx);
+    return n;
+  });
 }
 
 /**
@@ -581,13 +614,25 @@ export async function getVintageForIndicatorYears(db, indicatorId, years) {
  *
  * Lets the frontend detect whether two successive responses came from the
  * same retrieval generation.
+ *
+ * Phase 7B: served from dataset_state (1 row) when derived, with identical
+ * values and shape; absent row falls back to the legacy scans exactly.
  */
 export async function getDatasetFingerprint(db) {
   const lastSuccessAt = await getLastSuccessfulFetchTime(db);
+  const latestRun = await getLatestFetchRun(db, { status: 'success' });
+  const state = await getDatasetState(db);
+  if (state) {
+    return {
+      lastSuccessAt,
+      maxFetchedAt: state.maxFetchedAt,
+      observationCount: state.observationCount,
+      runId: latestRun?.id ?? null,
+    };
+  }
   const maxRow = await queryGet(db, 'SELECT MAX(fetched_at) AS t FROM observations');
   const maxFetched = maxRow?.t ?? null;
   const observationCount = await countObservations(db);
-  const latestRun = await getLatestFetchRun(db, { status: 'success' });
   return {
     lastSuccessAt,
     maxFetchedAt: maxFetched,
@@ -684,6 +729,26 @@ export async function getYearRange(db, indicatorId = null) {
   return { minYear: row?.minYear ?? null, maxYear: row?.maxYear ?? null };
 }
 
+/**
+ * Whether one indicator holds at least one eligible stored observation.
+ * Single-row existence probe (indexed, LIMIT 1) with the exact eligible
+ * predicate getYearRange() uses — lets callers that already know their
+ * year bounds skip the full-metric MIN/MAX scan while keeping the same
+ * empty outcome for never-ingested metrics.
+ */
+export async function hasEligibleObservationsForIndicator(db, indicatorId) {
+  const row = await queryGet(
+    db,
+    `SELECT 1 AS one
+       FROM observations o
+       JOIN countries c ON c.id = o.country_id
+       WHERE o.indicator_id = ? AND c.is_aggregate = 0 AND o.value IS NOT NULL
+       LIMIT 1`,
+    [indicatorId],
+  );
+  return row !== null;
+}
+
 /** Distinct years holding at least one eligible observation, ascending. */
 export async function listYearsWithData(db, indicatorId) {
   const rows = await queryAll(
@@ -701,6 +766,24 @@ export async function listYearsWithData(db, indicatorId) {
 }
 
 /**
+ * Eligible-data years for one metric key, ascending.
+ *
+ * Phase 7B: served from dataset_state years_json when derived (0
+ * observation reads; same predicate and order as listYearsWithData via the
+ * shared builder). Falls back to the per-indicator DISTINCT scan when the
+ * row is absent/corrupt, the metric key is unknown, or the indicator row is
+ * missing — identical values either way.
+ */
+export async function getMetricYears(db, metricKey) {
+  const state = await getDatasetState(db);
+  const list = state ? parseDatasetYears(state)?.perMetric?.[metricKey] : undefined;
+  if (Array.isArray(list)) return [...list].sort((a, b) => a - b);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  if (!indicator) return [];
+  return listYearsWithData(db, indicator.id);
+}
+
+/**
  * Every year that holds at least one eligible observation for ANY metric, plus
  * the same list per metric.
  *
@@ -715,14 +798,8 @@ export async function listYearsWithData(db, indicatorId) {
  * same null min/max on empty. See test/years.test.js for the equivalence
  * proof and backend/phase4-baseline notes for measured plans.
  */
-export async function listAvailableYears(db) {
-  const indicators = await listIndicators(db);
-  const perMetric = {};
-  for (const indicator of indicators) perMetric[indicator.metric_key] = [];
-
-  const rows = await queryAll(
-    db,
-    `
+/** Single group-by behind both listAvailableYears() and dataset_state years_json. */
+const AVAILABLE_YEARS_GROUP_SQL = `
       SELECT i.metric_key AS metric_key, o.year AS year
       FROM observations o
       JOIN countries c ON c.id = o.country_id
@@ -730,11 +807,31 @@ export async function listAvailableYears(db) {
       WHERE c.is_aggregate = 0 AND o.value IS NOT NULL
       GROUP BY i.metric_key, o.year
       ORDER BY i.metric_key, o.year
-    `,
-  );
+    `;
+
+export async function listAvailableYears(db) {
+  const indicators = await listIndicators(db);
+  const rows = await queryAll(db, AVAILABLE_YEARS_GROUP_SQL);
+  return buildYearsPayload(indicators, rows);
+}
+
+/**
+ * Assemble the available-years payload from an indicator catalog and
+ * (metric_key, year) group rows. Shared by listAvailableYears() and the
+ * Phase 7B dataset_state maintenance so the stored years_json can never
+ * drift from the scanned answer: same predicate, same ascending order, same
+ * per-metric catalog order, same null min/max on empty. Global `years` is
+ * the exact union of the per-metric sets (never one indicator's list).
+ *
+ * @param {{metric_key:string}[]} indicators catalog order
+ * @param {{metric_key:string, year:number}[]} rows group-by output
+ */
+export function buildYearsPayload(indicators, rows) {
+  const perMetric = {};
+  for (const indicator of indicators) perMetric[indicator.metric_key] = [];
 
   const yearSet = new Set();
-  for (const row of rows) {
+  for (const row of rows ?? []) {
     if (Object.hasOwn(perMetric, row.metric_key)) perMetric[row.metric_key].push(row.year);
     yearSet.add(row.year);
   }
@@ -753,8 +850,13 @@ export async function listAvailableYears(db) {
  * non-null `wb_last_updated` across observations (each row carries the WDI
  * `lastupdated` metadata from its own retrieval). Null when nothing stored.
  * Read-only derivation — no ingestion semantics involved.
+ *
+ * Phase 7B: served from dataset_state when derived (stored-dataset vintage,
+ * exactly the scan's value); absent row falls back to the legacy scan.
  */
 export async function getMaxWbLastUpdated(db) {
+  const state = await getDatasetState(db);
+  if (state) return state.maxWbLastUpdated;
   const row = await queryGet(
     db,
     'SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL',
@@ -971,6 +1073,30 @@ export async function getLatestIngestYearStat(db, metricKey, year) {
 }
 
 /**
+ * Latest ingest counters for several years of one metric from the latest
+ * SUCCESSFULLY PUBLISHED run only (same contract as
+ * getLatestSuccessfulIngestYearStat, one round trip instead of one per
+ * year). Returns a Map of year → row (years never ingested are absent).
+ */
+export async function getLatestSuccessfulIngestYearStats(db, metricKey, years) {
+  const unique = [...new Set((years ?? []).filter((y) => y !== null && y !== undefined))];
+  if (unique.length === 0) return new Map();
+  const placeholders = unique.map(() => '?').join(',');
+  const rows = await queryAll(
+    db,
+    `SELECT s.* FROM ingest_year_stats s
+       JOIN fetch_runs r ON r.id = s.fetch_run_id
+       WHERE s.metric_key = ? AND s.year IN (${placeholders}) AND r.status = 'success'
+       ORDER BY s.fetch_run_id DESC`,
+    [metricKey, ...unique],
+  );
+  const byYear = new Map();
+  for (const row of rows) {
+    if (!byYear.has(row.year)) byYear.set(row.year, row);
+  }
+  return byYear;
+}
+/**
  * Latest ingest counters for one metric and year from the latest SUCCESSFULLY
  * PUBLISHED run only. Failed/partial runs remain visible in the audit trail
  * (getIngestYearStats / listFetchRuns) but can never masquerade as current
@@ -1050,6 +1176,230 @@ export async function listFetchRuns(db, limit = 20) {
 export async function getLastSuccessfulFetchTime(db) {
   const row = await queryGet(db, "SELECT MAX(completed_at) AS t FROM fetch_runs WHERE status = 'success'");
   return row?.t ?? null;
+}
+
+// ============================================================
+// dataset_state: derived authoritative metadata (Phase 7B)
+// ============================================================
+// Single row (id = 1) describing the committed observations generation.
+// Written ONLY inside the O7 publish transaction (or one-time bootstrap);
+// absent row means "unknown" and every reader falls back to legacy scans.
+// Field semantics are documented on the table in schema.sql.
+
+/** The dataset_state row, or null when never derived. Null (never throws
+ * for a missing table) on legacy databases predating the Phase 7B table:
+ * every reader treats that as "unknown" and uses its legacy scan path. */
+export async function getDatasetState(db) {
+  try {
+    return (
+      (await queryGet(
+        db,
+        `SELECT id,
+              observation_count AS observationCount,
+              max_fetched_at AS maxFetchedAt,
+              max_wb_last_updated AS maxWbLastUpdated,
+              years_json AS yearsJson,
+              content_version AS contentVersion,
+              integrity_verified_content_version AS integrityVerifiedContentVersion,
+              integrity_checks_json AS integrityChecksJson,
+              updated_run_id AS updatedRunId,
+              updated_at AS updatedAt
+         FROM dataset_state WHERE id = 1`,
+      )) ?? null
+    );
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? '')) return null;
+    if (/no such column/i.test(error?.message ?? '')) {
+      // Table predates integrity_checks_json: same row without it.
+      const legacy = await queryGet(
+        db,
+        `SELECT id,
+                observation_count AS observationCount,
+                max_fetched_at AS maxFetchedAt,
+                max_wb_last_updated AS maxWbLastUpdated,
+                years_json AS yearsJson,
+                content_version AS contentVersion,
+                integrity_verified_content_version AS integrityVerifiedContentVersion,
+                updated_run_id AS updatedRunId,
+                updated_at AS updatedAt
+           FROM dataset_state WHERE id = 1`,
+      );
+      if (!legacy) return null;
+      return { ...legacy, integrityChecksJson: null };
+    }
+    throw error;
+  }
+}
+
+/** Parse the stored years payload ({perMetric, years}) or null when corrupt. */
+export function parseDatasetYears(state) {
+  if (!state?.yearsJson || typeof state.yearsJson !== 'string') return null;
+  try {
+    const parsed = JSON.parse(state.yearsJson);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.perMetric || typeof parsed.perMetric !== 'object') return null;
+    if (!Array.isArray(parsed.years)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Exact scan-derived dataset state (one-time bootstrap, shadow-equivalence
+ * validation, and changed-refresh maintenance inside the publish tx).
+ * Runs COUNT(*) + MAX(fetched_at) + MAX(wb_last_updated) + the shared
+ * available-years group-by — the same statements the legacy paths run.
+ */
+export async function computeDatasetState(db) {
+  const observationCount = await countObservations(db);
+  const maxFetchedRow = await queryGet(db, 'SELECT MAX(fetched_at) AS t FROM observations');
+  const maxWbLastUpdated = await getMaxWbLastUpdated(db);
+  const indicators = await listIndicators(db);
+  const rows = await queryAll(db, AVAILABLE_YEARS_GROUP_SQL);
+  const payload = buildYearsPayload(indicators, rows);
+  return {
+    observationCount,
+    maxFetchedAt: maxFetchedRow?.t ?? null,
+    maxWbLastUpdated,
+    yearsJson: JSON.stringify({ perMetric: payload.perMetric, years: payload.years }),
+  };
+}
+
+/** Write the dataset_state row (for use inside the atomic publish transaction). */
+export async function upsertDatasetStateInner(db, fields) {
+  await queryRun(
+    db,
+    `INSERT INTO dataset_state (
+       id, observation_count, max_fetched_at, max_wb_last_updated, years_json,
+       content_version, integrity_verified_content_version, integrity_checks_json,
+       updated_run_id, updated_at
+     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       observation_count                = excluded.observation_count,
+       max_fetched_at                   = excluded.max_fetched_at,
+       max_wb_last_updated              = excluded.max_wb_last_updated,
+       years_json                       = excluded.years_json,
+       content_version                  = excluded.content_version,
+       integrity_verified_content_version = excluded.integrity_verified_content_version,
+       integrity_checks_json            = excluded.integrity_checks_json,
+       updated_run_id                   = excluded.updated_run_id,
+       updated_at                       = excluded.updated_at`,
+    [
+      fields.observationCount ?? 0,
+      nz(fields.maxFetchedAt),
+      nz(fields.maxWbLastUpdated),
+      fields.yearsJson ?? '{"perMetric":{},"years":[]}',
+      fields.contentVersion ?? 0,
+      fields.integrityVerifiedContentVersion ?? null,
+      nz(fields.integrityChecksJson),
+      nz(fields.updatedRunId),
+      nowIso(),
+    ],
+  );
+}
+
+/**
+ * Insert the dataset_state row only when absent (boot bootstrap).
+ * INSERT OR IGNORE (not upsert): a concurrent successful publish always
+ * wins, so a stale bootstrap can never overwrite freshly published values.
+ * @returns {boolean} whether the row was inserted.
+ */
+export async function insertDatasetStateIfAbsent(db, fields) {
+  const info = await queryRun(
+    db,
+    `INSERT OR IGNORE INTO dataset_state (
+       id, observation_count, max_fetched_at, max_wb_last_updated, years_json,
+       content_version, integrity_verified_content_version, integrity_checks_json,
+       updated_run_id, updated_at
+     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      fields.observationCount ?? 0,
+      nz(fields.maxFetchedAt),
+      nz(fields.maxWbLastUpdated),
+      fields.yearsJson ?? '{"perMetric":{},"years":[]}',
+      fields.contentVersion ?? 0,
+      fields.integrityVerifiedContentVersion ?? null,
+      nz(fields.integrityChecksJson),
+      nz(fields.updatedRunId),
+      nowIso(),
+    ],
+  );
+  return info.changes === 1;
+}
+
+/**
+ * Record that `contentVersion` passed the full expensive integrity battery,
+ * persisting the expensive check results alongside the mark.
+ * Conditional on the version being unchanged since the verification started,
+ * so a concurrent publish can never be marked verified by a stale scan.
+ * @returns {boolean} whether the mark was applied.
+ */
+export async function markIntegrityVerified(db, contentVersion, expensiveChecks = null) {
+  let checksJson = null;
+  if (Array.isArray(expensiveChecks)) {
+    try {
+      checksJson = JSON.stringify(expensiveChecks);
+    } catch {
+      checksJson = null;
+    }
+  }
+  const info = await queryRun(
+    db,
+    'UPDATE dataset_state SET integrity_verified_content_version = ?, integrity_checks_json = ?, updated_at = ? WHERE id = 1 AND content_version = ?',
+    [contentVersion, checksJson, nowIso(), contentVersion],
+  );
+  return info.changes === 1;
+}
+
+/**
+ * Check names owned by the expensive integrity battery (served/stored as
+ * one unit with integrity_verified_content_version). Must match the checks
+ * runExpensiveIntegrityChecks() produces.
+ */
+export const EXPENSIVE_CHECK_NAMES = Object.freeze([
+  'C.unknown_iso3',
+  'D.duplicate_observation',
+  'E.invalid_year',
+  'F.non_finite_value',
+  'F.raw_round_trip',
+]);
+
+/**
+ * Validate persisted expensive checks: an array with exactly the expensive
+ * battery's check names, in any order. Anything else means
+ * "not trustworthy" and the caller must rescan.
+ */
+export function parseStoredIntegrityChecks(state) {
+  if (!state?.integrityChecksJson || typeof state.integrityChecksJson !== 'string') return null;
+  try {
+    const parsed = JSON.parse(state.integrityChecksJson);
+    if (!Array.isArray(parsed)) return null;
+    const names = parsed.map((c) => c?.check).sort();
+    if (JSON.stringify(names) !== JSON.stringify([...EXPENSIVE_CHECK_NAMES].sort())) return null;
+    if (!parsed.every((c) => c && (c.status === 'pass' || c.status === 'fail'))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Drop the dataset_state row (best-effort, never throws).
+ *
+ * Called by standalone write entry points below: observation/country/
+ * indicator writes outside the O7 publish cannot maintain the derived row
+ * (they lack the publish's atomic unit), so the row is invalidated instead
+ * of left stale — readers fall back to exact scans while it is absent.
+ * Production writes flow exclusively through refreshData (Inner variants),
+ * which maintain the row; standalone wrappers exist for tests/seeds.
+ */
+export async function invalidateDatasetState(db) {
+  try {
+    await queryRun(db, 'DELETE FROM dataset_state WHERE id = 1');
+  } catch {
+    // Missing table (legacy handle) or closed handle: nothing to invalidate.
+  }
 }
 
 // ============================================================

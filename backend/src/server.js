@@ -34,20 +34,26 @@ import config, {
 } from './config.js';
 import { closeDb, describeDbTarget, getDb, initDatabase, openExistingLocalDb, pingDatabase } from './db/index.js';
 import {
+  computeDatasetState,
   countAggregateCountries,
   countAllCountries,
   countEligibleCountries,
   countObservations,
+  EXPENSIVE_CHECK_NAMES,
   getCountry,
   getDatasetFingerprint,
+  getDatasetState,
   getEligibleObservations,
   getIndicatorByMetricKey,
   getMaxWbLastUpdated,
   getObservation,
   getObservedCountryIds,
+  insertDatasetStateIfAbsent,
   listCountries,
   listFetchRuns,
   listIndicators,
+  markIntegrityVerified,
+  parseStoredIntegrityChecks,
 } from './db/repository.js';
 import { describeUniverseRule } from './domain/universe.js';
 import { describeMeasure, describeMetric } from './domain/format.js';
@@ -58,7 +64,21 @@ import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from '.
 import { buildFullRanking } from './services/fullRanking.js';
 import { buildIndiaYearlyRows } from './services/indiaYearly.js';
 import { runIntegrityChecks } from './services/integrity.js';
-import { getCachedIntegrity, integrityCacheKey, resetIntegrityCache } from './services/statusCache.js';
+import {
+  cheapIntegrityKey,
+  expensiveIntegrityKey,
+  getCachedCheapIntegrity,
+  getCachedExpensiveIntegrity,
+  getCachedIntegrity,
+  integrityCacheKey,
+  resetIntegrityCache,
+} from './services/statusCache.js';
+import {
+  mergeIntegrityChecks,
+  runCheapIntegrityChecks,
+  runExpensiveIntegrityChecks,
+  runMetadataIntegrityChecks,
+} from './services/integrity.js';
 import { buildRankVerification, normalizeNeighborCount } from './services/rankVerification.js';
 import { buildPeriodSummary } from './services/periodService.js';
 import { buildPricesMovement, listPriceCountryGroups, PRICES_ERROR_CODES } from './services/pricesMovementService.js';
@@ -400,7 +420,11 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     // years to report yet — say so explicitly instead of returning an empty
     // range the frontend could mistake for "no data". The frontend treats
     // DATA_LOADING as still-starting (warm-up continues), not as a failure.
-    if ((await countObservations(h)) === 0 && (isRefreshInProgress() || (await isRefreshLocked(h)))) {
+    // Phase 7B: emptiness from dataset_state when derived (1 row, not a
+    // full COUNT scan); absent row keeps the legacy scan.
+    const datasetState = await getDatasetState(h);
+    const observationCount = datasetState ? datasetState.observationCount : await countObservations(h);
+    if (observationCount === 0 && (isRefreshInProgress() || (await isRefreshLocked(h)))) {
       res.status(503).json({
         error: {
           message: 'Data service is starting and the first dataset is not published yet. Retry shortly.',
@@ -1260,15 +1284,67 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     // always advances the fingerprint. Rapid polls within one generation
     // reuse the verified report instead of rescanning full tables.
     // /api/integrity below stays uncached (explicit on-demand validation).
+    //
+    // Phase 7B split memo: the cheap battery (small-table checks) is keyed
+    // by the latest success run; the expensive battery (observation-table
+    // scans) by content_version, so unchanged refreshes reuse the verified
+    // report instead of rescanning. Merged checks keep canonical order and
+    // shape. Absent dataset_state falls back to the legacy single memo.
     let integrity = null;
     try {
-      const key = integrityCacheKey(fingerprint);
-      integrity = (
-        await getCachedIntegrity(key, async () => {
-          const report = await runIntegrityChecks(h);
-          return { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
-        })
-      ).report;
+      const state = await getDatasetState(h);
+      if (state) {
+        const cheap = await getCachedCheapIntegrity(
+          cheapIntegrityKey(fingerprint?.runId),
+          async () => {
+            const checks = mergeIntegrityChecks(
+              await runCheapIntegrityChecks(h),
+              await runMetadataIntegrityChecks(h),
+            );
+            return { passed: checks.every((c) => c.status === 'pass'), checks };
+          },
+        );
+        const expensive = await getCachedExpensiveIntegrity(
+          expensiveIntegrityKey(state.contentVersion),
+          async () => {
+            // Restart-safe shortcut (Phase 7B Part 6): when this exact
+            // content generation already passed verification in a previous
+            // process lifetime, the persisted deterministic checks are the
+            // exact report — no rescan. Anything unparseable falls through
+            // to the live battery below.
+            if (state.integrityVerifiedContentVersion === state.contentVersion) {
+              const stored = parseStoredIntegrityChecks(state);
+              if (stored) return { passed: stored.every((c) => c.status === 'pass'), checks: stored };
+            }
+            const checks = await runExpensiveIntegrityChecks(h);
+            return { passed: checks.every((c) => c.status === 'pass'), checks };
+          },
+        );
+        const checks = mergeIntegrityChecks(cheap.report.checks, expensive.report.checks);
+        const passed = cheap.report.passed && expensive.report.passed;
+        integrity = {
+          passed,
+          checks: checks.map((c) => ({ check: c.check, status: c.status })),
+        };
+        // Record that this exact content generation passed, conditional on
+        // the version being unchanged since the verification ran. Best
+        // effort: never break the status response.
+        if (!expensive.fromCache && passed) {
+          try {
+            await markIntegrityVerified(h, state.contentVersion, expensive.report.checks);
+          } catch {
+            // Diagnostic write only; the verified report stands regardless.
+          }
+        }
+      } else {
+        const key = integrityCacheKey(fingerprint);
+        integrity = (
+          await getCachedIntegrity(key, async () => {
+            const report = await runIntegrityChecks(h);
+            return { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
+          })
+        ).report;
+      }
     } catch (error) {
       integrity = { passed: false, error: error.message };
     }
@@ -1302,7 +1378,22 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- integrity ----------
   app.get('/api/integrity', ah(async (req, res) => {
-    const report = await runIntegrityChecks(handle());
+    const h = handle();
+    const report = await runIntegrityChecks(h);
+    // An explicit on-demand validation that passes records the verified
+    // content generation (conditional on the version being unchanged since
+    // the scan). Best effort; the report itself is unaffected.
+    if (report.passed) {
+      try {
+        const state = await getDatasetState(h);
+        if (state) {
+          const expensive = report.checks.filter((c) => EXPENSIVE_CHECK_NAMES.includes(c.check));
+          await markIntegrityVerified(h, state.contentVersion, expensive);
+        }
+      } catch {
+        // Diagnostic write only.
+      }
+    }
     res.json({ ...report, methodology: methodologyBlock() });
   }));
 
@@ -1396,12 +1487,18 @@ async function boot() {
 
   let db = null;
   let degraded = false;
+  // Phase 7B: derived dataset metadata (1 row) once the handle exists, so
+  // boot decisions below never scan the observations table on a warm
+  // database. Null = unknown (legacy database): legacy scans apply once,
+  // then the row is bootstrapped below and never rescanned per restart.
+  let datasetState = null;
   try {
     db = getDb();
     await initDatabase(db, { localFile: target.mode === 'local' });
     await pingDatabase(db);
+    datasetState = await getDatasetState(db);
     if (target.mode === 'turso') {
-      const present = await countObservations(db);
+      const present = datasetState ? datasetState.observationCount : await countObservations(db);
       console.log(
         present > 0
           ? `Turso database reachable with ${present} stored observations; no startup ingestion needed.`
@@ -1428,6 +1525,15 @@ async function boot() {
       }
     } else {
       throw error;
+    }
+  }
+  // A fallback handle may carry its own derived row; re-read so the boot
+  // decisions below use it instead of scanning.
+  if (!datasetState && db && !degraded) {
+    try {
+      datasetState = await getDatasetState(db);
+    } catch {
+      datasetState = null;
     }
   }
 
@@ -1457,10 +1563,13 @@ async function boot() {
   // background, after listen(), so startup never blocks availability.
   // Degraded production never seeds: a giant unattended ingest is exactly
   // the failure mode persistence exists to avoid.
+  // Phase 7B: emptiness comes from dataset_state when derived (no scan);
+  // a populated database without a row gets its one-time bootstrap here
+  // (exact scans, once per database — never per restart).
   try {
     if (degraded) {
       console.log('Degraded mode: automatic startup ingestion is disabled until the primary database recovers.');
-    } else if ((await countObservations(db)) === 0) {
+    } else if ((datasetState ? datasetState.observationCount : await countObservations(db)) === 0) {
       if (config.autoIngestOnEmpty) {
         console.log('Database is empty; ingesting World Bank data in the background...');
         ensureDataPresent(db, { trigger: 'boot' }).then(
@@ -1471,6 +1580,29 @@ async function boot() {
         console.log('Database is empty; WB_AUTO_INGEST_ON_EMPTY=0 so startup ingestion is skipped. POST /api/data/refresh to ingest.');
       }
     } else {
+      if (!datasetState) {
+        // One-time bootstrap for a legacy populated database: derive the
+        // exact metadata once so every later restart serves it from 1 row.
+        // INSERT-only (never overwrite): a concurrent successful publish
+        // always wins over this stale-capable bootstrap.
+        try {
+          const computed = await computeDatasetState(db);
+          const inserted = await insertDatasetStateIfAbsent(db, {
+            ...computed,
+            contentVersion: 1,
+            integrityVerifiedContentVersion: null,
+            updatedRunId: null,
+          });
+          datasetState = await getDatasetState(db);
+          if (inserted) {
+            console.log(
+              `Dataset metadata bootstrapped (content v1, ${datasetState?.observationCount ?? 0} observations).`,
+            );
+          }
+        } catch (error) {
+          console.warn(`Dataset metadata bootstrap skipped: ${error.message}`);
+        }
+      }
       const cache = await getCacheStatus(db);
       if (cache.refreshDue) {
         // Stale cache at boot: refresh in the background while serving.
@@ -1491,13 +1623,28 @@ async function boot() {
   }
 
   // Integrity report at boot (warn-only; the API exposes the full report).
+  // Phase 7B: the cheap + run/metadata battery only (small tables, short
+  // index probes) — the observation-table scans run on demand through
+  // /api/data-status (first request per content generation) and explicit
+  // /api/integrity, never on every restart. The verification state of the
+  // current content generation is logged from dataset_state instead.
   try {
-    const report = await runIntegrityChecks(db);
-    const failed = report.checks.filter((c) => c.status === 'fail');
+    const cheap = await runCheapIntegrityChecks(db);
+    const meta = await runMetadataIntegrityChecks(db);
+    const checks = mergeIntegrityChecks(cheap, meta);
+    const failed = checks.filter((c) => c.status === 'fail');
     if (failed.length > 0) {
       console.warn(`Integrity: ${failed.length} check(s) failing: ${failed.map((c) => c.check).join(', ')}`);
     } else {
       console.log('Integrity checks passed.');
+    }
+    if (datasetState) {
+      const verified = datasetState.integrityVerifiedContentVersion;
+      console.log(
+        verified != null && verified === datasetState.contentVersion
+          ? `Content v${datasetState.contentVersion} integrity-verified.`
+          : `Content v${datasetState.contentVersion} not yet integrity-verified; first status request verifies it.`,
+      );
     }
   } catch (error) {
     console.warn(`Integrity checks skipped: ${error.message}`);

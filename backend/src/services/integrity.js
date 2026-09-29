@@ -38,7 +38,14 @@ function result(check, passed, detail = null) {
   return { check, status: passed ? 'pass' : 'fail', detail };
 }
 
-export async function runIntegrityChecks(db) {
+/**
+ * CHEAP battery (Phase 7B): checks whose reads are bounded to small tables
+ * and short index probes (A null-constraint, B aggregate typing + snapshot,
+ * G run provenance, H registry, I India presence, J metadata, K registry
+ * self-check). Safe to run per success run; merged with the expensive
+ * battery for the full report.
+ */
+export async function runCheapIntegrityChecks(db) {
   const checks = [];
 
   // A. No NULL values could be inserted (schema is NOT NULL; belt and braces).
@@ -97,6 +104,19 @@ export async function runIntegrityChecks(db) {
         : 'no comparable universe snapshot yet; typing unchecked',
     }),
   );
+
+  return checks;
+}
+
+/**
+ * EXPENSIVE battery (Phase 7B): full observation-table scans (C orphans,
+ * D duplicates, E years, F/O8 value scan + completeness COUNT). Required
+ * when explicitly requested and when the observation content generation is
+ * new; memoized by content_version otherwise. Never weakened: O8 keeps its
+ * `checked === COUNT(*)` gate.
+ */
+export async function runExpensiveIntegrityChecks(db) {
+  const checks = [];
 
   // C. No orphan ISO3 (foreign key + ingest filter guarantee this).
   const orphanRows = (
@@ -187,6 +207,18 @@ export async function runIntegrityChecks(db) {
       batched: true,
     }),
   );
+
+  return checks;
+}
+
+/**
+ * RUN/METADATA battery (Phase 7B): checks over fetch_runs, indicators,
+ * countries and the registry (G provenance, H registry, I India, J
+ * metadata, K self-consistency). Small-table reads; runs with the cheap
+ * battery per success run.
+ */
+export async function runMetadataIntegrityChecks(db) {
+  const checks = [];
 
   // G. Latest successful run must record pagination/provenance counters.
   const latest = await queryGet(db, "SELECT * FROM fetch_runs WHERE status = 'success' ORDER BY id DESC LIMIT 1");
@@ -286,6 +318,52 @@ export async function runIntegrityChecks(db) {
     }),
   );
 
+  return checks;
+}
+
+/** Canonical check order (data-status merges memoized batteries into this shape). */
+export const INTEGRITY_CHECK_ORDER = Object.freeze([
+  'A.null_value',
+  'B.aggregate_typing',
+  'C.unknown_iso3',
+  'D.duplicate_observation',
+  'E.invalid_year',
+  'F.non_finite_value',
+  'F.raw_round_trip',
+  'G.pagination_provenance',
+  'H.registry_indicators',
+  'I.india_observations',
+  'J.metadata_consistency',
+  'K.registry_consistency',
+]);
+
+/**
+ * Merge check arrays into canonical order (duplicates resolve last-wins;
+ * unknown names append after the known order so no check is ever dropped).
+ */
+export function mergeIntegrityChecks(...parts) {
+  const byName = new Map();
+  for (const part of parts) {
+    for (const check of part ?? []) byName.set(check.check, check);
+  }
+  const ordered = [];
+  for (const name of INTEGRITY_CHECK_ORDER) {
+    if (byName.has(name)) {
+      ordered.push(byName.get(name));
+      byName.delete(name);
+    }
+  }
+  for (const check of byName.values()) ordered.push(check);
+  return ordered;
+}
+
+/** Full report: all batteries in canonical order (byte-shape unchanged). */
+export async function runIntegrityChecks(db) {
+  const checks = mergeIntegrityChecks(
+    await runCheapIntegrityChecks(db),
+    await runExpensiveIntegrityChecks(db),
+    await runMetadataIntegrityChecks(db),
+  );
   return { passed: checks.every((c) => c.status === 'pass'), checks };
 }
 

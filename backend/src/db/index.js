@@ -38,8 +38,10 @@ let dbDescriptor = null;
  * its SQL definition.
  */
 const ADDED_COLUMNS = Object.freeze({
-  fetch_runs: Object.freeze({
-    rows_with_value: 'INTEGER DEFAULT 0',
+  dataset_state: Object.freeze({
+    integrity_checks_json: 'TEXT',
+  }),
+  fetch_runs: Object.freeze({    rows_with_value: 'INTEGER DEFAULT 0',
     rows_non_finite_skipped: 'INTEGER DEFAULT 0',
     rows_invalid_year: 'INTEGER DEFAULT 0',
     pages_fetched: 'INTEGER DEFAULT 0',
@@ -82,32 +84,40 @@ async function existingColumns(handle, table) {
   return new Set(rows.rows.map((row) => row.name));
 }
 
-/** Add any column the current code expects but the stored table is missing. */
+/** Add any column the current code expects but the stored table is missing. Returns the set of added "table.column" names. */
 async function applyColumnMigrations(handle) {
+  const added = new Set();
   for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
     const present = await existingColumns(handle, table);
     if (present.size === 0) continue;
     for (const [column, definition] of Object.entries(columns)) {
       if (!present.has(column)) {
         await handle.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+        added.add(`${table}.${column}`);
       }
     }
   }
+  return added;
 }
 
 /**
  * Apply the schema, then upgrade any pre-existing table in place.
  * Idempotent: every statement uses IF NOT EXISTS / a column presence check.
- * Also backfills value_raw for rows written before the column existed.
+ * The value_raw backfill runs ONLY when the column was newly added by the
+ * migration above (Phase 7B): it is a completed one-time migration, not a
+ * startup operation — running it unconditionally rescans the observations
+ * table on every process start for zero matching rows.
  */
 async function applySchema(handle) {
   const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
   await queryExec(handle, schema);
-  await applyColumnMigrations(handle);
-  try {
-    await handle.execute('UPDATE observations SET value_raw = CAST(value AS TEXT) WHERE value_raw IS NULL;');
-  } catch {
-    // Table may not exist yet in exotic flows; fresh schema already has values.
+  const added = await applyColumnMigrations(handle);
+  if (added.has('observations.value_raw')) {
+    try {
+      await handle.execute('UPDATE observations SET value_raw = CAST(value AS TEXT) WHERE value_raw IS NULL;');
+    } catch {
+      // Table may not exist yet in exotic flows; fresh schema already has values.
+    }
   }
 }
 

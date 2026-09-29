@@ -67,6 +67,22 @@ async function request(
   path,
   { params = {}, signal = null, method = 'GET', body = null, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {},
 ) {
+  const url = buildUrl(path, method === 'GET' ? params : {});
+  const headers = { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) };
+  // In-flight GET deduplication (Phase 7B): identical concurrent GETs share
+  // one fetch (Overview twins, StrictMode remounts, registry double-fetch).
+  // POSTs and already-aborted callers always take the direct path, so their
+  // exact behavior is untouched.
+  if (method === 'GET' && !body && !signal?.aborted) {
+    return requestShared(url, { method, path, headers, signal, timeoutMs });
+  }
+  return fetchOnce(url, { method, path, headers, body, signal, timeoutMs });
+}
+
+/**
+ * One fetch with its own timeout/abort semantics (the historical behavior).
+ */
+async function fetchOnce(url, { method, path, headers, body, signal, timeoutMs }) {
   // Compose the caller's AbortSignal (filter changes, unmount, manual retry)
   // with a bounded timeout so a hung backend can never leave the UI in
   // loading forever. Caller aborts keep AbortError semantics; only the
@@ -90,10 +106,10 @@ async function request(
   }
   let response;
   try {
-    response = await fetch(buildUrl(path, method === 'GET' ? params : {}), {
+    response = await fetch(url, {
       method,
       signal: controller.signal,
-      headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers,
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch (error) {
@@ -129,6 +145,144 @@ async function request(
     });
   }
   return payload;
+}
+
+/** In-flight shared GETs keyed by method + URL + timeout. Entries die on settle. */
+const inflightGets = new Map();
+
+function clonePayload(payload) {
+  // Each waiter receives its own object, exactly as separate fetches would
+  // produce — no shared mutable state between components.
+  if (typeof structuredClone === 'function') return structuredClone(payload);
+  return JSON.parse(JSON.stringify(payload));
+}
+
+function callerAbortError(signal) {
+  const reason = signal?.reason;
+  if (reason instanceof Error) return reason;
+  if (typeof DOMException === 'function' && reason instanceof DOMException) return reason;
+  if (reason !== undefined && reason !== null) {
+    const error = new Error(String(reason?.message ?? reason));
+    error.name = 'AbortError';
+    return error;
+  }
+  return new DOMException('This operation was aborted', 'AbortError');
+}
+
+/**
+ * Shared variant of fetchOnce for identical concurrent GETs.
+ *
+ * Observably identical per waiter to a separate fetch: same payload value
+ * (own copy), same per-caller timeout (own timer, same message), same abort
+ * semantics (own AbortError, fetch aborted only when no waiter remains).
+ * The shared fetch resolves/rejects with the exact fetchOnce mapping.
+ */
+function requestShared(url, { method, path, headers, signal, timeoutMs }) {
+  // Keyed by method + URL only: timeouts stay strictly per waiter (each
+  // waiter owns its timer and message), so sharing across different
+  // timeoutMs values changes nothing observable.
+  const key = `GET ${url}`;
+  let entry = inflightGets.get(key);
+  if (!entry) {
+    const controller = new AbortController();
+    entry = { controller, waiters: new Set(), promise: null };
+    inflightGets.set(key, entry);
+    entry.promise = (async () => {
+      try {
+        let response;
+        try {
+          response = await fetch(url, { method: 'GET', signal: controller.signal, headers });
+        } catch (error) {
+          // Identical mapping to fetchOnce: caller aborts keep AbortError
+          // semantics (internal abort when all waiters leave included);
+          // anything else is a connectivity failure. Timeouts stay
+          // per-waiter (own timers), never shared.
+          if (error?.name === 'AbortError') throw error;
+          throw new ApiError('Could not reach the backend. Is the API server running?', {
+            code: 'NETWORK_ERROR',
+          });
+        }
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch {
+          throw new ApiError(`Backend returned an unreadable response (HTTP ${response.status}).`, {
+            status: response.status,
+            code: 'BAD_RESPONSE',
+          });
+        }
+        if (!response.ok) {
+          throw new ApiError(payload?.error?.message ?? `Backend request failed (HTTP ${response.status}).`, {
+            status: response.status,
+            code: payload?.error?.code ?? 'REQUEST_ERROR',
+          });
+        }
+        return payload;
+      } finally {
+        // Guarded: a newer entry for the same key (after an eviction below)
+        // must never be removed by this settling fetch.
+        if (inflightGets.get(key) === entry) inflightGets.delete(key);
+      }
+    })();
+    // A rejection with zero remaining waiters (all aborted mid-flight) must
+    // not surface as an unhandled rejection; waiters hold their own branches.
+    entry.promise.catch(() => {});
+  }
+  return new Promise((resolve, reject) => {
+    const waiter = { timer: null, onAbort: null, done: false };
+    const detach = () => {
+      if (waiter.done) return;
+      waiter.done = true;
+      if (waiter.timer !== null) clearTimeout(waiter.timer);
+      if (signal && waiter.onAbort) signal.removeEventListener('abort', waiter.onAbort);
+      entry.waiters.delete(waiter);
+      if (entry.waiters.size === 0) {
+        try {
+          entry.controller.abort();
+        } catch {
+          // Already settled; nothing to abort.
+        }
+        // Evict so a hung-but-abandoned fetch can never poison later
+        // identical requests: the orphaned fetch settles unobserved (its
+        // guarded finally is a no-op for the evicted key) while new
+        // requests start a fresh shared fetch.
+        if (inflightGets.get(key) === entry) inflightGets.delete(key);
+      }
+    };
+    waiter.onAbort = () => {
+      detach();
+      reject(callerAbortError(signal));
+    };
+    if (signal && typeof signal.addEventListener === 'function') {
+      signal.addEventListener('abort', waiter.onAbort, { once: true });
+    }
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      waiter.timer = setTimeout(() => {
+        detach();
+        reject(
+          new ApiError(
+            `The backend is taking longer than expected (HTTP ${method} ${path} exceeded ${timeoutMs} ms). It may be warming up — retry shortly.`,
+            { code: 'TIMEOUT' },
+          ),
+        );
+      }, timeoutMs);
+    }
+    entry.waiters.add(waiter);
+    entry.promise.then(
+      (payload) => {
+        if (!waiter.done) {
+          detach();
+          resolve(clonePayload(payload));
+        }
+      },
+      (error) => {
+        if (!waiter.done) {
+          detach();
+          reject(error);
+        }
+      },
+    );
+  });
 }
 
 const get = (path, params, options) => request(path, { ...options, params });

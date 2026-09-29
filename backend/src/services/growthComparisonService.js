@@ -22,7 +22,7 @@ import {
   getEligibleObservationsForYears,
   getIndicatorByMetricKey,
   getLatestFetchRun,
-  listYearsWithData,
+  getMetricYears,
 } from '../db/repository.js';
 import { comparisonError, COMPARISON_ERROR_CODES } from './comparisonService.js';
 import { COMPARISON_POPULATION_LABEL } from '../domain/comparison.js';
@@ -255,7 +255,9 @@ export async function buildGrowthComparisonResponse(db, options = {}) {
     };
   }
 
-  const yearsWithData = new Set(await listYearsWithData(db, indicator.id));
+  // Phase 7B: year gate from derived years metadata when available (0
+  // observation reads); identical set, identical unavailable outcome.
+  const yearsWithData = new Set(await getMetricYears(db, metricKey));
   const requiredYears = hasMid ? [yearA, yearMid, yearB] : [yearA, yearB];
   if (!requiredYears.every((y) => yearsWithData.has(y))) {
     return {

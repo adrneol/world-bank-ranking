@@ -1,0 +1,1536 @@
+PHASE 7B — READ-PATH OPTIMIZATION
+CORRECTED MASTER ANCHOR + ZERO-LOSS IMPLEMENTATION PLAN
+=========================================================
+
+ROLE
+----
+
+Treat the existing Phase 7B forensic report as the BASELINE AUDIT.
+
+This prompt is the MASTER ANCHOR for correcting, strengthening, and safely
+implementing that proposed plan.
+
+The Phase 7B report is strong and evidence-based, but it is NOT automatically
+approved for implementation exactly as written.
+
+You MUST:
+
+1. Read the entire current codebase.
+2. Read the Phase 7B forensic report.
+3. Reconcile the proposed plan with the actual code.
+4. Apply every safety/correctness improvement in this anchor.
+5. Produce a corrected implementation plan.
+6. DO NOT modify source code until the corrected plan is complete and internally
+   reviewed against the zero-loss requirements below.
+7. Then implement only the corrected plan, phase by phase.
+
+====================================================================
+ABSOLUTE PRIORITY
+====================================================================
+
+The application has ZERO tolerance for:
+
+- missing observations
+- extra observations
+- altered values
+- altered value_raw
+- precision loss
+- missing countries
+- missing aggregates
+- missing years
+- incorrect World Bank vintage
+- incorrect dataset generation
+- stale or incorrect freshness
+- mixed generations
+- partial publication
+- false "fresh" state
+- false "unchanged" classification
+- false data
+- analytical output changes caused by optimization
+
+Performance is secondary.
+
+Priority:
+
+    DATA CORRECTNESS
+    >
+    EXACT SEMANTICS
+    >
+    ATOMICITY
+    >
+    COMPLETENESS
+    >
+    DATA AVAILABILITY
+    >
+    READ EFFICIENCY
+    >
+    WRITE EFFICIENCY
+    >
+    MEMORY
+    >
+    SPEED
+
+A performance optimization that cannot prove semantic equivalence MUST NOT
+ship.
+
+====================================================================
+CURRENT SYSTEM — FIXED CONSTRAINTS
+====================================================================
+
+Production:
+
+    Vercel frontend
+        ↓
+    Render Node/Express backend
+        ↓
+    libSQL driver
+        ↓
+    Turso Cloud primary DB
+
+Local development:
+
+    DB_MODE=local
+        ↓
+    local SQLite file
+    DATABASE_FILE=data/worldbank.db
+
+Production:
+
+    DB_MODE=turso
+        ↓
+    Turso Cloud
+
+Controlled local fallback remains supported.
+
+World Bank WDI remains the sole raw-data source.
+
+Frontend remains display/transport only.
+
+Backend remains analytical authority.
+
+Do NOT change:
+
+- ranking methodology
+- YoY methodology
+- movement methodology
+- compare methodology
+- analysis methodology
+- metric registry
+- indicator codes
+- country/entity universe
+- missing-data rules
+- precision semantics
+- World Bank source
+- API contracts
+- frontend analytical behavior
+- 24-hour TTL duration
+- O1
+- O2
+- O7
+- O8
+- O10
+- refresh retry semantics
+- GEO behavior
+- PWA behavior
+
+====================================================================
+PHASE 7A EVIDENCE — CURRENT REALITY
+====================================================================
+
+Use the existing Phase 7B forensic report as factual baseline.
+
+Confirmed:
+
+- ~228,776 observations
+- 20 indicators
+- 295 entities
+- 217 eligible / 78 aggregates
+- 1960–2025
+- 23 fetch runs
+- 8,868 ingest_year_stats
+- 0 value_raw NULL
+- WB stored vintage currently 2026-07-13
+- 48 SQL sites
+- ranking/movement/compare analytical paths are generally indexed
+- major waste is around status/boot/fingerprint/years/integrity/middleware
+- current broad status/boot scans repeatedly touch ~228k observations
+- current Turso total around 30M rows-read was reconciled approximately from
+  query-shape × execution-count accounting
+- current O10 uses exact indicator-range comparison and saves observation writes
+- frontend has a 60-second visible-tab data-status watcher
+- frontend does NOT directly touch Turso
+
+Do not assume every estimate from the old report is exact. Re-measure after
+implementation.
+
+====================================================================
+CRITICAL ARCHITECTURAL PRINCIPLE
+====================================================================
+
+The target system is NOT:
+
+    Render
+      ↓
+    load 228k observations into RAM
+      ↓
+    keep them locally
+
+The target system IS:
+
+    persistent database
+      ↓
+    lightweight metadata/run state
+      ↓
+    targeted indexed SQL
+      ↓
+    bounded result sets
+      ↓
+    backend calculations
+      ↓
+    API
+      ↓
+    frontend
+
+Turso is persistent remote database storage.
+
+Local SQLite is the same logical storage architecture for DB_MODE=local.
+
+A SQL query returning 1 row may still scan hundreds of thousands of rows.
+
+Therefore optimize BOTH:
+
+    rows returned
+    AND
+    rows touched/scanned
+
+====================================================================
+MASTER SAFETY REQUIREMENT — DATASET_STATE
+====================================================================
+
+The key proposed optimization is a new authoritative metadata row/table,
+currently proposed as:
+
+    dataset_state
+
+This must NOT become a second, independently drifting source of truth.
+
+It is a DERIVED AUTHORITATIVE STATE maintained transactionally from the same
+successful database publication that changes observations.
+
+The single most important requirement:
+
+    dataset_state MUST ALWAYS REPRESENT THE SAME COMMITTED GENERATION AS
+    observations.
+
+Never allow:
+
+    observations = generation N
+    dataset_state = generation N-1
+
+or:
+
+    observations rolled back
+    dataset_state remains updated
+
+or:
+
+    dataset_state updated
+    observation update fails
+
+====================================================================
+MANDATORY CHANGE TO THE ORIGINAL PLAN:
+SHADOW-EQUIVALENCE MIGRATION
+====================================================================
+
+DO NOT immediately replace observation scans with dataset_state values.
+
+Implement migration in two conceptual stages.
+
+------------------------------
+STAGE A — SHADOW / EQUIVALENCE
+------------------------------
+
+First add dataset_state support but continue computing the legacy scan-based
+values in validation/test paths.
+
+For every state field, compare:
+
+    dataset_state value
+        VS
+    independent scan-derived value
+
+on isolated/local databases.
+
+This comparison MUST be performed across:
+
+1. existing populated DB
+2. fresh empty DB
+3. full changed refresh
+4. unchanged refresh
+5. one-indicator change
+6. one-row deletion
+7. one-row addition
+8. partial refresh failure
+9. rollback after mid-refresh failure
+10. process crash during refresh
+11. local DB_MODE=local
+12. Turso-equivalent scratch DB
+13. fallback local DB
+14. test temp-file DB
+
+Do not switch production reads to dataset_state until equivalence is proven.
+
+------------------------------
+STAGE B — SWITCH READ AUTHORITY
+------------------------------
+
+Only after Stage A proves equivalence:
+
+    status
+    fingerprint
+    freshness
+    years
+    boot
+    metadata
+
+may switch from broad observation scans to dataset_state.
+
+Keep a fallback/diagnostic path capable of detecting metadata drift.
+
+====================================================================
+DATASET_STATE — EXACT SEMANTICS
+====================================================================
+
+Do NOT invent semantics for fields.
+
+Define each field precisely.
+
+At minimum investigate the need for:
+
+    observation_count
+    max_fetched_at
+    stored_dataset_wb_vintage
+    years_json
+    content_version
+    initialized
+    integrity_verified_content_version
+
+Potential fields must be separated semantically.
+
+IMPORTANT:
+
+Do NOT confuse:
+
+    data generation/content version
+    successful refresh timestamp
+    source World Bank vintage
+    stored observation vintage
+    integrity verification state
+
+These are different concepts.
+
+------------------------------
+content_version
+------------------------------
+
+Increment ONLY when observation content changes.
+
+For example:
+
+    inserted observation
+    updated observation
+    deleted observation
+
+=> content_version changes.
+
+An unchanged successful refresh:
+
+    observation content unchanged
+
+=> content_version MUST remain unchanged.
+
+But:
+
+    lastSuccessAt
+
+still advances.
+
+------------------------------
+lastSuccessAt
+------------------------------
+
+Continue to be owned by refresh/run metadata according to the current TTL
+semantics.
+
+Do NOT move TTL authority into a new approximation.
+
+TTL remains:
+
+    ageHours < ttlHours
+
+with the same strict 24-hour semantics already tested.
+
+------------------------------
+stored_dataset_wb_vintage
+------------------------------
+
+This must represent the vintage semantics of the ACTUAL STORED observations
+used by the application.
+
+Do NOT blindly replace this with the latest World Bank source-run vintage when
+the source was checked but observation content did not change.
+
+The audit explicitly identified this distinction as important.
+
+Trace current API semantics and preserve them exactly.
+
+If both source-run vintage and stored-dataset vintage are required, keep them as
+separate concepts rather than overwriting one with the other.
+
+------------------------------
+observation_count
+------------------------------
+
+Must remain EXACT.
+
+Do not use approximate counters.
+
+Do not trust:
+
+    old_count + guessed_delta
+
+unless the delta is formally proven against the actual DELETE/INSERT behavior.
+
+If using delta arithmetic, prove it across:
+
+- changed indicator
+- partial range
+- deletion
+- insertion
+- replacement
+- rollback
+
+A safer implementation may compute the exact count inside the same O7
+transaction when required.
+
+Correctness beats saving one metadata scan.
+
+------------------------------
+max_fetched_at
+------------------------------
+
+Must equal the current stored dataset's actual maximum fetched_at according to
+existing semantics.
+
+Do not approximate it.
+
+Do not use the time a refresh started.
+
+Do not use the time a request completed unless it matches the data semantics.
+
+------------------------------
+years_json
+------------------------------
+
+This field requires an explicit invariant.
+
+It MUST represent:
+
+1. per-metric available years
+2. global available years
+
+The global list MUST be the correct union of the per-metric year sets, not the
+year set of whichever indicator was processed last.
+
+Example:
+
+    metric A has 2000
+    metric B does not
+
+global must contain 2000.
+
+If metric A loses 2000 during a refresh but metric B still has 2000:
+
+    global must STILL contain 2000.
+
+This must be explicitly tested.
+
+Do not simply derive global years from the current indicator.
+
+--------------------------------------------------------------------
+YEAR DATA UPDATE STRATEGY
+--------------------------------------------------------------------
+
+If years are computed in-memory during ingest, prove that the resulting
+metadata is complete for the whole dataset.
+
+A safe implementation may:
+
+    compute exact per-metric year state
+    +
+    derive exact global union
+    +
+    atomically store the complete result
+
+inside the same successful publish transaction.
+
+If this cannot be proven from staged data alone, use an exact fallback
+calculation.
+
+Never prefer lower reads over incorrect years.
+
+====================================================================
+INTEGRITY VERIFICATION STATE
+====================================================================
+
+The old boot integrity check MUST NOT simply disappear because it is expensive.
+
+Determine exactly where the existing O8/integrity guarantees happen.
+
+Propose one of these only after source audit:
+
+A. integrity is already guaranteed as part of every successful data-changing
+   publish
+
+OR
+
+B. an explicit integrity check is performed when content_version changes
+
+OR
+
+C. a persisted:
+
+       integrity_verified_content_version
+
+   proves that this exact content version has passed the required integrity
+   gates.
+
+The safest target is:
+
+    content_version = 123
+    integrity_verified_content_version = 123
+
+meaning:
+
+    dataset content version 123 has passed required integrity validation.
+
+If:
+
+    content_version changes
+
+then:
+
+    integrity_verified_content_version becomes stale.
+
+Do NOT serve a new content generation as "integrity verified" merely because
+the old generation was verified.
+
+Do NOT weaken the O8:
+
+    checked === COUNT(*)
+
+completeness gate.
+
+Do NOT replace exact integrity with sampling.
+
+====================================================================
+BOOT / RENDER RESTART TARGET
+====================================================================
+
+The target after a warm production restart is:
+
+    Render starts
+       ↓
+    environment validation
+       ↓
+    connect Turso
+       ↓
+    schema/migration metadata
+       ↓
+    SELECT 1
+       ↓
+    dataset_state
+       ↓
+    refresh lock
+       ↓
+    latest successful run
+       ↓
+    server ready
+       ↓
+    targeted data requests as needed
+
+A warm restart MUST NOT:
+
+- read all 228k observations
+- materialize the DB into RAM
+- rebuild local SQLite from Turso
+- download World Bank again
+- run a needless full integrity scan if the committed generation is already
+  proven valid
+
+If a one-time migration/bootstrap is unavoidable, it may perform a full scan
+ONLY once for that database, after which the new metadata becomes authoritative.
+
+That one-time scan must be clearly identified and tested.
+
+====================================================================
+NORMAL USER REQUEST TARGET
+====================================================================
+
+For normal data endpoints:
+
+    user requests Ranking
+        ↓
+    backend reads small metadata state
+        ↓
+    indexed ranking query
+        ↓
+    only requested observation rows
+        ↓
+    backend calculates
+        ↓
+    API returns
+
+Do not allow a universal middleware COUNT(*) to precede every data request.
+
+If freshness checking is necessary, make it metadata-based.
+
+Do not make ranking read the entire DB.
+
+Do not make Compare read the entire DB.
+
+Do not make Analysis read the entire DB.
+
+Do not make Movement read the entire DB unless its methodology genuinely
+requires a complete analytical range.
+
+====================================================================
+DATA-STATUS TARGET
+====================================================================
+
+This is the highest-priority read optimization.
+
+Current status behavior must be replaced carefully.
+
+Target:
+
+    GET /api/data-status
+       ↓
+    dataset_state
+    +
+    fetch_runs
+    +
+    refresh_locks
+    +
+    cached integrity state
+       ↓
+    lightweight result
+
+No ordinary status request should scan 228k observations.
+
+Status must still report:
+
+- freshness
+- last successful refresh
+- current run
+- refresh progress
+- data generation/content version
+- stored observation count
+- stored World Bank vintage
+- integrity status
+
+without rediscovering these through full-table scans.
+
+If integrity is explicitly required, perform the exact integrity operation.
+
+Do not make every status request perform integrity.
+
+====================================================================
+FRONTEND 60-SECOND WATCHER
+====================================================================
+
+Do NOT immediately remove it.
+
+First make backend status cheap.
+
+Then evaluate whether it remains useful.
+
+Preferred first implementation:
+
+    keep existing watcher semantics
+    but make /api/data-status metadata-cheap
+
+This preserves UX with almost no read cost.
+
+Only consider removing/reducing the watcher later if measured evidence shows
+it is still unnecessary.
+
+DO NOT replace it with SSE/long-polling in this phase unless the current
+architecture makes that clearly justified.
+
+Keep:
+
+    2-second refresh-progress polling
+
+during actual refreshes.
+
+Keep:
+
+    cold-start retry behavior
+
+Keep:
+
+    backend as the freshness authority.
+
+Frontend never directly queries the database.
+
+====================================================================
+MIDDLEWARE FRESHNESS CHECK
+====================================================================
+
+The audit found:
+
+    every request on AUTO_REFRESH_PATHS
+        →
+    getCacheStatus
+        →
+    COUNT observations
+
+This must be treated as a major waste source.
+
+Replace broad observation-derived freshness checks with metadata/run state.
+
+The refresh decision remains:
+
+    lastSuccessAt
+    +
+    exact 24h TTL
+
+Do not change TTL semantics.
+
+Do not make request handling itself trigger large database scans.
+
+If a refresh is due:
+
+    trigger background refresh according to existing single-flight rules.
+
+Continue serving the last valid committed dataset.
+
+====================================================================
+YEARS CACHE
+====================================================================
+
+Current years-cache key uses COUNT and therefore causes a scan.
+
+Target:
+
+    content_version
+       ↓
+    years cache key
+
+When data content changes:
+
+    content_version changes
+       ↓
+    years cache invalidated
+
+When an unchanged refresh succeeds:
+
+    content_version unchanged
+       ↓
+    years cache remains valid
+
+lastSuccessAt may change independently.
+
+This distinction MUST be explicitly tested.
+
+====================================================================
+TIMESTAMP QUERIES
+====================================================================
+
+Current:
+
+    MAX(fetched_at)
+    MAX(wb_last_updated)
+
+are expensive scans.
+
+Preferred solution:
+
+    dataset_state
+
+rather than indexes.
+
+Only add timestamp indexes if the metadata approach cannot safely preserve
+semantics.
+
+If an index is later proposed, measure:
+
+- Turso index creation read cost
+- storage
+- write amplification
+- refresh runtime
+- local SQLite effect
+
+Do not add indexes simply because they eliminate a scan.
+
+====================================================================
+VALUE_RAW BACKFILL
+====================================================================
+
+Current:
+
+    UPDATE observations
+    SET value_raw = CAST(value AS TEXT)
+    WHERE value_raw IS NULL
+
+must NOT run as an unconditional startup operation forever.
+
+This is a completed migration concern.
+
+Target:
+
+    schema/migration state says whether migration has completed
+        ↓
+    skip startup UPDATE forever afterward
+
+If an existing DB is missing the migration:
+
+    run exact migration once
+    verify
+    mark migration complete
+
+Never silently skip rows.
+
+====================================================================
+ANALYTICAL QUERIES
+====================================================================
+
+Preserve the current good behavior.
+
+The audit found:
+
+- Ranking = indexed
+- YoY = indexed
+- Movement = targeted
+- Compare = targeted
+- country range = indexed
+- O10 = targeted range reads
+
+DO NOT redesign these simply to reduce their read counts.
+
+Optimize only actual unnecessary reads around them.
+
+For example:
+
+    if getYearRange is already unnecessary because bounds are already supplied
+
+then remove the redundant query in a later controlled phase.
+
+Do not alter analytical output.
+
+====================================================================
+O10
+====================================================================
+
+Do NOT redesign O10 solely to reduce reads.
+
+Current exact O10 comparison is an intentional correctness cost.
+
+It:
+
+- reads exact relevant ranges
+- compares country/year/value/value_raw
+- skips only when exact equality is proven
+- avoids enormous observation writes
+
+Do NOT replace it with:
+
+- sampling
+- lastupdated-only checks
+- approximate hashes
+- probabilistic checks
+- incomplete projections
+
+If a future optimization can mathematically prove exact equivalence with fewer
+reads, it may be investigated separately.
+
+For this phase:
+
+    O10 = PRESERVE.
+
+====================================================================
+READ VS WRITE ECONOMICS
+====================================================================
+
+Optimize total workload, not only one metric.
+
+Remember:
+
+    O10
+       → exact comparison reads
+       → large write savings
+
+Therefore do not save 100k reads by introducing 100k unnecessary writes.
+
+The plan must always compare:
+
+    reads
+    writes
+    latency
+    storage
+    memory
+    correctness
+
+====================================================================
+LOCAL SQLITE + TURSO REQUIREMENT
+====================================================================
+
+Every optimization MUST work for:
+
+    DB_MODE=local
+
+AND:
+
+    DB_MODE=turso
+
+Use the same logical SQL/schema/driver behavior.
+
+Do not create:
+
+    Turso-only optimization
+
+that causes:
+
+    local development regression
+
+The test matrix must include:
+
+- local populated DB
+- local empty DB
+- local fallback DB
+- Turso-equivalent scratch DB
+- fresh DB
+- existing DB
+- Render restart simulation
+
+====================================================================
+ATOMIC METADATA UPDATE
+====================================================================
+
+dataset_state MUST be written inside the same O7 transaction that publishes
+observation changes.
+
+Correct:
+
+    BEGIN
+      observation changes
+      ingest year stats
+      dataset_state update
+      fetch run success state
+    COMMIT
+
+Wrong:
+
+    observation COMMIT
+    ↓
+    dataset_state update later
+
+and also wrong:
+
+    dataset_state update
+    ↓
+    observation failure
+
+Any failure must rollback both observation changes and metadata state.
+
+====================================================================
+UNCHANGED REFRESH
+====================================================================
+
+This is mandatory.
+
+Scenario:
+
+    all 20 indicators unchanged
+
+Required:
+
+    zero observation writes
+    zero observation deletes
+    refresh SUCCESS
+    lastSuccessAt advances
+    TTL becomes +24h from successful completion
+    content_version DOES NOT advance
+    observation_count remains exact
+    years_json remains valid
+    integrity_verified_content_version remains valid
+    analytical caches keyed to content_version remain valid
+
+This must be explicitly tested.
+
+====================================================================
+CHANGED REFRESH
+====================================================================
+
+Scenario:
+
+    one or more indicators changed
+
+Required:
+
+    exact changed observations published
+    dataset_state updated atomically
+    content_version advances exactly once for the successful content change
+    lastSuccessAt advances
+    TTL renews
+    years metadata updates exactly
+    integrity verification state updates according to the actual validation
+    old generation is never partially exposed
+
+====================================================================
+FAILED REFRESH
+====================================================================
+
+Scenario:
+
+    indicator 17 fails after indicators 1–16 wrote inside O7
+
+Required:
+
+    ROLLBACK
+    observations return to old generation
+    dataset_state returns to old state
+    content_version remains old
+    lastSuccessAt remains old
+    years_json remains old
+    stored vintage remains old
+    integrity_verified_content_version remains old
+    stale data remains available
+    retry semantics unchanged
+    lock recovery unchanged
+
+There MUST be no half-updated dataset_state.
+
+====================================================================
+PROCESS CRASH
+====================================================================
+
+Scenario:
+
+    process dies during O7 transaction
+
+Required:
+
+    previous committed observations survive
+    previous dataset_state survives
+    no mixed generation
+    stale lock recovery works
+    restart can safely serve data
+    no full database reload
+    no World Bank re-seed when Turso already contains valid data
+
+====================================================================
+CACHE INVALIDATION
+====================================================================
+
+Separate these:
+
+    content_version
+    lastSuccessAt
+    integrity_verified_content_version
+
+DO NOT invalidate analytical/data caches solely because:
+
+    lastSuccessAt changed
+
+when observations did not change.
+
+Do invalidate content-dependent caches when:
+
+    content_version changes
+
+Do not accidentally reuse integrity verification from an older content version.
+
+====================================================================
+7B IMPLEMENTATION ORDER — CORRECTED
+====================================================================
+
+Use this staged implementation order unless actual source inspection proves a
+better sequence.
+
+------------------------------------------------------------
+7B-0 — PLAN RECONCILIATION + SAFETY MODEL
+------------------------------------------------------------
+
+Before code changes:
+
+- compare the old Phase 7B plan against this anchor
+- identify conflicts
+- produce final approved architecture
+- define exact dataset_state schema
+- define each field's semantics
+- define content_version
+- define years_json invariants
+- define integrity_verified_content_version
+- define migration/bootstrap behavior
+- define rollback behavior
+- define drift detector
+- define fallback behavior
+
+NO CODE CHANGES.
+
+------------------------------------------------------------
+7B-1A — DATASET_STATE SHADOW MODE
+------------------------------------------------------------
+
+Add metadata structure only if necessary to test it safely.
+
+Continue computing legacy values in a validation/shadow path.
+
+For each:
+
+    observation_count
+    max_fetched_at
+    stored_dataset_wb_vintage
+    years_json
+
+compare:
+
+    dataset_state
+    VS
+    exact underlying observation-derived value
+
+Test all mutation/failure cases.
+
+Do NOT switch production consumers yet.
+
+------------------------------------------------------------
+7B-1B — ATOMIC DATASET_STATE PUBLICATION
+------------------------------------------------------------
+
+Update dataset_state inside O7's same transaction.
+
+Prove:
+
+    observations + metadata
+    commit together
+    rollback together
+
+Test:
+
+- full change
+- partial change
+- unchanged
+- failure
+- crash
+- deletion
+- addition
+- local
+- Turso
+
+------------------------------------------------------------
+7B-1C — SWITCH STATUS/FINGERPRINT TO METADATA
+------------------------------------------------------------
+
+After shadow equivalence passes:
+
+Replace:
+
+    COUNT
+    MAX(fetched_at)
+    MAX(wb_last_updated)
+
+with:
+
+    dataset_state
+    fetch_runs
+    refresh_locks
+
+while preserving exact API payload semantics.
+
+Keep a diagnostic legacy scan path for explicit drift verification.
+
+------------------------------------------------------------
+7B-2 — BOOT DE-SCAN
+------------------------------------------------------------
+
+After dataset_state is proven:
+
+Remove/gate:
+
+- boot COUNTs
+- redundant boot integrity
+- unconditional value_raw migration update
+
+Target:
+
+    zero observation-table statements on warm boot
+
+Test exact startup SQL behavior.
+
+------------------------------------------------------------
+7B-3 — YEARS CACHE
+------------------------------------------------------------
+
+Use content_version/years_json.
+
+Test:
+
+- changed refresh invalidates
+- unchanged refresh does not invalidate
+- deletion/addition affects correct years
+- global union remains correct
+
+------------------------------------------------------------
+7B-4 — TIMESTAMP / STATUS CLEANUP
+------------------------------------------------------------
+
+Remove duplicate:
+
+    MAX(completed_at)
+    latest-run
+    COUNT
+
+queries within one status request where existing metadata can be reused.
+
+Ensure no semantic response change.
+
+------------------------------------------------------------
+7B-5 — ANALYTICAL QUERY CLEANUP
+------------------------------------------------------------
+
+Fix only proven redundant reads:
+
+- skip getYearRange when explicit bounds exist
+- coverage consolidation
+- repeated fingerprint/vintage lookup reuse
+- other confirmed duplicates
+
+Do NOT alter analytical math.
+
+------------------------------------------------------------
+7B-6 — FRONTEND REQUEST DEDUPLICATION
+------------------------------------------------------------
+
+After backend reads are cheap:
+
+- dedupe identical focus-yearly requests
+- preserve refresh-progress polling
+- reconsider watcher cadence only after measurement
+
+Do NOT make the frontend the freshness authority.
+
+------------------------------------------------------------
+7B-7 — O10
+------------------------------------------------------------
+
+NO CHANGE by default.
+
+Only revisit if measurement proves a safe exact optimization.
+
+------------------------------------------------------------
+7B-8 — FULL MEASUREMENT / ACCEPTANCE
+------------------------------------------------------------
+
+Measure:
+
+- Turso rows read
+- Turso rows written
+- request latency
+- boot latency
+- status latency
+- ranking latency
+- movement latency
+- compare latency
+- analysis latency
+- O10 refresh read cost
+- full refresh cost
+- local SQLite workload
+- Turso workload
+
+Compare before/after.
+
+====================================================================
+MANDATORY TEST GATES
+====================================================================
+
+BEFORE any production read path switches to dataset_state:
+
+1. dataset_state == exact scan-derived count
+2. dataset_state == exact scan-derived maxFetchedAt
+3. dataset_state == exact stored vintage
+4. years_json == exact source-derived years
+5. global years == union of metric years
+6. content_version changes iff content changes
+7. unchanged refresh does not advance content_version
+8. lastSuccessAt still advances on unchanged success
+9. failed refresh does not advance lastSuccessAt
+10. failed refresh does not advance content_version
+11. rollback restores dataset_state
+12. crash restores dataset_state
+13. integrity state matches content_version
+14. local and Turso semantics match
+
+====================================================================
+MANDATORY ZERO-DATA-LOSS EQUIVALENCE HARNESS
+====================================================================
+
+Use the existing equivalence infrastructure.
+
+Compare:
+
+    old pipeline/database
+    VS
+    optimized pipeline/database
+
+Compare:
+
+- all observations
+- all values
+- value_raw
+- indicators
+- countries
+- aggregates
+- years
+- nulls
+- zeros
+- duplicates
+- stored vintage
+- fingerprint
+- years metadata
+- dataset_state
+- content_version
+- API responses
+- rankings
+- movement
+- compare
+- analysis
+
+ONE DIFFERENCE = FAIL.
+
+====================================================================
+READ AVAILABILITY DURING REFRESH
+====================================================================
+
+Preserve:
+
+    old committed generation
+       ↓
+    readable during refresh
+       ↓
+    new generation visible only after COMMIT
+
+During refresh:
+
+    users must not wait for a full database scan
+    users must not receive partial content
+
+After successful commit:
+
+    new targeted reads may see new content.
+
+On rollback:
+
+    old targeted reads remain available.
+
+====================================================================
+EXPECTED TARGET ARCHITECTURE
+====================================================================
+
+Target:
+
+    WORLD BANK
+        ↓
+    backend TTL
+        ↓
+    O10 exact comparison
+        ↓
+    O7 atomic transaction
+        ↓
+    observations + dataset_state + metadata
+        ↓
+    COMMIT
+        ↓
+    TURSO / LOCAL SQLITE
+        ↓
+    backend targeted indexed SQL
+        ↓
+    bounded results
+        ↓
+    backend services
+        ↓
+    API
+        ↓
+    FRONTEND
+
+STATUS:
+
+    frontend request
+        ↓
+    backend
+        ↓
+    dataset_state + fetch_runs + lock
+        ↓
+    lightweight response
+
+RANKING:
+
+    request
+        ↓
+    metadata freshness check
+        ↓
+    indicator/year indexed query
+        ↓
+    required rows only
+        ↓
+    calculation
+        ↓
+    response
+
+RENDER RESTART:
+
+    connect
+        ↓
+    lightweight metadata
+        ↓
+    ready
+        ↓
+    targeted data on demand
+
+REFRESH:
+
+    old generation stays readable
+        ↓
+    background exact comparison
+        ↓
+    atomic publish
+        ↓
+    commit
+        ↓
+    new content_version
+        ↓
+    future targeted reads see new data
+
+FAILURE:
+
+    rollback observations + metadata
+        ↓
+    old generation remains readable
+        ↓
+    lastSuccessAt unchanged
+        ↓
+    retry logic unchanged
+
+====================================================================
+NON-GOALS
+====================================================================
+
+DO NOT:
+
+- load entire DB into RAM
+- cache entire DB in frontend
+- move analytics into frontend
+- reduce integrity guarantees
+- remove O8 completeness check
+- weaken O10 exact equality
+- use probabilistic fingerprints
+- use lastupdated-only skipping
+- make TTL approximate
+- make frontend decide freshness
+- create Turso-only SQL
+- break local SQLite
+- introduce unnecessary denormalization
+- introduce materialized analytical copies without separate approval
+- add indexes without query-plan justification
+- change API response shapes
+- change methodology
+- change country defaults
+- change GEO
+- change PWA
+- change refresh semantics
+
+====================================================================
+FINAL DELIVERABLE BEFORE IMPLEMENTATION
+====================================================================
+
+Before modifying code, return:
+
+1. Corrections to the original Phase 7B plan.
+2. Final dataset_state schema.
+3. Exact field semantics.
+4. content_version semantics.
+5. integrity_verified_content_version semantics.
+6. years_json invariants.
+7. Atomic transaction design.
+8. Shadow-equivalence strategy.
+9. Migration/bootstrap strategy.
+10. Drift detection/self-healing strategy.
+11. Exact files/functions to change.
+12. Exact queries to add/remove.
+13. Exact queries that remain intentionally full-scan.
+14. Local SQLite behavior.
+15. Turso behavior.
+16. Render restart behavior.
+17. Data-status behavior.
+18. Frontend watcher behavior.
+19. Failure/rollback behavior.
+20. Test matrix.
+21. Before/after read-budget model.
+22. Expected latency/read effects.
+23. Risk matrix.
+24. Implementation order.
+
+DO NOT IMPLEMENT UNTIL THIS PLAN HAS BEEN REVIEWED.
+
+====================================================================
+FINAL ACCEPTANCE STANDARD
+====================================================================
+
+The optimization is successful ONLY if:
+
+    SAME DATA
+    +
+    SAME ANALYTICS
+    +
+    SAME API CONTRACT
+    +
+    SAME TTL
+    +
+    SAME REFRESH FAILURE SEMANTICS
+    +
+    SAME STALE-DATA AVAILABILITY
+    +
+    SAME O7 ATOMICITY
+    +
+    SAME O10 EXACTNESS
+    +
+    LOWER UNNECESSARY READS
+    +
+    NO USER-PERFORMANCE REGRESSION
+
+If any correctness invariant cannot be proven:
+
+    STOP IMPLEMENTATION
+    report the blocker
+    retain the existing scan-based path
+
+Never trade correctness for quota savings.
+
+====================================================================
+IMPORTANT
+====================================================================
+
+The Phase 7B report is the evidence baseline.
+
+THIS ANCHOR OVERRIDES IT WHERE IT ADDS SAFETY REQUIREMENTS.
+
+The purpose is not to redesign the project.
+
+The purpose is to make the existing architecture:
+
+    more read-efficient
+    while remaining exactly data-equivalent
+    and fully compatible with both Turso and local SQLite.
+
+NO SOURCE CODE CHANGES IN THIS PLANNING STAGE.

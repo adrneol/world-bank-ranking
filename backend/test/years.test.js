@@ -17,9 +17,15 @@ import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
 process.env.WB_RETRY_BASE_MS = '20';
 
 let stub = null;
+// Opt-in row transform for tests that need a changed second publish
+// (null = serve fixtures verbatim).
+let rowsTransform = null;
 
 test.before(async () => {
-  stub = await startStubWorldBank();
+  stub = await startStubWorldBank({
+    seriesRowsFor: (metricKey, baseRows) =>
+      rowsTransform ? rowsTransform(metricKey, baseRows) : baseRows,
+  });
   useStubBaseUrl(stub.baseUrl);
 });
 
@@ -191,32 +197,46 @@ test('5. warm cache serves the same result reference', async () => {
   }
 });
 
-// 6. Publish invalidates: a new successful generation recomputes.
+// 6. Publish invalidates: a content-changing publish recomputes; an
+// unchanged one correctly does not (content_version key).
 test('6. successful publish advances the generation and refreshes years', async () => {
   const { refreshData } = await import('../src/wb/ingest.js');
   const { getCachedAvailableYears, resetYearsCache } = await import('../src/services/yearsCache.js');
-  const { upsertObservation, getIndicatorByMetricKey, startFetchRun, finishFetchRun } =
-    await import('../src/db/repository.js');
   resetYearsCache();
   const db = await freshDb();
   try {
     stub.reset();
+    rowsTransform = null;
     await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-years-publish' });
     const before = await getCachedAvailableYears(db);
     assert.equal(await getCachedAvailableYears(db), before);
 
-    // Simulate the next successful publish: one more year plus a recorded
-    // success run (what refreshData's staged publish always produces).
-    const indicatorId = (await getIndicatorByMetricKey(db, 'nominal_current')).id;
-    await upsertObservation(db, { countryId: 'IND', indicatorId, year: 2026, value: 1, wbLastUpdated: '2026-07-13' });
-    const runId = await startFetchRun(db, { trigger: 'test', endpoint: 'test', requestedStartYear: 2026, requestedEndYear: 2026, fetchedStartYear: 2026, fetchedEndYear: 2026, indicators: 'x' });
-    await finishFetchRun(db, runId, { status: 'success' });
+    // A real second publish with identical source data is an unchanged
+    // refresh: freshness renews but content (and the years answer) is
+    // identical, so the cache correctly stays valid.
+    const unchanged = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-years-same' });
+    assert.equal(unchanged.status, 'success');
+    assert.equal(await getCachedAvailableYears(db), before);
+
+    // A real content-changing publish (one added year) invalidates: the
+    // change flows through the O7 publish that maintains dataset_state.
+    // The refresh range reaches 2026 so the appended row is inside the
+    // fetched window (endYear 2025 would filter it out at the stub).
+    stub.reset();
+    rowsTransform = (metricKey, baseRows) => {
+      if (metricKey !== 'nominal_current') return baseRows;
+      return [...baseRows, { date: '2026', value: '9999.99', countryiso3code: 'IND' }];
+    };
+    const changed = await refreshData({ db, startYear: 2024, endYear: 2026, trigger: 'test-years-change' });
+    assert.equal(changed.status, 'success');
+    assert.ok(changed.rowsUpserted > 0);
 
     const after = await getCachedAvailableYears(db);
-    assert.notEqual(after, before, 'new generation must recompute');
+    assert.notEqual(after, before, 'new content generation must recompute');
     assert.ok(after.years.includes(2026), 'newly published year is available');
     assert.deepEqual(after.perMetric.nominal_current.slice(-1), [2026]);
   } finally {
+    rowsTransform = null;
     db.close();
     resetYearsCache();
   }

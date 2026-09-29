@@ -50,11 +50,17 @@ const HISTORICAL_ROWS = {
 };
 
 let stub = null;
+// Opt-in synthetic additions for tests that publish new rows through the
+// real refresh path (null = historical fixtures only).
+let extraRows = null;
 
 test.before(async () => {
   stub = await startStubWorldBank({
-    seriesRowsFor: (metricKey, baseRows) =>
-      HISTORICAL_ROWS[metricKey] ? [...baseRows, ...HISTORICAL_ROWS[metricKey]] : baseRows,
+    seriesRowsFor: (metricKey, baseRows) => {
+      const hist = HISTORICAL_ROWS[metricKey] ? [...baseRows, ...HISTORICAL_ROWS[metricKey]] : baseRows;
+      const extra = extraRows?.[metricKey];
+      return extra ? [...hist, ...extra] : hist;
+    },
   });
   useStubBaseUrl(stub.baseUrl);
 });
@@ -220,25 +226,43 @@ test('E+F. endpoint growth needs both endpoints; like-for-like uses real availab
 
 test('H. a future observation appears automatically through /api/years', async () => {
   const { db, repository } = await seedHistoricalDb();
-  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
-  await repository.upsertObservations(db, [{ countryId: 'IND', indicatorId: indicator.id, year: 2026, value: 2800.5 }]);
-
-  const { listAvailableYears } = await import('../src/db/repository.js');
-  assert.ok((await listAvailableYears(db)).years.includes(2026));
-
-  const { createApp } = await import('../src/server.js');
-  const app = createApp({ db, autoRefresh: false });
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
+  void repository;
+  // Publish the future row through the real O7 path (direct observation
+  // writes bypass dataset_state maintenance by design — production writes
+  // flow exclusively through refreshData).
+  extraRows = {
+    nominal_current: [wbRow(PCAP_CODE, 'GDP per capita (current US$)', 'IND', 'India', 2026, 2800.5)],
+  };
   try {
-    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/years`);
-    const body = await res.json();
-    assert.ok(body.years.includes(2026), 'a newly stored future year is selectable with no code change');
+    const { refreshData } = await import('../src/wb/ingest.js');
+    const summary = await refreshData({
+      db,
+      startYear: 1960,
+      endYear: 2026,
+      indicators: ['nominal_current', 'total_current'],
+      trigger: 'test-historical-future',
+    });
+    assert.equal(summary.status, 'success');
+
+    const { listAvailableYears } = await import('../src/db/repository.js');
+    assert.ok((await listAvailableYears(db)).years.includes(2026));
+
+    const { createApp } = await import('../src/server.js');
+    const app = createApp({ db, autoRefresh: false });
+    const server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.address().port}/api/years`);
+      const body = await res.json();
+      assert.ok(body.years.includes(2026), 'a newly stored future year is selectable with no code change');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    extraRows = null;
+    db.close();
   }
-  db.close();
 });
 
 test('I. historical coverage stays per-metric and per-subject', async () => {

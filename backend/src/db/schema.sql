@@ -174,3 +174,63 @@ CREATE TABLE IF NOT EXISTS refresh_locks (
 
 INSERT OR IGNORE INTO refresh_locks (id, locked, updated_at)
   VALUES (1, 0, datetime('now'));
+
+-- ------------------------------------------------------------
+-- dataset_state: DERIVED authoritative metadata about the committed
+-- observations (Phase 7B read optimization).
+-- ------------------------------------------------------------
+-- Why this table exists:
+-- Several hot paths (data-status, freshness checks, years lists, integrity
+-- memo keys) were answering metadata questions with full observation-table
+-- scans (COUNT(*), MAX(), GROUP BY). This single row maintains those answers
+-- transactionally so readers get them in ~1 row read.
+--
+-- ZERO second-source-of-truth: every field is derived from the observations
+-- table and written ONLY inside the same O7 publish transaction that changes
+-- observations (see wb/ingest.js). A rollback restores the previous row
+-- automatically. Readers MUST treat an absent row as "unknown" and fall back
+-- to the legacy scan path — never invent values.
+--
+-- Field semantics (exact):
+--   observation_count: COUNT(*) over ALL observations rows (eligible and
+--     aggregate alike), exactly as countObservations() defines it.
+--   max_fetched_at: MAX(fetched_at) over all observations, exactly as the
+--     dataset fingerprint defines it.
+--   max_wb_last_updated: MAX(wb_last_updated) over non-null values, exactly
+--     as getMaxWbLastUpdated() defines it. This is the STORED dataset
+--     vintage, not the latest checked source-run vintage.
+--   years_json: JSON {perMetric: {metricKey: [years]}, years: [...]} built by
+--     the same grouping as listAvailableYears(): eligible observations only,
+--     per-metric ascending, global = exact union of the per-metric sets.
+--   content_version: increments by exactly one per successful publish that
+--     rewrote ≥1 observation; unchanged on unchanged/failed/partial
+--     refreshes. Starts at 1 on first bootstrap. This is the DATA-CONTENT
+--     generation and MUST NOT be confused with lastSuccessAt (retrieval
+--     freshness, owned by fetch_runs) or the source vintage.
+--   integrity_verified_content_version: the content_version that last passed
+--     the full expensive integrity battery, or NULL when unverified/stale.
+--     Set only after an actual verification run, conditional on the version
+--     being unchanged since that run started.
+--   integrity_checks_json: the expensive-battery check results (C/D/E/F)
+--     from that verification, so a restarted process can serve the exact
+--     verified report for unchanged content without rescanning. Deterministic
+--     per content generation; validated by name on read, never trusted blind.
+--   updated_run_id / updated_at: audit trail (which success run wrote it).
+--
+-- NOTE: no INSERT here on purpose. A freshly created table has NO row;
+-- absence means "not yet derived" and every reader falls back to scans.
+-- The row is created by the publish path (or one-time bootstrap), never by
+-- schema application — otherwise a legacy populated database would briefly
+-- claim count 0.
+CREATE TABLE IF NOT EXISTS dataset_state (
+  id                               INTEGER PRIMARY KEY CHECK (id = 1),
+  observation_count                INTEGER NOT NULL DEFAULT 0,
+  max_fetched_at                   TEXT,
+  max_wb_last_updated              TEXT,
+  years_json                       TEXT NOT NULL DEFAULT '{"perMetric":{},"years":[]}',
+  content_version                  INTEGER NOT NULL DEFAULT 0,
+  integrity_verified_content_version INTEGER,
+  integrity_checks_json          TEXT,
+  updated_run_id                   INTEGER,
+  updated_at                       TEXT NOT NULL
+);

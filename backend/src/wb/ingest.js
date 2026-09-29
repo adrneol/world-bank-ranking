@@ -48,10 +48,12 @@ import { getDb } from '../db/index.js';
 import {
   acquireRefreshLock,
   canonicalDecimalString,
+  computeDatasetState,
   countObservations,
   deleteObservationsForIndicatorYears,
   finishFetchRun,
   forceReleaseRefreshLock,
+  getDatasetState,
   getIndicatorByMetricKey,
   getLastSuccessfulFetchTime,
   getLatestFetchRun,
@@ -62,7 +64,8 @@ import {
   startFetchRun,
   transaction,
   upsertCountriesInner,
-  upsertIndicator,
+  upsertDatasetStateInner,
+  upsertIndicatorInner,
   upsertIngestYearStats,
   upsertIngestYearStatsInner,
   upsertObservationsInner,
@@ -682,6 +685,11 @@ export async function refreshData(options = {}) {
       // Countries are published; the staged copy is now provably unneeded.
       meta.countries = EMPTY_RELEASED_ROWS;
       let succeededCount = 0;
+      // Phase 7B: true once ≥1 indicator's observations were rewritten in
+      // this attempt. Drives content_version (data-content generation):
+      // value mutations with a stable row count still advance it, while an
+      // all-unchanged attempt provably leaves every byte untouched.
+      let contentChanged = false;
       for (const metricKey of metricKeys) {
         lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
 
@@ -764,7 +772,8 @@ export async function refreshData(options = {}) {
         // publish reads them (the refresh summary keeps metadata plus an
         // empty row list, counters untouched).
         totals.rowsUpserted += result.rowsUpserted;
-        await upsertIndicator(tx, {
+        contentChanged = true;
+        await upsertIndicatorInner(tx, {
           ...metric,
           name: result.indicatorName,
           unit: result.indicatorUnit,
@@ -799,6 +808,27 @@ export async function refreshData(options = {}) {
       }
 
       await upsertIngestYearStatsInner(tx, runId, yearStats);
+      // Phase 7B dataset_state: maintained INSIDE the same atomic publish
+      // transaction, so observations and metadata commit or roll back
+      // together — a partial/failed attempt can never leave a half-updated
+      // row behind. Changed content recomputes the exact scan-derived values
+      // (rare: only when observations actually changed) and advances
+      // content_version exactly once; an all-unchanged attempt leaves every
+      // field untouched (freshness still advances via the success run below).
+      // A missing row (legacy database) is bootstrapped once, starting at
+      // content_version 1.
+      {
+        const previous = await getDatasetState(tx);
+        if (contentChanged || !previous) {
+          const computed = await computeDatasetState(tx);
+          await upsertDatasetStateInner(tx, {
+            ...computed,
+            contentVersion: (previous?.contentVersion ?? 0) + 1,
+            integrityVerifiedContentVersion: null,
+            updatedRunId: runId,
+          });
+        }
+      }
       await finishFetchRun(tx, runId, {
         status: 'success',
         wbLastUpdated,
@@ -1034,7 +1064,11 @@ export async function getCacheStatus(db, options = {}) {
   const ttlHours = Number(options.ttlHours ?? config.cacheTtlHours);
   const now = options.now ?? Date.now();
   const lastSuccessAt = await getLastSuccessfulFetchTime(db);
-  const observations = await countObservations(db);
+  // Phase 7B: the observation count is metadata when derived (1 row read);
+  // absent row falls back to the legacy COUNT(*) scan. TTL arithmetic is
+  // unchanged: strict ageHours < ttlHours on the success-run timestamp.
+  const datasetState = await getDatasetState(db);
+  const observations = datasetState ? datasetState.observationCount : await countObservations(db);
 
   let ageHours = null;
   if (lastSuccessAt) {

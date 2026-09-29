@@ -15,6 +15,8 @@
  */
 
 let cached = { key: null, value: null };
+let cheapCached = { key: null, value: null };
+let expensiveCached = { key: null, value: null };
 
 /**
  * Refresh-generation key for the memo. Both parts advance only when a new
@@ -45,6 +47,48 @@ export async function getCachedIntegrity(key, compute) {
 /** Test seam: clear the memo (also used if the process ever needs it). */
 export function resetIntegrityCache() {
   cached = { key: null, value: null };
+  cheapCached = { key: null, value: null };
+  expensiveCached = { key: null, value: null };
+}
+
+/**
+ * Phase 7B split memo.
+ *
+ * The integrity report has two independent freshness dimensions, so one slot
+ * cannot memoize it without either rescanning or going stale:
+ * - cheap battery (null guard, aggregate typing, run/metadata/registry
+ *   checks): inputs change only inside a successful publish, so the latest
+ *   success run id is the exact key. Recomputes ~once per success run.
+ * - expensive battery (orphan/duplicate/year/value full scans): inputs are
+ *   the observations table alone, so content_version is the exact key.
+ *   Unchanged refreshes (new run, same content) reuse the verified report.
+ */
+ /** Exact key for the cheap battery: the latest successful publish. */
+export function cheapIntegrityKey(runId) {
+  return `cheap:success:${String(runId ?? 'none')}`;
+}
+
+/** Exact key for the expensive battery: the observation-content generation. */
+export function expensiveIntegrityKey(contentVersion) {
+  return `expensive:content:${String(contentVersion ?? 'none')}`;
+}
+
+async function getCachedSlot(slot, key, compute) {
+  if (slot.key === key && slot.value !== null) {
+    return { report: slot.value, fromCache: true };
+  }
+  const report = await compute();
+  slot.key = key;
+  slot.value = report;
+  return { report, fromCache: false };
+}
+
+export async function getCachedCheapIntegrity(key, compute) {
+  return getCachedSlot(cheapCached, key, compute);
+}
+
+export async function getCachedExpensiveIntegrity(key, compute) {
+  return getCachedSlot(expensiveCached, key, compute);
 }
 
 export default { integrityCacheKey, getCachedIntegrity, resetIntegrityCache };
