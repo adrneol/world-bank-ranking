@@ -28,22 +28,22 @@ export function normalizeNeighborCount(value, fallback = config.neighborsDefault
 }
 
 /** Latest year with stored data for an indicator (or the whole database). */
-export function resolveLatestYear(db, indicatorId = null) {
-  return getYearRange(db, indicatorId).maxYear;
+export async function resolveLatestYear(db, indicatorId = null) {
+  return (await getYearRange(db, indicatorId)).maxYear;
 }
 
 /**
  * @param {object} db
  * @param {{year?:number, metricKey?:string, neighbors?:number, focusIso3?:string}} [options]
  */
-export function buildRankVerification(db, options = {}) {
+export async function buildRankVerification(db, options = {}) {
   const metricKey = options.metricKey ?? METRIC_KEYS[0];
   const metric = METRICS[metricKey];
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
 
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   const neighbors = normalizeNeighborCount(options.neighbors);
-  const indicator = getIndicatorByMetricKey(db, metricKey);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
   // See fullRanking.js: direction from the registry; NEUTRAL refused.
   const direction = directionFor(metric);
 
@@ -58,7 +58,7 @@ export function buildRankVerification(db, options = {}) {
       above: [],
       below: [],
       total: 0,
-      eligibleUniverse: countEligibleCountries(db),
+      eligibleUniverse: await countEligibleCountries(db),
       source: sourceAttribution(),
     };
   }
@@ -79,13 +79,13 @@ export function buildRankVerification(db, options = {}) {
       above: [],
       below: [],
       total: 0,
-      eligibleUniverse: countEligibleCountries(db),
+      eligibleUniverse: await countEligibleCountries(db),
       source: sourceAttribution(),
     };
   }
 
-  const year = options.year ?? resolveLatestYear(db, indicator.id);
-  const eligibleUniverse = countEligibleCountries(db);
+  const year = options.year ?? (await resolveLatestYear(db, indicator.id));
+  const eligibleUniverse = await countEligibleCountries(db);
 
   if (year === null || year === undefined) {
     return {
@@ -103,7 +103,7 @@ export function buildRankVerification(db, options = {}) {
     };
   }
 
-  const { ranked, total } = rankByValue(getEligibleObservations(db, indicator.id, year), direction);
+  const { ranked, total } = rankByValue(await getEligibleObservations(db, indicator.id, year), direction);
   const focusIndex = ranked.findIndex((row) => row.iso3 === focusIso3);
   const focusRow = focusIndex >= 0 ? ranked[focusIndex] : null;
 

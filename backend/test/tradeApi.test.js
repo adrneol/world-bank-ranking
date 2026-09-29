@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { getDb } from '../src/db/index.js';
+import { queryGet } from '../src/db/driver.js';
 import { createApp } from '../src/server.js';
 import { buildTradeMovement, listTradeCountryGroups } from '../src/services/tradeMovementService.js';
 
@@ -49,7 +50,7 @@ test('Trade rejects invalid basis + non-Trade metric (400)', async () => {
 
 test('Exports annual 2004→2024 (India): raw values, DESC rank, USD gap', async () => {
   const db = getDb();
-  const r = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2024, focusIso3: 'IND' });
+  const r = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2024, focusIso3: 'IND' });
   assert.equal(r.available, true);
   assert.equal(r.kind, 'annual');
   const vals = r.observed.map((o) => o.focus.value);
@@ -67,12 +68,12 @@ test('Exports annual 2004→2024 (India): raw values, DESC rank, USD gap', async
 
 test('Exports CAGR 2004→2014 uses endpoints only (10y annualization)', async () => {
   const db = getDb();
-  const r = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_cagr', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_cagr', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2004, 2014]);
-  const ind = db.prepare("SELECT id FROM indicators WHERE metric_key='exports_current'").get();
-  const s = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', 2004).value;
-  const e = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', 2014).value;
+  const ind = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='exports_current'");
+  const s = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', 2004])).value;
+  const e = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', 2014])).value;
   const expected = (Math.pow(e / s, 1 / 10) - 1) * 100;
   assert.ok(Math.abs(o.focus.value - expected) < 1e-9, `got ${o.focus.value} expected ${expected}`);
   assert.equal(o.focus.gapUnit, 'percentage points');
@@ -82,8 +83,8 @@ test('Exports CAGR 2004→2014 uses endpoints only (10y annualization)', async (
 
 test('Exports total 2004→2014 is inclusive (11 obs) and average = total/11', async () => {
   const db = getDb();
-  const t = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_total', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
-  const a = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_average', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const t = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_total', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const a = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_average', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.equal(t.observed[0].requiredYears.length, 11);
   assert.equal(t.observed[0].requiredYears[0], 2004);
   assert.equal(t.observed[0].requiredYears[10], 2014);
@@ -95,15 +96,15 @@ test('Exports total 2004→2014 is inclusive (11 obs) and average = total/11', a
 
 test('Trade LFL: total needs full 2004..2024 span; CAGR needs endpoints+positive starts', async () => {
   const db = getDb();
-  const t = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_total', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const t = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_total', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(t.likeForLike.map((o) => o.eligibleCount), [t.likeForLike[0].eligibleCount, t.likeForLike[0].eligibleCount, t.likeForLike[0].eligibleCount]);
-  const c = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_cagr', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const c = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_period_cagr', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(c.likeForLike.map((o) => o.eligibleCount), [c.likeForLike[0].eligibleCount, c.likeForLike[0].eligibleCount, c.likeForLike[0].eligibleCount]);
 });
 
 test('Country groups: dynamic income/region/lending, no Developed labels', async () => {
   const db = getDb();
-  const g = listTradeCountryGroups(db);
+  const g = await listTradeCountryGroups(db);
   assert.ok(g.supported.income_level.length >= 4);
   assert.equal(g.unsupportedRequestedLabels.status, 'NOT_SUPPORTED');
   assert.ok(g.nominalCaveat.includes('nominal'));
@@ -111,11 +112,11 @@ test('Country groups: dynamic income/region/lending, no Developed labels', async
 
 test('Group filter restricts before validity; unknown group fails closed', async () => {
   const db = getDb();
-  const all = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA' });
-  const grp = buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'High income' } });
+  const all = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA' });
+  const grp = await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'High income' } });
   assert.ok(grp.observed[0].eligibleCount <= all.observed[0].eligibleCount);
-  assert.throws(
-    () => buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
+  await assert.rejects(
+    async () => await buildTradeMovement(db, { metricKey: 'exports_current', basis: 'exp_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
     /Unknown income_level/,
   );
 });

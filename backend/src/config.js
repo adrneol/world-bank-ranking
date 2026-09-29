@@ -1532,6 +1532,19 @@ export const config = Object.freeze({
     providerUrl: str('GEO_PROVIDER_URL', 'https://ipwho.is/{ip}?fields=country_code'),
     timeoutMs: int('GEO_TIMEOUT_MS', 3000),
   }),
+
+  // Database backend selection (Phase 6A). Explicit DB_MODE wins
+  // ('turso' or 'local'); otherwise Turso is selected whenever
+  // TURSO_DATABASE_URL is configured, else the local SQLite file.
+  // Secrets are read here and never logged or returned by any endpoint.
+  dbMode: str('DB_MODE', '').trim().toLowerCase(),
+  tursoDatabaseUrl: str('TURSO_DATABASE_URL', '').trim(),
+  tursoAuthToken: str('TURSO_AUTH_TOKEN', ''),
+  // Guarded local fallback: when the Turso primary is unreachable at boot
+  // AND a valid non-empty local database exists, serve from it (with a loud
+  // warning) instead of failing. Never masks an outage with an empty
+  // database, and never triggers a full seed merely because local is empty.
+  allowLocalDbFallback: bool('ALLOW_LOCAL_DB_FALLBACK', true),
 });
 
 /** Data-source attribution used throughout API responses and the UI. */

@@ -24,7 +24,7 @@ import { normalizeNeighborCount } from './rankVerification.js';
  * @param {object} db
  * @param {{year?:number, metricKey?:string, neighbors?:number, focusIso3?:string}} [options]
  */
-export function buildYoyVerification(db, options = {}) {
+export async function buildYoyVerification(db, options = {}) {
   const metricKey = options.metricKey ?? METRIC_KEYS[0];
   const metric = METRICS[metricKey];
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
@@ -49,8 +49,8 @@ export function buildYoyVerification(db, options = {}) {
       source: sourceAttribution(),
     };
   }
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const eligibleUniverse = countEligibleCountries(db);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const eligibleUniverse = await countEligibleCountries(db);
 
   if (!indicator) {
     return {
@@ -68,7 +68,7 @@ export function buildYoyVerification(db, options = {}) {
     };
   }
 
-  const year = options.year ?? getYearRange(db, indicator.id).maxYear;
+  const year = options.year ?? (await getYearRange(db, indicator.id)).maxYear;
   if (year === null || year === undefined) {
     return {
       available: false,
@@ -85,8 +85,8 @@ export function buildYoyVerification(db, options = {}) {
     };
   }
 
-  const currentRows = getEligibleObservations(db, indicator.id, year);
-  const previousRows = getEligibleObservations(db, indicator.id, year - 1);
+  const currentRows = await getEligibleObservations(db, indicator.id, year);
+  const previousRows = await getEligibleObservations(db, indicator.id, year - 1);
 
   const coverage = buildYoyCoverage({
     metricKey,
@@ -177,13 +177,13 @@ export function buildYoyVerification(db, options = {}) {
  * @param {{year?:number, metricKey?:string, page?:number, pageSize?:number,
  *          search?:string, focusIso3?:string}} [options]
  */
-export function buildFullYoyRanking(db, options = {}) {
+export async function buildFullYoyRanking(db, options = {}) {
   const metricKey = options.metricKey ?? METRIC_KEYS[0];
   const metric = METRICS[metricKey];
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
 
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const eligibleUniverse = countEligibleCountries(db);
+  const eligibleUniverse = await countEligibleCountries(db);
   // Same YOY capability gate as buildYoyVerification (see above).
   if (!metric.validChangeTypes.includes('YOY')) {
     return {
@@ -197,7 +197,7 @@ export function buildFullYoyRanking(db, options = {}) {
       source: sourceAttribution(),
     };
   }
-  const indicator = getIndicatorByMetricKey(db, metricKey);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
 
   if (!indicator) {
     return {
@@ -212,13 +212,13 @@ export function buildFullYoyRanking(db, options = {}) {
     };
   }
 
-  const year = options.year ?? getYearRange(db, indicator.id).maxYear;
+  const year = options.year ?? (await getYearRange(db, indicator.id)).maxYear;
   const built =
     year === null || year === undefined
       ? { rows: [], pairs: 0 }
       : buildYoyRows(
-          getEligibleObservations(db, indicator.id, year),
-          getEligibleObservations(db, indicator.id, year - 1),
+          await getEligibleObservations(db, indicator.id, year),
+          await getEligibleObservations(db, indicator.id, year - 1),
         );
   const { ranked, total } = rankByYoy(built.rows);
 

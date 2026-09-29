@@ -23,9 +23,13 @@
  * check() returns a report; it never throws on a failed CHECK (only on a
  * broken database connection). Callers decide whether a failure blocks
  * startup/refresh or is logged as a warning.
+ *
+ * Phase 6A: async over the shared driver (Turso primary, local fallback).
+ * Check semantics are unchanged.
  */
 
 import { ALL_METRIC_KEYS, METRICS, PRODUCTION_METRIC_KEYS, assertRegistryIntegrity } from '../config.js';
+import { queryAll, queryGet } from '../db/driver.js';
 
 const EXPECTED_CODES = Object.freeze(PRODUCTION_METRIC_KEYS.map((k) => METRICS[k].indicatorCode).sort());
 const EXPECTED_METRIC_KEYS = Object.freeze([...PRODUCTION_METRIC_KEYS].sort());
@@ -34,11 +38,11 @@ function result(check, passed, detail = null) {
   return { check, status: passed ? 'pass' : 'fail', detail };
 }
 
-export function runIntegrityChecks(db) {
+export async function runIntegrityChecks(db) {
   const checks = [];
 
   // A. No NULL values could be inserted (schema is NOT NULL; belt and braces).
-  const nullValues = db.prepare('SELECT COUNT(*) AS n FROM observations WHERE value IS NULL').get().n;
+  const nullValues = (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE value IS NULL')).n;
   checks.push(result('A.null_value', nullValues === 0, { nullRows: nullValues }));
 
   // B. Aggregate typing consistency (Phase 5 stores official World Bank
@@ -46,16 +50,18 @@ export function runIntegrityChecks(db) {
   // Proves current metadata flags match the latest successful run's universe
   // snapshot: a flipped flag would silently move rows into or out of every
   // ranking universe. Aggregate/eligible row counts ride along as facts.
-  const aggregateRows = db
-    .prepare(
+  const aggregateRows = (
+    await queryGet(
+      db,
       `SELECT COUNT(*) AS n FROM observations o
        JOIN countries c ON c.id = o.country_id
        WHERE c.is_aggregate = 1`,
     )
-    .get().n;
-  const latestSnapshotRow = db
-    .prepare("SELECT universe_snapshot FROM fetch_runs WHERE status = 'success' AND universe_snapshot IS NOT NULL ORDER BY id DESC LIMIT 1")
-    .get();
+  ).n;
+  const latestSnapshotRow = await queryGet(
+    db,
+    "SELECT universe_snapshot FROM fetch_runs WHERE status = 'success' AND universe_snapshot IS NOT NULL ORDER BY id DESC LIMIT 1",
+  );
   let typingMismatches = [];
   let snapshotComparable = false;
   if (latestSnapshotRow?.universe_snapshot) {
@@ -65,7 +71,7 @@ export function runIntegrityChecks(db) {
       const aggregateIds = new Set(snapshot.aggregateIds ?? []);
       if (eligibleIds.size > 0 || aggregateIds.size > 0) {
         snapshotComparable = true;
-        const flags = db.prepare('SELECT id, is_aggregate FROM countries').all();
+        const flags = await queryAll(db, 'SELECT id, is_aggregate FROM countries');
         for (const row of flags) {
           const inEligible = eligibleIds.has(row.id);
           const inAggregate = aggregateIds.has(row.id);
@@ -93,35 +99,39 @@ export function runIntegrityChecks(db) {
   );
 
   // C. No orphan ISO3 (foreign key + ingest filter guarantee this).
-  const orphanRows = db
-    .prepare(
+  const orphanRows = (
+    await queryGet(
+      db,
       `SELECT COUNT(*) AS n FROM observations o
        LEFT JOIN countries c ON c.id = o.country_id
        WHERE c.id IS NULL`,
     )
-    .get().n;
+  ).n;
   checks.push(result('C.unknown_iso3', orphanRows === 0, { orphanRows }));
 
   // D. No duplicate (country, indicator, year) beyond the primary key.
-  const duplicateGroups = db
-    .prepare(
+  const duplicateGroups = (
+    await queryGet(
+      db,
       `SELECT COUNT(*) AS n FROM (
          SELECT country_id, indicator_id, year, COUNT(*) AS c
          FROM observations GROUP BY country_id, indicator_id, year HAVING c > 1
        )`,
     )
-    .get().n;
+  ).n;
   checks.push(result('D.duplicate_observation', duplicateGroups === 0, { duplicateGroups }));
 
   // E. Years must be plausible WDI years (World Bank series start in 1960).
   const thisYear = new Date().getFullYear();
-  const invalidYears = db
-    .prepare('SELECT COUNT(*) AS n FROM observations WHERE year IS NULL OR year < 1960 OR year > ?')
-    .get(thisYear + 2).n;
+  const invalidYears = (
+    await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE year IS NULL OR year < 1960 OR year > ?', [
+      thisYear + 2,
+    ])
+  ).n;
   checks.push(result('E.invalid_year', invalidYears === 0, { invalidYears }));
 
   // F. Every stored value must be finite (NaN/Infinity rejected at ingest).
-  const stored = db.prepare('SELECT value, value_raw FROM observations').all();
+  const stored = await queryAll(db, 'SELECT value, value_raw FROM observations');
   let nonFinite = 0;
   let rawMismatch = 0;
   for (const row of stored) {
@@ -140,9 +150,7 @@ export function runIntegrityChecks(db) {
   );
 
   // G. Latest successful run must record pagination/provenance counters.
-  const latest = db
-    .prepare("SELECT * FROM fetch_runs WHERE status = 'success' ORDER BY id DESC LIMIT 1")
-    .get();
+  const latest = await queryGet(db, "SELECT * FROM fetch_runs WHERE status = 'success' ORDER BY id DESC LIMIT 1");
   if (!latest) {
     checks.push(result('G.pagination_provenance', true, { note: 'no successful run yet (empty database)' }));
   } else {
@@ -167,7 +175,7 @@ export function runIntegrityChecks(db) {
   // database fails loudly instead of silently ranking a subset of the subjects.
   // Generalized from the historical "exactly four indicators" rule: it is not
   // weaker, it is registry-driven (it fails on any missing OR extra series).
-  const storedIndicators = db.prepare('SELECT code, metric_key FROM indicators').all();
+  const storedIndicators = await queryAll(db, 'SELECT code, metric_key FROM indicators');
   const codes = storedIndicators.map((r) => r.code).sort();
   const storedMetricKeys = storedIndicators.map((r) => r.metric_key).sort();
   const hPassed =
@@ -191,12 +199,15 @@ export function runIntegrityChecks(db) {
   );
 
   // I. India must hold observations for every ingested indicator.
-  const indicatorIds = db.prepare('SELECT id, metric_key FROM indicators').all();
+  const indicatorIds = await queryAll(db, 'SELECT id, metric_key FROM indicators');
   const missingIndia = [];
   for (const indicator of indicatorIds) {
-    const n = db
-      .prepare('SELECT COUNT(*) AS n FROM observations WHERE country_id = ? AND indicator_id = ?')
-      .get('IND', indicator.id).n;
+    const n = (
+      await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE country_id = ? AND indicator_id = ?', [
+        'IND',
+        indicator.id,
+      ])
+    ).n;
     if (n === 0) missingIndia.push(indicator.metric_key);
   }
   checks.push(
@@ -206,12 +217,12 @@ export function runIntegrityChecks(db) {
   );
 
   // J. Metadata consistency: no blank ids; eligible rows carry non-blank ISO3.
-  const blankIds = db
-    .prepare("SELECT COUNT(*) AS n FROM countries WHERE id IS NULL OR TRIM(id) = ''")
-    .get().n;
-  const eligibleBlankIso = db
-    .prepare("SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 0 AND (iso3 IS NULL OR TRIM(iso3) = '')")
-    .get().n;
+  const blankIds = (
+    await queryGet(db, "SELECT COUNT(*) AS n FROM countries WHERE id IS NULL OR TRIM(id) = ''")
+  ).n;
+  const eligibleBlankIso = (
+    await queryGet(db, "SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 0 AND (iso3 IS NULL OR TRIM(iso3) = '')")
+  ).n;
   checks.push(
     result('J.metadata_consistency', blankIds === 0 && eligibleBlankIso === 0, {
       blankIds,

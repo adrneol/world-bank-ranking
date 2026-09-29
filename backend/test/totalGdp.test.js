@@ -134,16 +134,16 @@ async function seedBothSubjects() {
   const { METRICS } = await import('../src/config.js');
 
   const universe = buildUniverse(GDP_METADATA);
-  repository.upsertCountries(db, universe.countries);
+  await repository.upsertCountries(db, universe.countries);
 
-  const seedMetric = (metricKey, valuesByYear) => {
-    repository.upsertIndicator(db, {
+  const seedMetric = async (metricKey, valuesByYear) => {
+    await repository.upsertIndicator(db, {
       ...METRICS[metricKey],
       name: METRICS[metricKey].label,
       unit: METRICS[metricKey].unit,
       source: 'World Development Indicators',
     });
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
     const rows = [];
     for (const [year, values] of Object.entries(valuesByYear)) {
       for (const [iso3, value] of Object.entries(values)) {
@@ -152,12 +152,12 @@ async function seedBothSubjects() {
     }
     // Aggregate rows bypass the eligible ranking universe (stored with entity
     // typing since Phase 5, never ranked): repository writes do not filter.
-    repository.upsertObservations(db, rows);
+    await repository.upsertObservations(db, rows);
     return indicator;
   };
 
-  seedMetric('total_current', { 2024: TOTAL_2024, 2025: TOTAL_2025 });
-  seedMetric('nominal_current', { 2025: PCAP_2025 });
+  await seedMetric('total_current', { 2024: TOTAL_2024, 2025: TOTAL_2025 });
+  await seedMetric('nominal_current', { 2025: PCAP_2025 });
   return { db, repository };
 }
 
@@ -165,20 +165,20 @@ test('denominators are independent per metric; aggregates never ranked', async (
   const { db, repository } = await seedBothSubjects();
   const { buildFullRanking } = await import('../src/services/fullRanking.js');
 
-  const total = buildFullRanking(db, { metricKey: 'total_current', year: 2025 });
+  const total = await buildFullRanking(db, { metricKey: 'total_current', year: 2025 });
   assert.equal(total.total, 4);
   assert.equal(total.metric.subject, 'gdp_total');
   assert.deepEqual(total.rows.map((r) => r.iso3), ['USA', 'DEU', 'IND', 'PAK']);
 
-  const perCapita = buildFullRanking(db, { metricKey: 'nominal_current', year: 2025 });
+  const perCapita = await buildFullRanking(db, { metricKey: 'nominal_current', year: 2025 });
   assert.equal(perCapita.total, 3);
   assert.equal(perCapita.metric.subject, 'gdp_per_capita');
 
   // The aggregate entity holds no RANKED observation under either indicator:
   // eligible reads exclude aggregate-typed rows by construction.
   for (const key of ['total_current', 'nominal_current']) {
-    const indicator = repository.getIndicatorByMetricKey(db, key);
-    const agg = repository.getEligibleObservations(db, indicator.id, 2025).filter((r) => r.iso3 === 'AFE');
+    const indicator = await repository.getIndicatorByMetricKey(db, key);
+    const agg = (await repository.getEligibleObservations(db, indicator.id, 2025)).filter((r) => r.iso3 === 'AFE');
     assert.equal(agg.length, 0, `${key}: aggregate must be excluded from rankings`);
   }
 });
@@ -188,12 +188,12 @@ test('per-capita panels never show Total GDP and vice versa', async () => {
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
   const { buildCoveragePanel } = await import('../src/services/coverageService.js');
 
-  const perCapita = buildIndiaYearlyRows(db, { startYear: 2025, endYear: 2025 });
+  const perCapita = await buildIndiaYearlyRows(db, { startYear: 2025, endYear: 2025 });
   assert.equal(perCapita.subject, 'gdp_per_capita');
   assert.deepEqual(perCapita.metricKeys, ['nominal_current', 'nominal_constant', 'ppp_current', 'ppp_constant']);
   assert.ok(!('total_current' in perCapita.rows[0]), 'no Total GDP cell in a per-capita row');
 
-  const total = buildIndiaYearlyRows(db, { startYear: 2024, endYear: 2025, subject: 'gdp_total' });
+  const total = await buildIndiaYearlyRows(db, { startYear: 2024, endYear: 2025, subject: 'gdp_total' });
   assert.equal(total.subject, 'gdp_total');
   const row2025 = total.rows.find((r) => r.year === 2025);
   assert.equal(row2025.total_current.indiaValue, IND_2025);
@@ -204,14 +204,14 @@ test('per-capita panels never show Total GDP and vice versa', async () => {
   );
   assert.ok(!('nominal_current' in row2025), 'no per-capita cell in a Total GDP row');
 
-  const coverageDefault = buildCoveragePanel(db, { year: 2025 });
+  const coverageDefault = await buildCoveragePanel(db, { year: 2025 });
   assert.deepEqual(coverageDefault.metrics.map((m) => m.metric.key), [
     'nominal_current',
     'nominal_constant',
     'ppp_current',
     'ppp_constant',
   ]);
-  const coverageTotal = buildCoveragePanel(db, { year: 2025, subject: 'gdp_total' });
+  const coverageTotal = await buildCoveragePanel(db, { year: 2025, subject: 'gdp_total' });
   assert.deepEqual(coverageTotal.metrics.map((m) => m.metric.key), [
     'total_current',
     'total_constant',
@@ -224,7 +224,7 @@ test('Total GDP comparison: entered/exited/outside with above/below India by pos
   const { db } = await seedBothSubjects();
   const { buildLevelComparisonResponse } = await import('../src/services/comparisonService.js');
 
-  const response = buildLevelComparisonResponse(db, {
+  const response = await buildLevelComparisonResponse(db, {
     metricKey: 'total_current',
     yearA: 2024,
     yearB: 2025,
@@ -252,7 +252,7 @@ test('Total GDP comparison: entered/exited/outside with above/below India by pos
 test('partial Total GDP ingest fails integrity loudly (missing series, not silent subset)', async () => {
   const { db } = await seedBothSubjects(); // only 2 of 8 indicators stored
   const { runIntegrityChecks } = await import('../src/services/integrity.js');
-  const report = runIntegrityChecks(db);
+  const report = await runIntegrityChecks(db);
   const check = report.checks.find((c) => c.check === 'H.registry_indicators');
   assert.equal(check.status, 'fail');
   assert.match(JSON.stringify(check.detail.expectedMetricKeys), /total_ppp_constant/);

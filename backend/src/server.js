@@ -32,7 +32,7 @@ import config, {
   getMetric,
   getSubject,
 } from './config.js';
-import { closeDb, getDb } from './db/index.js';
+import { closeDb, describeDbTarget, getDb, initDatabase, openExistingLocalDb, pingDatabase } from './db/index.js';
 import {
   countAggregateCountries,
   countAllCountries,
@@ -40,6 +40,7 @@ import {
   countObservations,
   getCountry,
   getDatasetFingerprint,
+  getEligibleObservations,
   getIndicatorByMetricKey,
   getMaxWbLastUpdated,
   getObservation,
@@ -217,12 +218,12 @@ function parseCountry(value, fallback = FOCUS_COUNTRY.iso3) {
  *
  * Only an OMITTED parameter defaults to IND.
  */
-function parseFocusCountry(db, value) {
+async function parseFocusCountry(db, value) {
   if (value === undefined || value === null || String(value).trim() === '') {
     return FOCUS_COUNTRY.iso3;
   }
   const iso3 = parseCountry(value);
-  const meta = getCountry(db, iso3);
+  const meta = await getCountry(db, iso3);
   if (!meta) {
     throw httpError(
       400,
@@ -263,9 +264,9 @@ const ah = (fn) => (req, res, next) => {
  * DB-level refresh-lock signal for the cold-start gate. Never throws on the
  * read path: an unreadable lock simply means "no lock evidence".
  */
-function isRefreshLocked(db) {
+async function isRefreshLocked(db) {
   try {
-    return getRefreshLockState(db)?.locked === true;
+    return (await getRefreshLockState(db))?.locked === true;
   } catch {
     return false;
   }
@@ -352,17 +353,19 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   // (in-memory flag + SQLite mutex) and backs off after failures.
   if (autoRefreshEnabled) {
     app.use((req, res, next) => {
-      try {
-        if (req.method === 'GET' && AUTO_REFRESH_PATHS.includes(req.path)) {
-          const decision = maybeAutoRefresh(handle(), {
-            onWarn: (w) => console.warn(`Auto-refresh: ${w.message}`),
-          });
-          if (decision.triggered) res.setHeader('X-Auto-Refresh', decision.reason);
+      (async () => {
+        try {
+          if (req.method === 'GET' && AUTO_REFRESH_PATHS.includes(req.path)) {
+            const decision = await maybeAutoRefresh(handle(), {
+              onWarn: (w) => console.warn(`Auto-refresh: ${w.message}`),
+            });
+            if (decision.triggered) res.setHeader('X-Auto-Refresh', decision.reason);
+          }
+        } catch {
+          // Auto-refresh must never break a data request.
         }
-      } catch {
-        // Auto-refresh must never break a data request.
-      }
-      next();
+        next();
+      })();
     });
   }
 
@@ -396,7 +399,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     // years to report yet — say so explicitly instead of returning an empty
     // range the frontend could mistake for "no data". The frontend treats
     // DATA_LOADING as still-starting (warm-up continues), not as a failure.
-    if (countObservations(h) === 0 && (isRefreshInProgress() || isRefreshLocked(h))) {
+    if ((await countObservations(h)) === 0 && (isRefreshInProgress() || (await isRefreshLocked(h)))) {
       res.status(503).json({
         error: {
           message: 'Data service is starting and the first dataset is not published yet. Retry shortly.',
@@ -405,7 +408,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       });
       return;
     }
-    const available = getCachedAvailableYears(h);
+    const available = await getCachedAvailableYears(h);
     res.json({
       ...available,
       defaults: { startYear: config.defaultStartYear, endYear: config.defaultEndYear },
@@ -426,11 +429,11 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       throw httpError(400, 'Invalid range: startYear must not exceed endYear.', 'INVALID_RANGE');
     }
     const subject = parseOptionalSubject(req.query.subject);
-    const result = buildIndiaYearlyRows(h, {
+    const result = await buildIndiaYearlyRows(h, {
       ...(startYear !== undefined ? { startYear } : {}),
       ...(endYear !== undefined ? { endYear } : {}),
       ...(subject ? { subject } : {}),
-      focusIso3: parseFocusCountry(h, req.query.country),
+      focusIso3: await parseFocusCountry(h, req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   });
@@ -441,13 +444,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   app.get('/api/ranking', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
-    const result = buildFullRanking(handle(), {
+    const result = await buildFullRanking(handle(), {
       metricKey,
       ...(year !== undefined ? { year } : {}),
       page: parsePositiveInt(req.query.page, 'page', { fallback: 1 }),
       pageSize: parsePositiveInt(req.query.pageSize, 'pageSize', { fallback: 50 }),
       search: req.query.search ?? '',
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -456,10 +459,10 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   app.get('/api/ranking/verify', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
-    const result = buildRankVerification(handle(), {
+    const result = await buildRankVerification(handle(), {
       metricKey,
       ...(year !== undefined ? { year } : {}),
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
       neighbors: normalizeNeighborCount(req.query.neighbors),
     });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -469,13 +472,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   app.get('/api/yoy-ranking', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
-    const result = buildFullYoyRanking(handle(), {
+    const result = await buildFullYoyRanking(handle(), {
       metricKey,
       ...(year !== undefined ? { year } : {}),
       page: parsePositiveInt(req.query.page, 'page', { fallback: 1 }),
       pageSize: parsePositiveInt(req.query.pageSize, 'pageSize', { fallback: 50 }),
       search: req.query.search ?? '',
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -484,10 +487,10 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   app.get('/api/yoy-ranking/verify', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
-    const result = buildYoyVerification(handle(), {
+    const result = await buildYoyVerification(handle(), {
       metricKey,
       ...(year !== undefined ? { year } : {}),
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
       neighbors: normalizeNeighborCount(req.query.neighbors),
     });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -523,20 +526,20 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     }
     const result =
       mode === 'yoy'
-        ? buildGrowthComparisonResponse(handle(), {
+        ? await buildGrowthComparisonResponse(handle(), {
             metricKey,
             yearA,
             yearB,
             ...(yearMid !== undefined ? { yearMid } : {}),
-            focusIso3: parseFocusCountry(handle(), req.query.country),
+            focusIso3: await parseFocusCountry(handle(), req.query.country),
             detail,
           })
-        : buildLevelComparisonResponse(handle(), {
+        : await buildLevelComparisonResponse(handle(), {
             metricKey,
             yearA,
             yearB,
             ...(yearMid !== undefined ? { yearMid } : {}),
-            focusIso3: parseFocusCountry(handle(), req.query.country),
+            focusIso3: await parseFocusCountry(handle(), req.query.country),
             detail,
           });
     res.json({ ...result, methodology: methodologyBlock() });
@@ -555,7 +558,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     }
     const rawB = req.query.yearB;
     const yearB = rawB === undefined || rawB === null || String(rawB).trim() === '' ? undefined : parseYear(rawB, 'yearB');
-    const result = buildCompareResponse(handle(), {
+    const result = await buildCompareResponse(handle(), {
       entityA: req.query.entityA,
       entityB: req.query.entityB,
       ...(req.query.labelA !== undefined ? { labelA: req.query.labelA } : {}),
@@ -585,18 +588,18 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     let observed = null;
     if (req.query.indicator !== undefined && req.query.indicator !== null && String(req.query.indicator).trim() !== '') {
       const metricKey = parseMetric(req.query.indicator);
-      const indicator = getIndicatorByMetricKey(h, metricKey);
+      const indicator = await getIndicatorByMetricKey(h, metricKey);
       if (indicator) {
         const rawYear = req.query.year;
         const year = rawYear === undefined || rawYear === null || String(rawYear).trim() === '' ? null : parseYear(rawYear, 'year');
-        observed = getObservedCountryIds(h, indicator.id, year);
+        observed = await getObservedCountryIds(h, indicator.id, year);
       } else {
         observed = new Set();
       }
     }
     const includeAggregates = type !== 'country';
     const onlyAggregates = type === 'aggregate';
-    const rows = listCountries(h, { includeAggregates })
+    const rows = (await listCountries(h, { includeAggregates }))
       .filter((c) => !onlyAggregates || c.is_aggregate === 1)
       .filter(
         (c) =>
@@ -636,7 +639,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const rawB = req.query.yearB;
     const yearA = rawA === undefined || rawA === null || String(rawA).trim() === '' ? undefined : parseYear(rawA, 'yearA');
     const yearB = rawB === undefined || rawB === null || String(rawB).trim() === '' ? undefined : parseYear(rawB, 'yearB');
-    const result = buildGroupEvaluation(handle(), {
+    const result = await buildGroupEvaluation(handle(), {
       members: req.query.members,
       ...(req.query.label !== undefined ? { label: req.query.label } : {}),
       metricKey,
@@ -663,12 +666,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     if (operation !== 'SUM' && operation !== 'AVG') {
       throw httpError(400, `Unknown period operation "${req.query.operation}". Expected SUM or AVG.`, 'INVALID_OPERATION');
     }
-    const result = buildPeriodSummary(handle(), {
+    const result = await buildPeriodSummary(handle(), {
       metricKey,
       startYear,
       endYear,
       operation,
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
     });
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -711,13 +714,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const groupType = req.query.groupType ?? req.query.group_type ?? null;
     const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
     try {
-      const result = buildPricesMovement(handle(), {
+      const result = await buildPricesMovement(handle(), {
         metricKey,
         ...(basis !== undefined ? { basis } : {}),
         yearA,
         yearB,
         ...(yearMid !== undefined ? { yearMid } : {}),
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
         ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
       });
       res.json({ ...result, methodology: methodologyBlock() });
@@ -731,7 +734,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- Prices country-group discovery (dynamic, no hardcoding) ----------
   app.get('/api/prices/country-groups', ah(async (req, res) => {
-    const result = listPriceCountryGroups(handle());
+    const result = await listPriceCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
@@ -772,13 +775,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const groupType = req.query.groupType ?? req.query.group_type ?? null;
     const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
     try {
-      const result = buildTradeMovement(handle(), {
+      const result = await buildTradeMovement(handle(), {
         metricKey,
         ...(basis !== undefined ? { basis } : {}),
         yearA,
         yearB,
         ...(yearMid !== undefined ? { yearMid } : {}),
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
         ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
       });
       res.json({ ...result, methodology: methodologyBlock() });
@@ -792,7 +795,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- Trade country-group discovery (dynamic, no hardcoding) ----------
   app.get('/api/trade/country-groups', ah(async (req, res) => {
-    const result = listTradeCountryGroups(handle());
+    const result = await listTradeCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
@@ -833,13 +836,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const groupType = req.query.groupType ?? req.query.group_type ?? null;
     const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
     try {
-      const result = buildCapitalMovement(handle(), {
+      const result = await buildCapitalMovement(handle(), {
         metricKey,
         ...(basis !== undefined ? { basis } : {}),
         yearA,
         yearB,
         ...(yearMid !== undefined ? { yearMid } : {}),
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
         ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
       });
       res.json({ ...result, methodology: methodologyBlock() });
@@ -853,7 +856,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- Capital Flow country-group discovery (dynamic, no hardcoding) ----------
   app.get('/api/capital/country-groups', ah(async (req, res) => {
-    const result = listCapitalCountryGroups(handle());
+    const result = await listCapitalCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
@@ -894,13 +897,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const groupType = req.query.groupType ?? req.query.group_type ?? null;
     const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
     try {
-      const result = buildFxMovement(handle(), {
+      const result = await buildFxMovement(handle(), {
         metricKey,
         ...(basis !== undefined ? { basis } : {}),
         yearA,
         yearB,
         ...(yearMid !== undefined ? { yearMid } : {}),
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
         ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
       });
       res.json({ ...result, methodology: methodologyBlock() });
@@ -914,7 +917,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- Exchange Rate country-group discovery (dynamic, no hardcoding) ----------
   app.get('/api/fx/country-groups', ah(async (req, res) => {
-    const result = listFxCountryGroups(handle());
+    const result = await listFxCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
@@ -955,13 +958,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const groupType = req.query.groupType ?? req.query.group_type ?? null;
     const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
     try {
-      const result = buildExternalMovement(handle(), {
+      const result = await buildExternalMovement(handle(), {
         metricKey,
         ...(basis !== undefined ? { basis } : {}),
         yearA,
         yearB,
         ...(yearMid !== undefined ? { yearMid } : {}),
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
         ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
       });
       res.json({ ...result, methodology: methodologyBlock() });
@@ -975,7 +978,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- External Sector country-group discovery (dynamic, no hardcoding) ----------
   app.get('/api/external/country-groups', ah(async (req, res) => {
-    const result = listExternalCountryGroups(handle());
+    const result = await listExternalCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
@@ -1016,13 +1019,13 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const groupType = req.query.groupType ?? req.query.group_type ?? null;
     const groupValue = req.query.group ?? req.query.groupValue ?? req.query.group_value ?? null;
     try {
-      const result = buildPopulationMovement(handle(), {
+      const result = await buildPopulationMovement(handle(), {
         metricKey,
         ...(basis !== undefined ? { basis } : {}),
         yearA,
         yearB,
         ...(yearMid !== undefined ? { yearMid } : {}),
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
         ...(groupType || groupValue ? { group: { type: groupType ? String(groupType) : null, value: groupValue ? String(groupValue) : 'All' } } : {}),
       });
       res.json({ ...result, methodology: methodologyBlock() });
@@ -1036,7 +1039,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
   // ---------- Population country-group discovery (dynamic, no hardcoding) ----------
   app.get('/api/population/country-groups', ah(async (req, res) => {
-    const result = listPopulationCountryGroups(handle());
+    const result = await listPopulationCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
 
@@ -1045,15 +1048,15 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const h = handle();
     const year = parseYear(req.query.year, 'year');
     const subject = parseOptionalSubject(req.query.subject);
-    const panel = buildCoveragePanel(h, {
+    const panel = await buildCoveragePanel(h, {
       ...(year !== undefined ? { year } : {}),
       ...(subject ? { subject } : {}),
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
     });
-    const yoyPanel = buildYoyCoveragePanel(h, {
+    const yoyPanel = await buildYoyCoveragePanel(h, {
       ...(year !== undefined ? { year } : {}),
       ...(subject ? { subject } : {}),
-      focusIso3: parseFocusCountry(handle(), req.query.country),
+      focusIso3: await parseFocusCountry(handle(), req.query.country),
     });
 
     let explanation = null;
@@ -1064,11 +1067,11 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         throw httpError(400, 'Both fromYear and toYear are required for a changing-totals explanation.', 'INVALID_RANGE');
       }
       const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
-      explanation = explainTotalChange(h, {
+      explanation = await explainTotalChange(h, {
         metricKey,
         fromYear,
         toYear,
-        focusIso3: parseFocusCountry(handle(), req.query.country),
+        focusIso3: await parseFocusCountry(handle(), req.query.country),
       });
     }
 
@@ -1083,7 +1086,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     if (year === undefined) {
       throw httpError(400, 'Missing year. Observations are addressed by indicator and year.', 'MISSING_YEAR');
     }
-    const indicator = getIndicatorByMetricKey(h, metricKey);
+    const indicator = await getIndicatorByMetricKey(h, metricKey);
     if (!indicator) {
       return res.json({
         available: false,
@@ -1097,9 +1100,9 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
 
     const country = req.query.country;
     if (country !== undefined && country !== null && country !== '') {
-      const iso3 = parseFocusCountry(h, country);
-      const row = getObservation(h, iso3, indicator.id, year);
-      const meta = getCountry(h, iso3);
+      const iso3 = await parseFocusCountry(h, country);
+      const row = await getObservation(h, iso3, indicator.id, year);
+      const meta = await getCountry(h, iso3);
       return res.json({
         available: Boolean(row),
         metric: getMetric(metricKey),
@@ -1120,8 +1123,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       });
     }
 
-    const { getEligibleObservations } = await import('./db/repository.js');
-    const rows = getEligibleObservations(h, indicator.id, year).map((r) => ({
+    const rows = (await getEligibleObservations(h, indicator.id, year)).map((r) => ({
       iso3: r.iso3,
       country: r.name,
       value: r.value,
@@ -1142,12 +1144,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     const h = handle();
     const include = String(req.query.includeAggregates ?? 'true').toLowerCase();
     const includeAggregates = !['0', 'false', 'no'].includes(include);
-    const rows = listCountries(h, { includeAggregates });
+    const rows = await listCountries(h, { includeAggregates });
     res.json({
       count: rows.length,
-      eligibleCount: countEligibleCountries(h),
-      aggregateCount: countAggregateCountries(h),
-      totalCount: countAllCountries(h),
+      eligibleCount: await countEligibleCountries(h),
+      aggregateCount: await countAggregateCountries(h),
+      totalCount: await countAllCountries(h),
       countries: rows.map((c) => ({
         id: c.id,
         iso3: c.iso3,
@@ -1171,18 +1173,18 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     res.json({
       source: SOURCE_INFO,
       apiBaseUrl: config.worldBank.baseUrl,
-      indicators: listIndicators(h),
+      indicators: await listIndicators(h),
       expectedIndicators: PRODUCTION_METRIC_KEYS.map((k) => getMetric(k)),
       subjects: describeSubjects().map((subject) => ({
         ...subject,
         metrics: subject.metricKeys.map((key) => describeMetric(METRICS[key])),
       })),
       universe: {
-        total: countAllCountries(h),
-        eligible: countEligibleCountries(h),
-        aggregates: countAggregateCountries(h),
+        total: await countAllCountries(h),
+        eligible: await countEligibleCountries(h),
+        aggregates: await countAggregateCountries(h),
       },
-      years: getCachedAvailableYears(h),
+      years: await getCachedAvailableYears(h),
       methodology: methodologyBlock(),
     });
   }));
@@ -1195,7 +1197,9 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   // keep using /api/metadata, which is unchanged above.
   app.get('/api/indicators', ah(async (req, res) => {
     const h = handle();
-    const isIngested = (key) => getIndicatorByMetricKey(h, key) !== null;
+    // One batched read for every ingested flag below (never per-metric queries).
+    const ingestedKeys = new Set((await listIndicators(h)).map((r) => r.metric_key));
+    const isIngested = (key) => ingestedKeys.has(key);
     const production = PRODUCTION_METRIC_KEYS.map((key) => ({
       ...describeMeasure(getDefinedMetric(key)),
       lifecycle: 'PRODUCTION',
@@ -1233,10 +1237,10 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
   // ---------- data status ----------
   app.get('/api/data-status', ah(async (req, res) => {
     const h = handle();
-    const cache = getCacheStatus(h);
+    const cache = await getCacheStatus(h);
     let lock = null;
     try {
-      lock = getRefreshLockState(h);
+      lock = await getRefreshLockState(h);
     } catch {
       lock = null;
     }
@@ -1246,7 +1250,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     // blindly, and keys the integrity memo below.
     let fingerprint = null;
     try {
-      fingerprint = getDatasetFingerprint(h);
+      fingerprint = await getDatasetFingerprint(h);
     } catch {
       fingerprint = null;
     }
@@ -1258,10 +1262,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     let integrity = null;
     try {
       const key = integrityCacheKey(fingerprint);
-      integrity = getCachedIntegrity(key, () => {
-        const report = runIntegrityChecks(h);
-        return { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
-      }).report;
+      integrity = (
+        await getCachedIntegrity(key, async () => {
+          const report = await runIntegrityChecks(h);
+          return { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
+        })
+      ).report;
     } catch (error) {
       integrity = { passed: false, error: error.message };
     }
@@ -1272,7 +1278,7 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       // from its own retrieval). Distinct from lastSuccessAt below, which
       // is the LOCAL retrieval timestamp. Additive, read-only, derived —
       // no ingestion semantics involved.
-      wbLastUpdated: getMaxWbLastUpdated(h),
+      wbLastUpdated: await getMaxWbLastUpdated(h),
       inProgress: isRefreshInProgress(),
       progress: getIngestProgress(),
       lock,
@@ -1286,15 +1292,15 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       // manual-refresh action when the backend requires an admin token.
       // Non-analytical; exposes only whether auth is required, never the token.
       refreshRequiresAuth: config.refreshAdminToken !== '',
-      latestRuns: listFetchRuns(h, 5),
-      years: getCachedAvailableYears(h),
+      latestRuns: await listFetchRuns(h, 5),
+      years: await getCachedAvailableYears(h),
       methodology: methodologyBlock(),
     });
   }));
 
   // ---------- integrity ----------
   app.get('/api/integrity', ah(async (req, res) => {
-    const report = runIntegrityChecks(handle());
+    const report = await runIntegrityChecks(handle());
     res.json({ ...report, methodology: methodologyBlock() });
   }));
 
@@ -1369,13 +1375,65 @@ async function boot() {
     }
   }
 
-  const db = getDb();
+  // Database backend selection (Phase 6A): Turso Cloud when configured,
+  // otherwise the local SQLite file. A Turso outage never silently becomes
+  // an uncontrolled full seed: with a usable non-empty local database and
+  // ALLOW_LOCAL_DB_FALLBACK the server falls back loudly; otherwise
+  // production serves degraded (empty, no auto-seed) and development fails
+  // fast with the connection error.
+  const target = describeDbTarget();
+  if (process.env.NODE_ENV === 'production' && target.mode !== 'turso') {
+    console.warn(
+      'Production is using the local SQLite file (no TURSO_DATABASE_URL): data will not survive ephemeral restarts. Configure Turso for persistent production storage.',
+    );
+  }
+  console.log(
+    `Database backend: ${target.mode}` +
+      (target.mode === 'turso' ? ` (${target.host ?? 'unknown host'})` : ` (${target.file})`),
+  );
+
+  let db = null;
+  let degraded = false;
+  try {
+    db = getDb();
+    await initDatabase(db, { localFile: target.mode === 'local' });
+    await pingDatabase(db);
+    if (target.mode === 'turso') {
+      const present = await countObservations(db);
+      console.log(
+        present > 0
+          ? `Turso database reachable with ${present} stored observations; no startup ingestion needed.`
+          : 'Turso database reachable but empty; startup ingestion will seed it.',
+      );
+    }
+  } catch (error) {
+    const fallback = config.allowLocalDbFallback ? await openExistingLocalDb() : null;
+    if (fallback) {
+      console.warn(
+        `Primary database (${target.mode}) unreachable (${error.message}); serving from the existing local database instead. This fallback hides a persistent-database outage — investigate promptly.`,
+      );
+      db = fallback.handle;
+    } else if (process.env.NODE_ENV === 'production') {
+      console.error(
+        `Primary database (${target.mode}) unreachable and no usable local database exists (${error.message}). Serving DEGRADED with an empty dataset and no automatic seeding; POST /api/data/refresh once the database recovers.`,
+      );
+      degraded = true;
+      db = getDb();
+      try {
+        await initDatabase(db, { localFile: target.mode === 'local' });
+      } catch {
+        // Degraded means best-effort; request paths already tolerate an empty store.
+      }
+    } else {
+      throw error;
+    }
+  }
 
   // Crash recovery first: a stale SQLite lock must never wedge the server.
   try {
-    const state = getRefreshLockState(db);
+    const state = await getRefreshLockState(db);
     if (state?.locked) {
-      const recovered = recoverRefreshLock(db, 'server boot recovery');
+      const recovered = await recoverRefreshLock(db, 'server boot recovery');
       console.log(`Recovered stale refresh lock (holder: ${recovered?.previous?.holder ?? 'unknown'}).`);
     }
   } catch (error) {
@@ -1387,7 +1445,7 @@ async function boot() {
   // first dataset is still being prepared, never block listen() on a
   // multi-minute ingest. /api/years reports DATA_LOADING (503) while the
   // seed runs; every other endpoint keeps its existing behavior.
-  const app = createApp();
+  const app = createApp({ db });
   const server = app.listen(config.port, () => {
     console.log(`World Bank India GDP ranking backend listening on port ${config.port}`);
     console.log(`  Health: http://localhost:${config.port}/api/health`);
@@ -1395,9 +1453,12 @@ async function boot() {
 
   // First-run behavior: ingest on empty when enabled — now in the
   // background, after listen(), so startup never blocks availability.
+  // Degraded production never seeds: a giant unattended ingest is exactly
+  // the failure mode persistence exists to avoid.
   try {
-    const { countObservations } = await import('./db/repository.js');
-    if (countObservations(db) === 0) {
+    if (degraded) {
+      console.log('Degraded mode: automatic startup ingestion is disabled until the primary database recovers.');
+    } else if ((await countObservations(db)) === 0) {
       if (config.autoIngestOnEmpty) {
         console.log('Database is empty; ingesting World Bank data in the background...');
         ensureDataPresent(db, { trigger: 'boot' }).then(
@@ -1408,12 +1469,12 @@ async function boot() {
         console.log('Database is empty; WB_AUTO_INGEST_ON_EMPTY=0 so startup ingestion is skipped. POST /api/data/refresh to ingest.');
       }
     } else {
-      const cache = getCacheStatus(db);
+      const cache = await getCacheStatus(db);
       if (cache.refreshDue) {
         // Stale cache at boot: refresh in the background while serving.
         // maybeAutoRefresh() re-checks all guards (freshness, locks,
         // post-failure cooldown), so this is safe to attempt unconditionally.
-        const decision = maybeAutoRefresh(db, {
+        const decision = await maybeAutoRefresh(db, {
           onWarn: (w) => console.warn(`Auto-refresh: ${w.message}`),
         });
         if (decision.triggered) {
@@ -1429,7 +1490,7 @@ async function boot() {
 
   // Integrity report at boot (warn-only; the API exposes the full report).
   try {
-    const report = runIntegrityChecks(db);
+    const report = await runIntegrityChecks(db);
     const failed = report.checks.filter((c) => c.status === 'fail');
     if (failed.length > 0) {
       console.warn(`Integrity: ${failed.length} check(s) failing: ${failed.map((c) => c.check).join(', ')}`);

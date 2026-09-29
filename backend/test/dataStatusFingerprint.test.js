@@ -41,8 +41,8 @@ async function getStatus() {
   return res.json();
 }
 
-function recordSuccess(trigger) {
-  const runId = repository.startFetchRun(db, {
+async function recordSuccess(trigger) {
+  const runId = await repository.startFetchRun(db, {
     trigger,
     endpoint: 'stub://world-bank',
     requestedStartYear: 2003,
@@ -51,12 +51,12 @@ function recordSuccess(trigger) {
     fetchedEndYear: 2005,
     indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, runId, { status: 'success', wbLastUpdated: '2026-09-28' });
+  await repository.finishFetchRun(db, runId, { status: 'success', wbLastUpdated: '2026-09-28' });
   return runId;
 }
 
 test('data-status exposes a fingerprint identifying the published generation', async () => {
-  const runId = recordSuccess('test-seed');
+  const runId = await recordSuccess('test-seed');
   const body = await getStatus();
   assert.ok(body.fingerprint, 'fingerprint object present');
   assert.equal(body.fingerprint.runId, runId);
@@ -66,7 +66,7 @@ test('data-status exposes a fingerprint identifying the published generation', a
 
 test('fingerprint runId strictly advances when a new success run publishes', async () => {
   const before = (await getStatus()).fingerprint?.runId;
-  const newRunId = recordSuccess('test-publish');
+  const newRunId = await recordSuccess('test-publish');
   const after = await getStatus();
   assert.equal(after.fingerprint?.runId, newRunId);
   assert.ok(newRunId > before, 'generation strictly advances');

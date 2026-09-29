@@ -88,7 +88,7 @@ test('R-12: failed and partial runs do not advance the generation or memo', asyn
   const { db, repository } = await createMemoryTestDb();
   resetIntegrityCache();
 
-  const successId = repository.startFetchRun(db, {
+  const successId = await repository.startFetchRun(db, {
     trigger: 'test-seed',
     endpoint: 'stub://world-bank',
     requestedStartYear: 2024,
@@ -97,20 +97,20 @@ test('R-12: failed and partial runs do not advance the generation or memo', asyn
     fetchedEndYear: 2025,
     indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, successId, { status: 'success', wbLastUpdated: '2026-09-28' });
+  await repository.finishFetchRun(db, successId, { status: 'success', wbLastUpdated: '2026-09-28' });
 
-  const fingerprint = repository.getDatasetFingerprint(db);
+  const fingerprint = await repository.getDatasetFingerprint(db);
   assert.equal(fingerprint.runId, successId);
   const key = integrityCacheKey(fingerprint);
   let scans = 0;
-  getCachedIntegrity(key, () => {
+  await getCachedIntegrity(key, () => {
     scans += 1;
     return { passed: true, checks: [] };
   });
   assert.equal(scans, 1);
 
   // Failed run: audit history only.
-  const failedId = repository.startFetchRun(db, {
+  const failedId = await repository.startFetchRun(db, {
     trigger: 'test-fail',
     endpoint: 'stub://world-bank',
     requestedStartYear: 2024,
@@ -119,11 +119,11 @@ test('R-12: failed and partial runs do not advance the generation or memo', asyn
     fetchedEndYear: 2025,
     indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, failedId, { status: 'failed', errorMessage: 'boom' });
+  await repository.finishFetchRun(db, failedId, { status: 'failed', errorMessage: 'boom' });
 
-  const afterFail = repository.getDatasetFingerprint(db);
+  const afterFail = await repository.getDatasetFingerprint(db);
   assert.deepEqual(afterFail, fingerprint, 'failed run moves nothing generation-visible');
-  const reused = getCachedIntegrity(integrityCacheKey(afterFail), () => {
+  const reused = await getCachedIntegrity(integrityCacheKey(afterFail), () => {
     scans += 1;
     return { passed: true, checks: [] };
   });

@@ -21,7 +21,7 @@ import {
 export async function createMemoryTestDb() {
   const { createMemoryDb } = await import('../../src/db/index.js');
   const repository = await import('../../src/db/repository.js');
-  return { db: createMemoryDb(), repository };
+  return { db: await createMemoryDb(), repository };
 }
 
 /**
@@ -43,15 +43,15 @@ export async function seedEdgeCaseDb() {
   const { METRICS } = await import('../../src/config.js');
 
   const universe = buildUniverse([...EDGE_METADATA, ...EDGE_BLANK_METADATA]);
-  repository.upsertCountries(db, universe.countries);
+  await repository.upsertCountries(db, universe.countries);
 
-  repository.upsertIndicator(db, {
+  await repository.upsertIndicator(db, {
     ...METRICS[EDGE_METRIC_KEY],
     name: 'GDP per capita (current US$)',
     unit: 'current US$',
     source: 'World Development Indicators',
   });
-  const indicator = repository.getIndicatorByMetricKey(db, EDGE_METRIC_KEY);
+  const indicator = await repository.getIndicatorByMetricKey(db, EDGE_METRIC_KEY);
 
   const storableIds = new Set(universe.countries.map((row) => row.id));
   const storable = [];
@@ -73,7 +73,7 @@ export async function seedEdgeCaseDb() {
       value: row.value,
     });
   }
-  repository.upsertObservations(db, storable);
+  await repository.upsertObservations(db, storable);
 
   return {
     db,
@@ -89,7 +89,7 @@ export async function seedEdgeCaseDb() {
 
 /** Record a successful run (with a universe snapshot) for the seeded database. */
 export async function recordSuccessRun(db, repository, extras = {}) {
-  const runId = repository.startFetchRun(db, {
+  const runId = await repository.startFetchRun(db, {
     trigger: extras.trigger ?? 'test',
     endpoint: extras.endpoint ?? 'stub://world-bank',
     requestedStartYear: extras.requestedStartYear ?? 2003,
@@ -98,7 +98,7 @@ export async function recordSuccessRun(db, repository, extras = {}) {
     fetchedEndYear: extras.fetchedEndYear ?? 2005,
     indicators: extras.indicators ?? [EDGE_INDICATOR_CODE],
   });
-  repository.finishFetchRun(db, runId, {
+  await repository.finishFetchRun(db, runId, {
     status: 'success',
     wbLastUpdated: extras.wbLastUpdated ?? '2026-07-13',
     countriesRows: extras.countriesRows ?? 0,
@@ -132,10 +132,10 @@ export async function seedSnapshotDb(options = {}) {
   const metricKeys = options.metricKeys ?? METRIC_KEYS;
 
   const universe = buildUniverse(snapshot.countryMetadata.rows);
-  repository.upsertCountries(db, universe.countries);
+  await repository.upsertCountries(db, universe.countries);
   const index = createUniverseIndex(universe);
 
-  const runId = repository.startFetchRun(db, {
+  const runId = await repository.startFetchRun(db, {
     trigger: 'test-fixture',
     endpoint: snapshot.apiBaseUrl,
     requestedStartYear: startYear,
@@ -160,14 +160,14 @@ export async function seedSnapshotDb(options = {}) {
   let rowsUpserted = 0;
   for (const metricKey of metricKeys) {
     const entry = snapshot.indicators[metricKey];
-    repository.upsertIndicator(db, {
+    await repository.upsertIndicator(db, {
       ...METRICS[metricKey],
       name: entry.indicatorMetadata?.name ?? METRICS[metricKey].label,
       unit: entry.indicatorMetadata?.unit || METRICS[metricKey].unit,
       source: entry.indicatorMetadata?.source ?? 'World Development Indicators',
       sourceNote: entry.indicatorMetadata?.sourceNote ?? null,
     });
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
     const perYear = new Map();
     const statsFor = (year) => {
       if (!perYear.has(year)) {
@@ -222,15 +222,15 @@ export async function seedSnapshotDb(options = {}) {
       });
     }
 
-    rowsUpserted += repository.upsertObservations(db, rows);
+    rowsUpserted += await repository.upsertObservations(db, rows);
     for (const stats of [...perYear.values()].sort((a, b) => a.year - b.year)) {
       yearStats.push({ metricKey, indicatorCode: METRICS[metricKey].indicatorCode, ...stats });
     }
   }
 
   const sum = (key) => yearStats.reduce((total, entry) => total + (entry[key] ?? 0), 0);
-  repository.upsertIngestYearStats(db, runId, yearStats);
-  repository.finishFetchRun(db, runId, {
+  await repository.upsertIngestYearStats(db, runId, yearStats);
+  await repository.finishFetchRun(db, runId, {
     status: 'success',
     wbLastUpdated: snapshot.worldBankLastUpdated?.[metricKeys[0]] ?? null,
     countriesRows: universe.countries.length,

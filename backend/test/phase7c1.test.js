@@ -34,13 +34,13 @@ test.after(async () => {
 
 async function freshDb() {
   const { createMemoryDb } = await import('../src/db/index.js');
-  return createMemoryDb();
+  return await createMemoryDb();
 }
 
 async function ingestFull(db, years = { startYear: 2024, endYear: 2025 }) {
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
-  return refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
+  return await refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
 }
 
 async function startApp(db) {
@@ -341,7 +341,7 @@ test('Phase 7C-1.9: period summary builder (identity, completeness, capability)'
   await ingestFull(db);
   const { buildPeriodSummary } = await import('../src/services/periodService.js');
   // Exports 2024 -> 2026 = [2024, 2025], both present for IND.
-  const sum = buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2024, endYear: 2026, operation: 'SUM' });
+  const sum = await buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2024, endYear: 2026, operation: 'SUM' });
   assert.equal(sum.available, true);
   assert.equal(sum.operation, 'PERIOD_SUM');
   assert.equal(sum.semantic.code, 'PERIOD_SUM');
@@ -353,24 +353,24 @@ test('Phase 7C-1.9: period summary builder (identity, completeness, capability)'
   assert.equal(sum.provenance.kind, 'APP_DERIVED');
   assert.equal(sum.provenance.transform, 'PERIOD_SUM');
   assert.ok((sum.sumDisplay ?? '').length > 0, 'display string travels alongside the raw sum');
-  const avg = buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2024, endYear: 2026, operation: 'AVG' });
+  const avg = await buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2024, endYear: 2026, operation: 'AVG' });
   assert.equal(avg.available, true);
   assert.equal(avg.operation, 'PERIOD_AVG');
   assert.ok(Math.abs(avg.average - expected / 2) < 1, 'typical annual scale');
   assert.equal(avg.sum, sum.sum, 'average carries its sum, never substitutes for it');
   // Missing year 2023: unavailable with reason + missing-year evidence.
-  const gappy = buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2023, endYear: 2025, operation: 'SUM' });
+  const gappy = await buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2023, endYear: 2025, operation: 'SUM' });
   assert.equal(gappy.available, false);
   assert.equal(gappy.reason, 'incomplete_period');
   assert.deepEqual(gappy.missingYears, [2023]);
   assert.equal(gappy.sum, null);
   // GDP LEVEL: capability refusal, never a summed GDP.
-  const gdp = buildPeriodSummary(db, { metricKey: 'nominal_current', startYear: 2024, endYear: 2026, operation: 'SUM' });
+  const gdp = await buildPeriodSummary(db, { metricKey: 'nominal_current', startYear: 2024, endYear: 2026, operation: 'SUM' });
   assert.equal(gdp.available, false);
   assert.equal(gdp.reason, 'unsupported_transformation_for_metric');
   // Unknown metric + unknown operation fail closed.
-  assert.throws(() => buildPeriodSummary(db, { metricKey: 'nope', startYear: 2024, endYear: 2026 }), /Unknown metric/);
-  assert.throws(
+  await assert.rejects(() => buildPeriodSummary(db, { metricKey: 'nope', startYear: 2024, endYear: 2026 }), /Unknown metric/);
+  await assert.rejects(
     () => buildPeriodSummary(db, { metricKey: 'exports_current', startYear: 2024, endYear: 2026, operation: 'MEDIAN' }),
     (err) => err?.code === 'INVALID_OPERATION',
   );
@@ -390,30 +390,30 @@ test('Phase 7C-1.10: GDP analytical outputs identical on the frozen edge fixture
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
   const { buildYoyCoveragePanel } = await import('../src/services/coverageService.js');
   // Ranking: exact order, ranks, denominators (nominal_current, DESC).
-  const ranking = buildFullRanking(db, { metricKey: 'nominal_current', year: 2005 });
+  const ranking = await buildFullRanking(db, { metricKey: 'nominal_current', year: 2005 });
   assert.deepEqual(ranking.rows.map((r) => r.iso3), EDGE_EXPECTATIONS.levelOrder[2005]);
   assert.equal(ranking.total, EDGE_EXPECTATIONS.levelDenominator[2005]);
   assert.equal(ranking.rows.find((r) => r.iso3 === 'IND').rank, EDGE_EXPECTATIONS.indiaRank[2005]);
   assert.match(ranking.notes.join(' '), /descending/);
   // Verification: exact rank focus + YoY percent + denominator.
-  const verify = buildRankVerification(db, { metricKey: 'nominal_current', year: 2005 });
+  const verify = await buildRankVerification(db, { metricKey: 'nominal_current', year: 2005 });
   assert.equal(verify.focus.rank, EDGE_EXPECTATIONS.indiaRank[2005]);
   assert.equal(verify.total, EDGE_EXPECTATIONS.levelDenominator[2005]);
   const { buildFullYoyRanking } = await import('../src/services/yoyVerification.js');
-  const yoy = buildFullYoyRanking(db, { metricKey: 'nominal_current', year: 2005 });
+  const yoy = await buildFullYoyRanking(db, { metricKey: 'nominal_current', year: 2005 });
   assert.equal(yoy.focus.yoyPercent, EDGE_EXPECTATIONS.indiaYoyPercent[2005]);
   assert.equal(yoy.total, EDGE_EXPECTATIONS.yoyPairs[2005]);
   // Level comparison 2004 -> 2005: available, verified, identity holds.
-  const level = buildLevelComparisonResponse(db, { metricKey: 'nominal_current', yearA: 2004, yearB: 2005 });
+  const level = await buildLevelComparisonResponse(db, { metricKey: 'nominal_current', yearA: 2004, yearB: 2005 });
   assert.equal(level.comparison.available, true);
   assert.equal(level.verification.passed, true);
   // Growth comparison: available, verified (endpoint percent, DESC growth rank).
-  const growth = buildGrowthComparisonResponse(db, { metricKey: 'nominal_current', yearA: 2004, yearB: 2005 });
+  const growth = await buildGrowthComparisonResponse(db, { metricKey: 'nominal_current', yearA: 2004, yearB: 2005 });
   assert.equal(growth.comparison.available, true);
   assert.equal(growth.verification.passed, true);
   assert.equal('flowSemantics' in growth, false, 'no flow fields leak into GDP payloads');
   // Yearly cells: exact value/rank/YoY.
-  const yearly = buildIndiaYearlyRows(db, { metricKeys: ['nominal_current'], startYear: 2003, endYear: 2005 });
+  const yearly = await buildIndiaYearlyRows(db, { metricKeys: ['nominal_current'], startYear: 2003, endYear: 2005 });
   for (const row of yearly.rows) {
     const cell = row.nominal_current;
     assert.equal(cell.indiaValue, EDGE_EXPECTATIONS.indiaValue[row.year]);
@@ -421,7 +421,7 @@ test('Phase 7C-1.10: GDP analytical outputs identical on the frozen edge fixture
     assert.equal(cell.indiaYoY, EDGE_EXPECTATIONS.indiaYoyPercent[row.year]);
   }
   // Coverage YoY: GDP pairs intact.
-  const coverage = buildYoyCoveragePanel(db, { metricKeys: ['nominal_current'], year: 2005 });
+  const coverage = await buildYoyCoveragePanel(db, { metricKeys: ['nominal_current'], year: 2005 });
   const entry = coverage.metrics[0];
   assert.equal(entry.available, true);
   assert.equal(entry.validYoyPairs, EDGE_EXPECTATIONS.yoyPairs[2005]);

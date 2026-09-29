@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { getDb } from '../src/db/index.js';
+import { queryGet } from '../src/db/driver.js';
 import { createApp } from '../src/server.js';
 import { buildFxMovement, listFxCountryGroups } from '../src/services/fxMovementService.js';
 
@@ -48,21 +49,21 @@ test('FX rejects invalid basis, CAGR-as-basis, non-FX metric (400)', async () =>
 
 test('Basis A: raw levels, never ranked/benchmarked', async () => {
   const db = getDb();
-  const r = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_rate', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_rate', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.equal(r.available, true);
   for (const o of r.observed) {
     assert.equal(o.rankable, false);
     assert.deepEqual(o.ranking, []);
     assert.equal(o.focus.benchmark, undefined);
-    const ind = db.prepare("SELECT id FROM indicators WHERE metric_key='fx_official'").get();
-    const raw = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', o.year).value;
+    const ind = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='fx_official'");
+    const raw = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', o.year])).value;
     assert.ok(Math.abs(o.focus.value - raw) < 1e-9, 'raw passthrough');
   }
 });
 
 test('Basis B: annual change needs t−1 and t (India 2004 = 45.316/46.583 − 1)', async () => {
   const db = getDb();
-  const r = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2003, 2004]);
   const expected = (45.3164666666666 / 46.5832841666667 - 1) * 100;
@@ -72,7 +73,7 @@ test('Basis B: annual change needs t−1 and t (India 2004 = 45.316/46.583 − 1
 
 test('Basis C: period change endpoints-only (India 2004→2014 ≈ +34.67%)', async () => {
   const db = getDb();
-  const r = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2004, 2014]);
   const expected = (61.0295144607843 / 45.3164666666666 - 1) * 100;
@@ -85,7 +86,7 @@ test('Basis C: period change endpoints-only (India 2004→2014 ≈ +34.67%)', as
 
 test('Median (not mean): benchmark recomputed as LOO median', async () => {
   const db = getDb();
-  const r = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   const others = o.ranking.filter((x) => x.iso3 !== 'IND').map((x) => x.value).sort((a, b) => a - b);
   const mid = Math.floor(others.length / 2);
@@ -99,7 +100,7 @@ test('Median (not mean): benchmark recomputed as LOO median', async () => {
 
 test('DESC competition rank from full cross-section (no ASC leakage)', async () => {
   const db = getDb();
-  const r = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   const top = [...o.ranking].sort((a, b) => b.value - a.value)[0];
   assert.equal(top.rank, 1);
@@ -109,21 +110,21 @@ test('DESC competition rank from full cross-section (no ASC leakage)', async () 
 
 test('LFL: period needs S&M&E; annual needs every t−1/t pair', async () => {
   const db = getDb();
-  const p = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const p = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(p.likeForLike.map((o) => o.eligibleCount), [p.likeForLike[0].eligibleCount, p.likeForLike[0].eligibleCount, p.likeForLike[0].eligibleCount]);
-  const a = buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_change', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const a = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_change', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(a.likeForLike.map((o) => o.eligibleCount), [a.likeForLike[0].eligibleCount, a.likeForLike[0].eligibleCount, a.likeForLike[0].eligibleCount]);
   assert.deepEqual(a.observed[0].requiredYears, [2003, 2004]);
 });
 
 test('Country groups: dynamic, no Developed labels; unknown fails closed', async () => {
   const db = getDb();
-  const g = listFxCountryGroups(db);
+  const g = await listFxCountryGroups(db);
   assert.ok(g.supported.income_level.length >= 4);
   assert.equal(g.unsupportedRequestedLabels.status, 'NOT_SUPPORTED');
   assert.ok(g.continuityNote.includes('no authoritative'));
-  assert.throws(
-    () => buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
+  await assert.rejects(
+    async () => await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
     /Unknown income_level/,
   );
 });

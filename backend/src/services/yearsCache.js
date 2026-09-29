@@ -30,18 +30,18 @@ export function resetYearsCache() {
 }
 
 /** Generation identity: cheap, indexed reads only (no table scans). */
-export function yearsCacheKey(db) {
+export async function yearsCacheKey(db) {
   const handle = db ?? getDb();
-  const run = getLatestFetchRun(handle, { status: 'success' });
-  return `${run?.id ?? 'none'}:${countObservations(handle)}`;
+  const run = await getLatestFetchRun(handle, { status: 'success' });
+  return `${run?.id ?? 'none'}:${await countObservations(handle)}`;
 }
 
-export function getCachedAvailableYears(db = null) {
+export async function getCachedAvailableYears(db = null) {
   const handle = db ?? getDb();
-  const key = yearsCacheKey(handle);
+  const key = await yearsCacheKey(handle);
   const entry = entries.get(handle);
   if (entry && entry.key === key) return entry.result;
-  const result = listAvailableYears(handle);
+  const result = await listAvailableYears(handle);
   entries.set(handle, { key, result });
   return result;
 }

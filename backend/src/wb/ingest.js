@@ -333,9 +333,9 @@ export async function fetchIndicatorPayload(
  * Inspect the cross-process refresh lock without acquiring it.
  * Used by the status endpoint and by boot recovery.
  */
-export function getRefreshLockState(db) {
+export async function getRefreshLockState(db) {
   const handle = db ?? getDb();
-  const row = refreshLockStatus(handle);
+  const row = await refreshLockStatus(handle);
   return { locked: Boolean(row?.locked), runId: row?.runId ?? null, holder: row?.holder ?? null, updatedAt: row?.updatedAt ?? null };
 }
 
@@ -344,9 +344,9 @@ export function getRefreshLockState(db) {
  * Releases it and returns the previous state for the audit trail. Never
  * releases the in-memory flag of a live refresh in this process.
  */
-export function recoverRefreshLock(db, reason = 'boot recovery') {
+export async function recoverRefreshLock(db, reason = 'boot recovery') {
   const handle = db ?? getDb();
-  return forceReleaseRefreshLock(handle, reason);
+  return await forceReleaseRefreshLock(handle, reason);
 }
 
 /**
@@ -380,26 +380,26 @@ function publishStagedRefresh(db, {
   fetchedStartYear,
   fetchedEndYear,
 }) {
-  transaction(db, () => {
-    upsertCountriesInner(db, stagedCountries);
+  return transaction(db, async (tx) => {
+    await upsertCountriesInner(tx, stagedCountries);
     for (const staged of stagedMetrics) {
       const metric = METRICS[staged.metricKey];
-      upsertIndicator(db, {
+      await upsertIndicator(tx, {
         ...metric,
         name: staged.indicatorName,
         unit: staged.indicatorUnit,
         source: staged.indicatorSource,
         sourceNote: staged.indicatorSourceNote,
       });
-      const indicator = getIndicatorByMetricKey(db, staged.metricKey);
-      deleteObservationsForIndicatorYears(db, indicator.id, fetchedStartYear, fetchedEndYear);
-      upsertObservationsInner(
-        db,
+      const indicator = await getIndicatorByMetricKey(tx, staged.metricKey);
+      await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
+      await upsertObservationsInner(
+        tx,
         staged.stagedRows.map((row) => ({ ...row, indicatorId: indicator.id })),
       );
     }
-    upsertIngestYearStatsInner(db, runId, yearStats);
-    finishFetchRun(db, runId, {
+    await upsertIngestYearStatsInner(tx, runId, yearStats);
+    await finishFetchRun(tx, runId, {
       status: 'success',
       wbLastUpdated,
       universeSnapshot,
@@ -409,11 +409,32 @@ function publishStagedRefresh(db, {
 }
 
 export async function refreshData(options = {}) {
-  if (refreshInProgress) {
+  if (isRefreshInProgress()) {
     const error = new Error('A World Bank data refresh is already in progress.');
     error.code = 'REFRESH_IN_PROGRESS';
     throw error;
   }
+  // Same-tick visibility: mark the attempt synchronously so a concurrent
+  // caller in this process observes it immediately (the atomic SQLite lock
+  // below remains the cross-process authority). Reaching past this point
+  // proves no in-process refresh was flagged, so if lock acquisition fails
+  // the mark below is ours alone to clear.
+  refreshInProgress = true;
+  // Publish the initial progress synchronously on entry (stage 'starting'):
+  // status polling must observe a refresh the same tick it starts, never
+  // gated on the first database round-trip. Detail fields available without
+  // I/O go here; run-bound fields join as the refresh proceeds.
+  lastProgress = {
+    stage: 'starting',
+    startedAt: new Date().toISOString(),
+    trigger: options.trigger ?? 'manual',
+    requestedStartYear: options.startYear ?? config.ingestStartYear,
+    requestedEndYear: options.endYear ?? config.ingestEndYear,
+    ...deriveFetchRange(
+      options.startYear ?? config.ingestStartYear,
+      options.endYear ?? config.ingestEndYear,
+    ),
+  };
 
   const db = options.db ?? getDb();
   const holder = `${options.trigger ?? 'manual'}:pid-${process.pid}`;
@@ -421,14 +442,15 @@ export async function refreshData(options = {}) {
   // Cross-process authority: exactly one acquirer wins the atomic UPDATE.
   let dbLockHeld = false;
   try {
-    dbLockHeld = acquireRefreshLock(db, { holder });
+    dbLockHeld = await acquireRefreshLock(db, { holder });
   } catch {
     dbLockHeld = false;
   }
   if (!dbLockHeld) {
+    refreshInProgress = false;
     let lockedBy = null;
     try {
-      lockedBy = refreshLockStatus(db);
+      lockedBy = await refreshLockStatus(db);
     } catch {
       lockedBy = null;
     }
@@ -482,16 +504,9 @@ export async function refreshData(options = {}) {
   // refresh therefore cannot publish a mixed dataset: the previous dataset
   // stays exactly as it was.
   try {
-    refreshInProgress = true;
-    lastProgress = {
-      stage: 'starting',
-      startedAt: new Date().toISOString(),
-      trigger,
-      requestedStartYear,
-      requestedEndYear,
-      fetchedStartYear,
-      fetchedEndYear,
-    };
+    // (Attempt flag and initial 'starting' progress were published
+    // synchronously on entry, above.)
+    const metricKeys = options.indicators ?? PRODUCTION_METRIC_KEYS;
 
     // Lifecycle enforcement (inside the try so the finally below always
     // releases the refresh lock): only production-enabled metrics may be
@@ -508,7 +523,7 @@ export async function refreshData(options = {}) {
       }
     }
 
-    runId = startFetchRun(db, {
+    runId = await startFetchRun(db, {
       trigger,
       endpoint: config.worldBank.baseUrl,
       requestedStartYear,
@@ -520,7 +535,7 @@ export async function refreshData(options = {}) {
     // Associate the held SQLite lock with the real run id (P7). A failure
     // here flows through the generic catch below: the run is marked failed
     // and the lock is released; nothing staged has been published.
-    setRefreshLockRunId(db, runId);
+    await setRefreshLockRunId(db, runId);
 
     lastProgress = { ...lastProgress, stage: 'country-metadata', runId };
     const meta = await fetchCountryMetadataPayload({
@@ -624,8 +639,8 @@ export async function refreshData(options = {}) {
       const failureSummary =
         `Partial refresh: ${stagedMetrics.length} of ${perIndicator.length} indicators staged; ` +
         `failures: ${failedMetrics.map((r) => `${r.metricKey}: ${r.error}`).join(' | ')}`;
-      upsertIngestYearStats(db, runId, yearStats);
-      finishFetchRun(db, runId, {
+      await upsertIngestYearStats(db, runId, yearStats);
+      await finishFetchRun(db, runId, {
         status: 'partial',
         wbLastUpdated,
         universeSnapshot,
@@ -655,7 +670,7 @@ export async function refreshData(options = {}) {
 
     lastProgress = { ...lastProgress, stage: 'publishing' };
     totals.countriesRows = countriesRows;
-    publishStagedRefresh(db, {
+    await publishStagedRefresh(db, {
       runId,
       stagedCountries: meta.countries,
       stagedMetrics,
@@ -706,12 +721,12 @@ export async function refreshData(options = {}) {
     if (runId !== null) {
       // Recording the failure must never mask the original error.
       try {
-        upsertIngestYearStats(db, runId, yearStats);
+        await upsertIngestYearStats(db, runId, yearStats);
       } catch (statsError) {
         options.onWarn?.({ message: `Could not record per-year counters: ${statsError.message}` });
       }
       try {
-        finishFetchRun(db, runId, {
+        await finishFetchRun(db, runId, {
           status: 'failed',
           wbLastUpdated,
           universeSnapshot,
@@ -733,7 +748,7 @@ export async function refreshData(options = {}) {
     refreshInProgress = false;
     if (dbLockHeld) {
       try {
-        releaseRefreshLock(db);
+        await releaseRefreshLock(db);
       } catch {
         // Best effort; the stale row is recoverable via recoverRefreshLock().
       }
@@ -747,7 +762,7 @@ export async function refreshData(options = {}) {
  */
 export async function ensureDataPresent(db, options = {}) {
   const handle = db ?? getDb();
-  const count = handle.prepare('SELECT COUNT(*) AS n FROM observations').get().n;
+  const count = await countObservations(handle);
   if (count > 0) return { ingested: false, observations: count };
 
   // NOTE: db must be forwarded so callers with an explicit handle (tests,
@@ -759,7 +774,7 @@ export async function ensureDataPresent(db, options = {}) {
 /**
  * Automatic refresh trigger for request serving and server boot.
  *
- * Synchronous decision, fire-and-forget execution: when the cache is empty
+ * Async decision, fire-and-forget execution: when the cache is empty
  * (and empty auto-ingest is enabled) or stale per CACHE_TTL_HOURS (and stale
  * auto-refresh is enabled), and no refresh is already running or locked, a
  * background refreshData() is launched WITHOUT awaiting it, so requests stay
@@ -776,9 +791,9 @@ export async function ensureDataPresent(db, options = {}) {
  *
  * @param {object} [db]
  * @param {{ ttlHours?:number, autoStale?:boolean, autoEmpty?:boolean, onWarn?:Function }} [options]
- * @returns {{ triggered:boolean, reason:string }}
+ * @returns {Promise<{ triggered:boolean, reason:string }>}
  */
-export function maybeAutoRefresh(db, options = {}) {
+export async function maybeAutoRefresh(db, options = {}) {
   const handle = db ?? getDb();
   const ttlHours = options.ttlHours ?? config.cacheTtlHours;
   const autoStale = options.autoStale ?? config.autoRefreshOnStale;
@@ -786,7 +801,7 @@ export function maybeAutoRefresh(db, options = {}) {
 
   let status;
   try {
-    status = getCacheStatus(handle, { ttlHours });
+    status = await getCacheStatus(handle, { ttlHours });
   } catch {
     return { triggered: false, reason: 'status-unavailable' };
   }
@@ -796,7 +811,7 @@ export function maybeAutoRefresh(db, options = {}) {
   if (!status.empty && !autoStale) return { triggered: false, reason: 'stale-auto-refresh-disabled' };
   if (isRefreshInProgress()) return { triggered: false, reason: 'already-running' };
   try {
-    if (refreshLockStatus(handle)?.locked) return { triggered: false, reason: 'already-running' };
+    if ((await refreshLockStatus(handle))?.locked) return { triggered: false, reason: 'already-running' };
   } catch {
     return { triggered: false, reason: 'status-unavailable' };
   }
@@ -834,11 +849,11 @@ export function maybeAutoRefresh(db, options = {}) {
  * @param {object} db
  * @param {{ttlHours?:number, now?:number}} [options]
  */
-export function getCacheStatus(db, options = {}) {
+export async function getCacheStatus(db, options = {}) {
   const ttlHours = Number(options.ttlHours ?? config.cacheTtlHours);
   const now = options.now ?? Date.now();
-  const lastSuccessAt = getLastSuccessfulFetchTime(db);
-  const observations = countObservations(db);
+  const lastSuccessAt = await getLastSuccessfulFetchTime(db);
+  const observations = await countObservations(db);
 
   let ageHours = null;
   if (lastSuccessAt) {
@@ -861,7 +876,7 @@ export function getCacheStatus(db, options = {}) {
     ttlHours: Number.isFinite(ttlHours) ? ttlHours : null,
     fresh,
     refreshDue: !fresh,
-    lastRun: getLatestFetchRun(db, { status: null }),
+    lastRun: await getLatestFetchRun(db, { status: null }),
   };
 }
 

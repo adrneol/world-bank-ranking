@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { getDb } from '../src/db/index.js';
+import { queryGet } from '../src/db/driver.js';
 import { createApp } from '../src/server.js';
 import { buildExternalMovement, listExternalCountryGroups } from '../src/services/externalMovementService.js';
 
@@ -51,14 +52,14 @@ test('External rejects invalid basis, generic growth, non-External metric (400)'
 
 test('CA annual (India): derived CA/GDP legs, DESC rank, mean pp gap', async () => {
   const db = getDb();
-  const r = buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_annual_gdp', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_annual_gdp', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.equal(r.available, true);
   assert.equal(r.kind, 'annual');
-  const ca = db.prepare("SELECT id FROM indicators WHERE metric_key='current_account'").get();
-  const gdp = db.prepare("SELECT id FROM indicators WHERE metric_key='total_current'").get();
+  const ca = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='current_account'");
+  const gdp = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='total_current'");
   for (const o of r.observed) {
-    const c = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ca.id, 'IND', o.year).value;
-    const g = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(gdp.id, 'IND', o.year).value;
+    const c = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ca.id, 'IND', o.year])).value;
+    const g = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [gdp.id, 'IND', o.year])).value;
     assert.ok(Math.abs(o.focus.value - (c / g) * 100) < 1e-9, 'legs-derived ratio');
     const others = o.ranking.filter((x) => x.iso3 !== 'IND').map((x) => x.value);
     const mean = others.reduce((s, v) => s + v, 0) / others.length;
@@ -70,80 +71,80 @@ test('CA annual (India): derived CA/GDP legs, DESC rank, mean pp gap', async () 
 
 test('CA average uses S+1..E ratios; cumulative uses legs (never summed %)', async () => {
   const db = getDb();
-  const a = buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_average_gdp', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const a = await buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_average_gdp', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.deepEqual(a.observed[0].requiredYears.length, 10);
   assert.deepEqual(a.observed[0].requiredYears[0], 2005);
-  const c = buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_cumulative_share', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
-  const ca = db.prepare("SELECT id FROM indicators WHERE metric_key='current_account'").get();
-  const gdp = db.prepare("SELECT id FROM indicators WHERE metric_key='total_current'").get();
-  const sf = db.prepare('SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014').get(ca.id, 'IND').s;
-  const sg = db.prepare('SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014').get(gdp.id, 'IND').s;
+  const c = await buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_cumulative_share', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const ca = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='current_account'");
+  const gdp = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='total_current'");
+  const sf = (await queryGet(db, 'SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014', [ca.id, 'IND'])).s;
+  const sg = (await queryGet(db, 'SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014', [gdp.id, 'IND'])).s;
   assert.ok(Math.abs(c.observed[0].focus.value - (sf / sg) * 100) / Math.abs((sf / sg) * 100) < 1e-9);
 });
 
 test('Reserves: stock raw, endpoint change S/E only, coverage legs', async () => {
   const db = getDb();
-  const s = buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_annual_stock', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
-  const ind = db.prepare("SELECT id FROM indicators WHERE metric_key='reserves_ex_gold'").get();
-  const raw = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', 2014).value;
+  const s = await buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_annual_stock', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const ind = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='reserves_ex_gold'");
+  const raw = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', 2014])).value;
   assert.ok(Math.abs(s.observed[1].focus.value - raw) < 1e-6, 'raw stock passthrough');
   assert.equal(s.observed[1].focus.gapUnit, 'current US$');
-  const ch = buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const ch = await buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.deepEqual(ch.observed[0].requiredYears, [2004, 2014]);
-  const a = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', 2004).value;
-  const b = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', 2014).value;
+  const a = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', 2004])).value;
+  const b = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', 2014])).value;
   assert.ok(Math.abs(ch.observed[0].focus.value - ((b / a - 1) * 100)) < 1e-9, 'endpoint-only change');
-  const cov = buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_import_coverage', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
-  const imp = db.prepare("SELECT id FROM indicators WHERE metric_key='imports_current'").get();
-  const rv = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', 2014).value;
-  const iv = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(imp.id, 'IND', 2014).value;
+  const cov = await buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_import_coverage', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const imp = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='imports_current'");
+  const rv = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', 2014])).value;
+  const iv = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [imp.id, 'IND', 2014])).value;
   assert.ok(Math.abs(cov.observed[1].focus.value - (rv / iv) * 12) < 1e-9, 'coverage legs');
   assert.equal(cov.observed[1].focus.gapUnit, 'months');
 });
 
 test('Remittances: cumulative S+1..E, average = cum/N, intensity from legs', async () => {
   const db = getDb();
-  const t = buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_period_cumulative', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const t = await buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_period_cumulative', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.equal(t.observed[0].requiredYears.length, 10);
-  const v = buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_period_average', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const v = await buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_period_average', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.ok(Math.abs(v.observed[0].focus.value - t.observed[0].focus.value / 10) < 1e-3);
   assert.equal(v.observed[0].focus.rank, t.observed[0].focus.rank);
   assert.equal(v.observed[0].focus.gapUnit, 'current US$/year');
-  const i = buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_cumulative_intensity', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
-  const remit = db.prepare("SELECT id FROM indicators WHERE metric_key='remittances_received'").get();
-  const gdp = db.prepare("SELECT id FROM indicators WHERE metric_key='total_current'").get();
-  const sf = db.prepare('SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014').get(remit.id, 'IND').s;
-  const sg = db.prepare('SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014').get(gdp.id, 'IND').s;
+  const i = await buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_cumulative_intensity', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const remit = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='remittances_received'");
+  const gdp = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='total_current'");
+  const sf = (await queryGet(db, 'SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014', [remit.id, 'IND'])).s;
+  const sg = (await queryGet(db, 'SELECT SUM(value) s FROM observations WHERE indicator_id=? AND country_id=? AND year BETWEEN 2005 AND 2014', [gdp.id, 'IND'])).s;
   assert.ok(Math.abs(i.observed[0].focus.value - (sf / sg) * 100) / Math.abs((sf / sg) * 100) < 1e-9);
 });
 
 test('External LFL: flow bases need 2005..2024 legs; reserve change needs 04&14&24', async () => {
   const db = getDb();
-  const t = buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_period_cumulative', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const t = await buildExternalMovement(db, { metricKey: 'remittances_received', basis: 'remit_period_cumulative', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(t.likeForLike.map((o) => o.eligibleCount), [t.likeForLike[0].eligibleCount, t.likeForLike[0].eligibleCount, t.likeForLike[0].eligibleCount]);
-  const ch = buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_period_change', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const ch = await buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_period_change', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(ch.likeForLike.map((o) => o.eligibleCount), [ch.likeForLike[0].eligibleCount, ch.likeForLike[0].eligibleCount, ch.likeForLike[0].eligibleCount]);
 });
 
 test('Benchmark freeze: median raw-scale, mean normalized (live check)', async () => {
   const db = getDb();
-  const s = buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_annual_stock', yearA: 2014, yearB: 2024, focusIso3: 'IND' });
+  const s = await buildExternalMovement(db, { metricKey: 'reserves_ex_gold', basis: 'res_annual_stock', yearA: 2014, yearB: 2024, focusIso3: 'IND' });
   assert.equal(s.observed[0].basis.benchmarkType, 'median');
   const others = s.observed[0].ranking.filter((x) => x.iso3 !== 'IND').map((x) => x.value).sort((a, b) => a - b);
   const mid = Math.floor(others.length / 2);
   const med = others.length % 2 === 1 ? others[mid] : (others[mid - 1] + others[mid]) / 2;
   assert.ok(Math.abs(s.observed[0].focus.benchmark - med) / med < 1e-9, 'median stock benchmark');
-  const c = buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_cumulative_share', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const c = await buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_cumulative_share', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   assert.equal(c.observed[0].basis.benchmarkType, 'mean');
 });
 
 test('Country groups: dynamic, no Developed labels; unknown fails closed', async () => {
   const db = getDb();
-  const g = listExternalCountryGroups(db);
+  const g = await listExternalCountryGroups(db);
   assert.ok(g.supported.income_level.length >= 4);
   assert.equal(g.unsupportedRequestedLabels.status, 'NOT_SUPPORTED');
-  assert.throws(
-    () => buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_annual_gdp', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
+  await assert.rejects(
+    async () => await buildExternalMovement(db, { metricKey: 'current_account', basis: 'ca_annual_gdp', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
     /Unknown income_level/,
   );
 });

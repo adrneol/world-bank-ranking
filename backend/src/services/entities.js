@@ -177,9 +177,9 @@ export function parseEntitySpec(raw, label = null) {
  * hard-coded); group members must each be known eligible countries — the
  * first invalid member fails the whole group (strict mode, no silent drops).
  */
-export function resolveEntity(db, spec) {
+export async function resolveEntity(db, spec) {
   if (spec.kind === ENTITY_KINDS.COUNTRY) {
-    const meta = getCountry(db, spec.iso3);
+    const meta = await getCountry(db, spec.iso3);
     if (!meta || meta.is_aggregate === 1) {
       throw entityError(ENTITY_ERROR_CODES.INVALID_COUNTRY, `Unknown country "${spec.iso3}".`);
     }
@@ -191,7 +191,7 @@ export function resolveEntity(db, spec) {
     };
   }
   if (spec.kind === ENTITY_KINDS.OFFICIAL_AGGREGATE) {
-    const meta = getCountry(db, spec.iso3);
+    const meta = await getCountry(db, spec.iso3);
     if (!meta) {
       throw entityError(
         ENTITY_ERROR_CODES.NO_OFFICIAL_AGGREGATE,
@@ -212,7 +212,7 @@ export function resolveEntity(db, spec) {
     };
   }
   if (spec.kind === ENTITY_KINDS.CUSTOM_GROUP) {
-    const rows = getCountriesByIso3List(db, spec.members);
+    const rows = await getCountriesByIso3List(db, spec.members);
     const byId = new Map(rows.map((r) => [r.id, r]));
     for (const iso3 of spec.members) {
       const meta = byId.get(iso3);

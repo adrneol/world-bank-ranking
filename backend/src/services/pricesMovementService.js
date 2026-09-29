@@ -16,8 +16,11 @@
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
   getEligibleObservationsForYears,
+  countCountryGroupsByColumn,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
+  listCountryIdsByColumn,
+  listDistinctCountryColumn,
 } from '../db/repository.js';
 import { describeMetric } from '../domain/format.js';
 import {
@@ -78,41 +81,36 @@ function normalizeMid(options, yearA, yearB) {
  * group: { type: 'income_level'|'region'|'lending_type'|null, value: string|null }
  * null/All → null (no restriction). Values validated against DISTINCT DB values.
  */
-export function resolveGroupFilter(db, group) {
+export async function resolveGroupFilter(db, group) {
   if (!group || !group.type || !group.value || String(group.value).toLowerCase() === 'all') return null;
   const type = String(group.type);
   if (!['income_level', 'region', 'lending_type'].includes(type)) {
     throw pricesError(PRICES_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown group type "${group.type}".`, 400);
   }
   const col = type === 'income_level' ? 'income_level' : type === 'region' ? 'region' : 'lending_type';
-  const rows = db.prepare(`SELECT DISTINCT ${col} AS v FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL`).all();
+  const rows = await listDistinctCountryColumn(db, col);
   const allowed = new Set(rows.map((r) => String(r.v)));
   if (!allowed.has(String(group.value))) {
     throw pricesError(PRICES_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown ${type} "${group.value}".`, 400);
   }
-  const members = db
-    .prepare(`SELECT id FROM countries WHERE is_aggregate = 0 AND ${col} = ?`)
-    .all(String(group.value))
-    .map((r) => String(r.id).toUpperCase());
+  const members = await listCountryIdsByColumn(db, col, String(group.value));
   return { type, value: String(group.value), members: new Set(members) };
 }
 
 /** List available classifications dynamically (no hard-coded membership). */
-export function listPriceCountryGroups(db) {
-  const q = (col) =>
-    db
-      .prepare(
-        `SELECT ${col} AS value, COUNT(*) AS eligibleCount FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY ${col}`,
-      )
-      .all();
+export async function listPriceCountryGroups(db) {
+  const groups = {};
+  for (const col of ['income_level', 'region', 'lending_type']) {
+    groups[col] = await countCountryGroupsByColumn(db, col);
+  }
   return {
     default: 'All',
     vintageNote:
       'Classifications are the current retrieved World Bank metadata vintage stored in this project, not historical classifications as of the compared years. Period comparisons therefore use current-vintage membership; historical reclassification is not tracked.',
     supported: {
-      income_level: q('income_level'),
-      region: q('region'),
-      lending_type: q('lending_type'),
+      income_level: groups.income_level,
+      region: groups.region,
+      lending_type: groups.lending_type,
     },
     unsupportedRequestedLabels: {
       requested: ['All', 'Developed', 'Developing', 'Underdeveloped'],
@@ -274,7 +272,7 @@ function buildAnnualResult({ values, focusIso3, basisId, year }) {
  * Main entry: build Prices movement for one metric+basis and S/[M]/E.
  * options: { metricKey, basis, yearA, yearB, yearMid?, focusIso3?, group? }
  */
-export function buildPricesMovement(db, options = {}) {
+export async function buildPricesMovement(db, options = {}) {
   const { metricKey } = options;
   if (!metricKey || !isPricesMetric(metricKey) || !METRICS[metricKey]) {
     throw pricesError(PRICES_ERROR_CODES.INVALID_METRIC, `Unknown or non-Prices metric "${metricKey}".`, 400);
@@ -299,11 +297,11 @@ export function buildPricesMovement(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   if (!/^[A-Z]{3}$/.test(focusIso3)) throw pricesError(PRICES_ERROR_CODES.UNKNOWN_COUNTRY, `Invalid focus country "${options.focusIso3}".`, 400);
 
-  const groupSet = resolveGroupFilter(db, options.group ?? null);
+  const groupSet = await resolveGroupFilter(db, options.group ?? null);
 
   const metric = METRICS[metricKey];
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const focusName = focusDisplayName(db, focusIso3);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const focusName = await focusDisplayName(db, focusIso3);
   const base = {
     metric: describeMetric(metric),
     basis: basisInfo(basisId),
@@ -331,7 +329,7 @@ export function buildPricesMovement(db, options = {}) {
 
   if (isAnnualBasis) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = getEligibleObservationsForYears(db, indicator.id, years);
+    const rows = await getEligibleObservationsForYears(db, indicator.id, years);
     // Attach names
     const byIsoYear = indexByIsoYear(rows);
     // Candidate universe: eligible rows restricted by group first
@@ -394,7 +392,7 @@ export function buildPricesMovement(db, options = {}) {
   const seqBasis = Boolean(info.requiresSequence);
   const minYear = seqBasis ? S + 1 : Math.min(...periods.flatMap((p) => [p.s, p.e]));
   const maxYear = E;
-  const rows = getEligibleObservationsRange(db, indicator.id, minYear, maxYear);
+  const rows = await getEligibleObservationsRange(db, indicator.id, minYear, maxYear);
   const byIsoYear = indexByIsoYear(rows);
   const nameMap = new Map();
   for (const r of rows) nameMap.set(String(r.iso3).toUpperCase(), r.name);

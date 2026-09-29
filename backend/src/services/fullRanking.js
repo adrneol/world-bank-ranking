@@ -22,14 +22,14 @@ import { sourceAttribution } from './attribution.js';
  * @param {{year?:number, metricKey?:string, page?:number, pageSize?:number,
  *          search?:string, focusIso3?:string}} [options]
  */
-export function buildFullRanking(db, options = {}) {
+export async function buildFullRanking(db, options = {}) {
   const metricKey = options.metricKey ?? METRIC_KEYS[0];
   const metric = METRICS[metricKey];
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
 
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const eligibleUniverse = countEligibleCountries(db);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const eligibleUniverse = await countEligibleCountries(db);
   // Ranking direction comes from the metric registry: DESC (GDP default),
   // ASC (e.g. inflation, lower first), or refusal for NEUTRAL metrics whose
   // raw levels must never be ordered into a country rank.
@@ -67,10 +67,10 @@ export function buildFullRanking(db, options = {}) {
     };
   }
 
-  const year = options.year ?? getYearRange(db, indicator.id).maxYear;
+  const year = options.year ?? (await getYearRange(db, indicator.id)).maxYear;
   const { ranked, total } = year === null
     ? { ranked: [], total: 0 }
-    : rankByValue(getEligibleObservations(db, indicator.id, year), direction);
+    : rankByValue(await getEligibleObservations(db, indicator.id, year), direction);
 
   const decorate = (row) => ({
     rank: row.rank,

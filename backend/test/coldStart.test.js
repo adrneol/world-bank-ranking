@@ -60,9 +60,14 @@ async function waitForIdle(timeoutMs = 60000) {
   }
 }
 
-function backdateLatestRun(db, hoursAgo) {
+async function backdateLatestRun(db, hoursAgo) {
+  const { queryRun } = await import('../src/db/driver.js');
   const iso = new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
-  db.prepare('UPDATE fetch_runs SET started_at = ?, completed_at = ? WHERE id = (SELECT MAX(id) FROM fetch_runs)').run(iso, iso);
+  await queryRun(
+    db,
+    'UPDATE fetch_runs SET started_at = ?, completed_at = ? WHERE id = (SELECT MAX(id) FROM fetch_runs)',
+    [iso, iso],
+  );
 }
 
 async function rankingSnapshot(api) {
@@ -75,11 +80,11 @@ async function rankingSnapshot(api) {
 test('1. years reports DATA_LOADING while the first ingest runs, then serves once published', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { refreshData } = await import('../src/wb/ingest.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   stub.reset();
 
-  // refreshData acquires the DB lock and raises the in-progress flag
-  // synchronously, so the seed is observably running from this line on.
+  // refreshData raises the in-progress flag synchronously, so the seed is
+  // observably running from this line on (the years gate checks the flag).
   const seed = refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-boot-seed' });
   const api = await serve(db);
   try {
@@ -101,7 +106,7 @@ test('1. years reports DATA_LOADING while the first ingest runs, then serves onc
 // 2. Empty DB + no ingest -> previous 200-empty contract is unchanged.
 test('2. empty database without a running ingest keeps the 200-empty contract', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
 
   const api = await serve(db);
   try {
@@ -120,10 +125,10 @@ test('2. empty database without a running ingest keeps the 200-empty contract', 
 test('3. non-empty database serves years normally while a background refresh runs', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { refreshData } = await import('../src/wb/ingest.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   stub.reset();
   await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-seed' });
-  backdateLatestRun(db, 48);
+  await backdateLatestRun(db, 48);
 
   const api = await serve(db, { autoRefresh: true });
   try {
@@ -144,14 +149,14 @@ test('3. non-empty database serves years normally while a background refresh run
 test('4. ranking reads stay identical before, during, and after a background refresh', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { refreshData } = await import('../src/wb/ingest.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   stub.reset();
   await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-seed' });
 
   const api = await serve(db, { autoRefresh: true });
   try {
     const before = await rankingSnapshot(api);
-    backdateLatestRun(db, 48);
+    await backdateLatestRun(db, 48);
 
     // This request trips the stale detector and launches the background
     // refresh; the stub is deterministic so any partial publish would show

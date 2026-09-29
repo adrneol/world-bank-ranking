@@ -9,10 +9,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createMemoryTestDb, seedEdgeCaseDb } from './helpers/testDb.js';
+import { queryRun } from '../src/db/driver.js';
 
 async function run(db) {
   const { runIntegrityChecks } = await import('../src/services/integrity.js');
-  return runIntegrityChecks(db);
+  return await runIntegrityChecks(db);
 }
 
 function statusOf(report, check) {
@@ -30,15 +31,15 @@ test('clean database passes null/aggregate/orphan/duplicate/year/finite checks',
   const { EDGE_METADATA, EDGE_BLANK_METADATA, EDGE_OBSERVATIONS } = await import('./fixtures/edgeCases.js');
 
   const universe = buildUniverse([...EDGE_METADATA, ...EDGE_BLANK_METADATA]);
-  repository.upsertCountries(db, universe.countries);
+  await repository.upsertCountries(db, universe.countries);
   const { ALL_METRIC_KEYS } = await import('../src/config.js');
   const eligibleIds = new Set(universe.eligible.map((c) => c.id));
   const eligibleRows = EDGE_OBSERVATIONS.filter((r) => r.value !== null && eligibleIds.has(r.iso3));
   // A production-like database holds EVERY configured metric, both subjects.
   for (const metricKey of ALL_METRIC_KEYS) {
-    repository.upsertIndicator(db, { ...METRICS[metricKey], name: 'x', unit: 'u', source: 'WDI' });
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
-    repository.upsertObservations(
+    await repository.upsertIndicator(db, { ...METRICS[metricKey], name: 'x', unit: 'u', source: 'WDI' });
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
+    await repository.upsertObservations(
       db,
       eligibleRows.map((r) => ({
         countryId: r.iso3,
@@ -68,7 +69,7 @@ test('partial indicator set fails H loudly instead of silently ranking a subset'
 test('an unexpected indicator fails H (no series is silently accepted)', async () => {
   const { db, repository } = await seedEdgeCaseDb();
   // Smuggle in a series that is NOT part of the curated registry.
-  repository.upsertIndicator(db, {
+  await repository.upsertIndicator(db, {
     key: 'unregistered_series',
     indicatorCode: 'NY.GDP.MKTP.KN',
     label: 'GDP (constant LCU)',
@@ -116,7 +117,7 @@ test('B detects metadata typing drift against the recorded universe snapshot', a
     },
   });
   // Corrupt the typing after the snapshot: WLD flips to eligible.
-  db.prepare('UPDATE countries SET is_aggregate = 0 WHERE id = ?').run('WLD');
+  await queryRun(db, 'UPDATE countries SET is_aggregate = 0 WHERE id = ?', ['WLD']);
   const report = await run(db);
   assert.equal(statusOf(report, 'B.aggregate_typing'), 'fail');
   assert.deepEqual(report.checks.find((c) => c.check === 'B.aggregate_typing').detail.mismatches, ['WLD']);
@@ -125,7 +126,7 @@ test('B detects metadata typing drift against the recorded universe snapshot', a
 
 test('E detects an implausible year', async () => {
   const { db, repository, indicator } = await seedEdgeCaseDb();
-  repository.upsertObservation(db, { countryId: 'IND', indicatorId: indicator.id, year: 1700, value: 100 });
+  await repository.upsertObservation(db, { countryId: 'IND', indicatorId: indicator.id, year: 1700, value: 100 });
   const report = await run(db);
   assert.equal(statusOf(report, 'E.invalid_year'), 'fail');
 });
@@ -138,11 +139,11 @@ test('I detects a missing India series for an ingested indicator', async () => {
   const { EDGE_METADATA, EDGE_BLANK_METADATA } = await import('./fixtures/edgeCases.js');
 
   const universe = buildUniverse([...EDGE_METADATA, ...EDGE_BLANK_METADATA]);
-  repository.upsertCountries(db, universe.countries);
-  repository.upsertIndicator(db, { ...METRICS.nominal_current, name: 'x', unit: 'current US$', source: 'WDI' });
-  const indicator = repository.getIndicatorByMetricKey(db, 'nominal_current');
+  await repository.upsertCountries(db, universe.countries);
+  await repository.upsertIndicator(db, { ...METRICS.nominal_current, name: 'x', unit: 'current US$', source: 'WDI' });
+  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
   // Only USA holds data: India is missing for the only ingested indicator.
-  repository.upsertObservation(db, { countryId: 'USA', indicatorId: indicator.id, year: 2005, value: 43000 });
+  await repository.upsertObservation(db, { countryId: 'USA', indicatorId: indicator.id, year: 2005, value: 43000 });
 
   const report = await run(db);
   assert.equal(statusOf(report, 'I.india_observations'), 'fail');

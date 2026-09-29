@@ -33,13 +33,13 @@ test.after(async () => {
 
 async function freshDb() {
   const { createMemoryDb } = await import('../src/db/index.js');
-  return createMemoryDb();
+  return await createMemoryDb();
 }
 
 async function ingestFull(db, years = { startYear: 2024, endYear: 2025 }) {
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
-  return refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
+  return await refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
 }
 
 async function startApp(db) {
@@ -65,8 +65,8 @@ async function hydrateFrontendFromBackend() {
 
 async function obsValue(db, metricKey, iso3, year) {
   const repository = await import('../src/db/repository.js');
-  const indicator = repository.getIndicatorByMetricKey(db, metricKey);
-  const row = repository.getObservation(db, iso3, indicator.id, year);
+  const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
+  const row = await repository.getObservation(db, iso3, indicator.id, year);
   return row ? row.value : null;
 }
 

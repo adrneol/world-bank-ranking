@@ -11,8 +11,11 @@
 
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
+  countCountryGroupsByColumn,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
+  listCountryIdsByColumn,
+  listDistinctCountryColumn,
 } from '../db/repository.js';
 import { describeMetric, formatValue } from '../domain/format.js';
 import {
@@ -71,33 +74,28 @@ function normalizeMid(options, yearA, yearB) {
 }
 
 /** Dynamic group membership (no hardcoding); values validated vs DISTINCT DB values. */
-export function resolveTradeGroupFilter(db, group) {
+export async function resolveTradeGroupFilter(db, group) {
   if (!group || !group.type || !group.value || String(group.value).toLowerCase() === 'all') return null;
   const type = String(group.type);
   if (!['income_level', 'region', 'lending_type'].includes(type)) {
     throw tradeError(TRADE_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown group type "${group.type}".`, 400);
   }
   const col = type === 'income_level' ? 'income_level' : type === 'region' ? 'region' : 'lending_type';
-  const rows = db.prepare(`SELECT DISTINCT ${col} AS v FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL`).all();
+  const rows = await listDistinctCountryColumn(db, col);
   const allowed = new Set(rows.map((r) => String(r.v)));
   if (!allowed.has(String(group.value))) {
     throw tradeError(TRADE_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown ${type} "${group.value}".`, 400);
   }
-  const members = db
-    .prepare(`SELECT id FROM countries WHERE is_aggregate = 0 AND ${col} = ?`)
-    .all(String(group.value))
-    .map((r) => String(r.id).toUpperCase());
+  const members = await listCountryIdsByColumn(db, col, String(group.value));
   return { type, value: String(group.value), members: new Set(members) };
 }
 
 /** Dynamic classification discovery (same authoritative store as Prices). */
-export function listTradeCountryGroups(db) {
-  const q = (col) =>
-    db
-      .prepare(
-        `SELECT ${col} AS value, COUNT(*) AS eligibleCount FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY ${col}`,
-      )
-      .all();
+export async function listTradeCountryGroups(db) {
+  const groups = {};
+  for (const col of ['income_level', 'region', 'lending_type']) {
+    groups[col] = await countCountryGroupsByColumn(db, col);
+  }
   return {
     default: 'All',
     vintageNote:
@@ -105,9 +103,9 @@ export function listTradeCountryGroups(db) {
     nominalCaveat:
       'Current-US$ trade values measure nominal trade values. Changes can reflect quantities, prices, exchange rates and trade composition — not pure real-volume growth.',
     supported: {
-      income_level: q('income_level'),
-      region: q('region'),
-      lending_type: q('lending_type'),
+      income_level: groups.income_level,
+      region: groups.region,
+      lending_type: groups.lending_type,
     },
     unsupportedRequestedLabels: {
       requested: ['All', 'Developed', 'Developing', 'Underdeveloped'],
@@ -259,7 +257,7 @@ function buildTradeAnnualResult({ values, focusIso3, basisId, year, metric }) {
 /**
  * Main entry: build Trade movement for one metric+basis and S/[M]/E.
  */
-export function buildTradeMovement(db, options = {}) {
+export async function buildTradeMovement(db, options = {}) {
   const { metricKey } = options;
   if (!metricKey || !isTradeMetric(metricKey) || !METRICS[metricKey]) {
     throw tradeError(TRADE_ERROR_CODES.INVALID_METRIC, `Unknown or non-Trade metric "${metricKey}".`, 400);
@@ -284,10 +282,10 @@ export function buildTradeMovement(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   if (!/^[A-Z]{3}$/.test(focusIso3)) throw tradeError(TRADE_ERROR_CODES.UNKNOWN_COUNTRY, `Invalid focus country "${options.focusIso3}".`, 400);
 
-  const groupSet = resolveTradeGroupFilter(db, options.group ?? null);
+  const groupSet = await resolveTradeGroupFilter(db, options.group ?? null);
   const metric = METRICS[metricKey];
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const focusName = focusDisplayName(db, focusIso3);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const focusName = await focusDisplayName(db, focusIso3);
   const info = tradeBasisInfo(basisId);
   const base = {
     metric: describeMetric(metric),
@@ -312,8 +310,9 @@ export function buildTradeMovement(db, options = {}) {
 
   if (isAnnualBasis(basisId)) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = getEligibleObservationsRange(db, indicator.id, Math.min(...years), Math.max(...years))
-      .filter((r) => years.includes(Number(r.year)));
+    const rows = (
+      await getEligibleObservationsRange(db, indicator.id, Math.min(...years), Math.max(...years))
+    ).filter((r) => years.includes(Number(r.year)));
     const byIsoYear = indexByIsoYear(rows);
     const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
     const grouped = applyGroup([...byIsoYear.keys()]);
@@ -335,7 +334,7 @@ export function buildTradeMovement(db, options = {}) {
     ? [{ label: `${S}→${M}`, s: S, e: M }, { label: `${M}→${E}`, s: M, e: E }, { label: `${S}→${E}`, s: S, e: E }]
     : [{ label: `${S}→${E}`, s: S, e: E }];
 
-  const rows = getEligibleObservationsRange(db, indicator.id, S, E);
+  const rows = await getEligibleObservationsRange(db, indicator.id, S, E);
   const byIsoYear = indexByIsoYear(rows);
   const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
   const groupedIsos = applyGroup([...byIsoYear.keys()]);

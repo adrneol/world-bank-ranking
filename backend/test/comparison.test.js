@@ -347,14 +347,14 @@ async function snapshotFixture() {
 }
 
 /** Eligible stored rows for one metric and year, via the existing repository. */
-function rowsForYear(db, repository, metricKey, year) {
-  const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+async function rowsForYear(db, repository, metricKey, year) {
+  const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
   return repository.getEligibleObservations(db, indicator.id, year);
 }
 
 test('the seeded snapshot reproduces the stored denominators of the real vintage', async () => {
   const { db, repository } = await snapshotFixture();
-  assert.equal(repository.countEligibleCountries(db), 217);
+  assert.equal(await repository.countEligibleCountries(db), 217);
 
   const expected = {
     nominal_current: { 2004: 209, 2014: 213, 2024: 200 },
@@ -364,7 +364,7 @@ test('the seeded snapshot reproduces the stored denominators of the real vintage
   };
   for (const [metricKey, years] of Object.entries(expected)) {
     for (const [year, total] of Object.entries(years)) {
-      const { ranked } = rankByValue(rowsForYear(db, repository, metricKey, Number(year)));
+      const { ranked } = rankByValue(await rowsForYear(db, repository, metricKey, Number(year)));
       assert.equal(ranked.length, total, `${metricKey} ${year}`);
     }
   }
@@ -373,8 +373,8 @@ test('the seeded snapshot reproduces the stored denominators of the real vintage
 test('report case: nominal_current 2004 to 2014 decomposes exactly', async () => {
   const { db, repository } = await snapshotFixture();
   const result = buildLevelComparison({
-    rowsA: rowsForYear(db, repository, 'nominal_current', 2004),
-    rowsB: rowsForYear(db, repository, 'nominal_current', 2014),
+    rowsA: await rowsForYear(db, repository, 'nominal_current', 2004),
+    rowsB: await rowsForYear(db, repository, 'nominal_current', 2014),
     focusIso3: 'IND',
   });
 
@@ -395,8 +395,8 @@ test('report case: nominal_current 2004 to 2014 decomposes exactly', async () =>
 test('report case: nominal_current 2014 to 2024 decomposes exactly', async () => {
   const { db, repository } = await snapshotFixture();
   const result = buildLevelComparison({
-    rowsA: rowsForYear(db, repository, 'nominal_current', 2014),
-    rowsB: rowsForYear(db, repository, 'nominal_current', 2024),
+    rowsA: await rowsForYear(db, repository, 'nominal_current', 2014),
+    rowsB: await rowsForYear(db, repository, 'nominal_current', 2024),
     focusIso3: 'IND',
   });
 
@@ -473,8 +473,8 @@ test('report cases: one verified year pair for each of the four indicators', asy
 
   for (const entry of cases) {
     const result = buildLevelComparison({
-      rowsA: rowsForYear(db, repository, entry.metricKey, entry.yearA),
-      rowsB: rowsForYear(db, repository, entry.metricKey, entry.yearB),
+      rowsA: await rowsForYear(db, repository, entry.metricKey, entry.yearA),
+      rowsB: await rowsForYear(db, repository, entry.metricKey, entry.yearB),
       focusIso3: 'IND',
     });
     const label = `${entry.metricKey} ${entry.yearA}-${entry.yearB}`;
@@ -496,10 +496,11 @@ test('invariant sweep: every metric and every year pair of the stored vintage re
 
   let checked = 0;
   for (const metricKey of METRIC_KEYS) {
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
-    const rowsByYear = new Map(
-      years.map((year) => [year, repository.getEligibleObservations(db, indicator.id, year)]),
-    );
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
+    const rowsByYear = new Map();
+    for (const year of years) {
+      rowsByYear.set(year, await repository.getEligibleObservations(db, indicator.id, year));
+    }
 
     for (const yearA of years) {
       for (const yearB of years) {
@@ -543,10 +544,10 @@ test('full ranks agree with the existing ranking services for the same metric an
   ];
 
   for (const { metricKey, year } of checks) {
-    const rows = rowsForYear(db, repository, metricKey, year);
+    const rows = await rowsForYear(db, repository, metricKey, year);
     const engine = rankByValue(rows);
     const engineFocus = engine.ranked.find((entry) => entry.iso3 === 'IND');
-    const verification = buildRankVerification(db, { metricKey, year, focusIso3: 'IND' });
+    const verification = await buildRankVerification(db, { metricKey, year, focusIso3: 'IND' });
     const comparison = buildLevelComparison({ rowsA: rows, rowsB: rows, focusIso3: 'IND' });
 
     assert.equal(comparison.focus.fullRankA, engineFocus.rank, `${metricKey} ${year} engine rank`);
@@ -566,16 +567,16 @@ test('YoY comparison uses the YoY pair universe, never the level universe', asyn
   const { db, repository } = await seedEdgeCaseDb();
   // Period A ends in 2004 (2003 -> 2004); period B ends in 2005 (2004 -> 2005).
   const result = buildYoyComparison({
-    currentA: rowsForYear(db, repository, 'nominal_current', 2004),
-    previousA: rowsForYear(db, repository, 'nominal_current', 2003),
-    currentB: rowsForYear(db, repository, 'nominal_current', 2005),
-    previousB: rowsForYear(db, repository, 'nominal_current', 2004),
+    currentA: await rowsForYear(db, repository, 'nominal_current', 2004),
+    previousA: await rowsForYear(db, repository, 'nominal_current', 2003),
+    currentB: await rowsForYear(db, repository, 'nominal_current', 2005),
+    previousB: await rowsForYear(db, repository, 'nominal_current', 2004),
     focusIso3: 'IND',
   });
 
   // Level denominators for the same years are 7 and 6 (edge fixture).
-  const level2004 = rankByValue(rowsForYear(db, repository, 'nominal_current', 2004)).total;
-  const level2005 = rankByValue(rowsForYear(db, repository, 'nominal_current', 2005)).total;
+  const level2004 = rankByValue(await rowsForYear(db, repository, 'nominal_current', 2004)).total;
+  const level2005 = rankByValue(await rowsForYear(db, repository, 'nominal_current', 2005)).total;
   assert.equal(level2004, EDGE_EXPECTATIONS.levelDenominator[2004]);
   assert.equal(level2005, EDGE_EXPECTATIONS.levelDenominator[2005]);
 
@@ -598,10 +599,10 @@ test('YoY comparison uses the YoY pair universe, never the level universe', asyn
 
   // A period with no base year yields no YoY universe and no decomposition.
   const noBase = buildYoyComparison({
-    currentA: rowsForYear(db, repository, 'nominal_current', 2004),
+    currentA: await rowsForYear(db, repository, 'nominal_current', 2004),
     previousA: [],
-    currentB: rowsForYear(db, repository, 'nominal_current', 2005),
-    previousB: rowsForYear(db, repository, 'nominal_current', 2004),
+    currentB: await rowsForYear(db, repository, 'nominal_current', 2005),
+    previousB: await rowsForYear(db, repository, 'nominal_current', 2004),
     focusIso3: 'IND',
   });
   assert.equal(noBase.totals.a, 0);
@@ -620,7 +621,7 @@ test('YoY invariant sweep: every metric and period pair of the stored vintage re
 
   let checked = 0;
   for (const metricKey of METRIC_KEYS) {
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
     // Include the base year before the first period: period P needs rows for
     // P (current) and P-1 (previous). Mapping only `periods` would leave
     // previousA/B undefined for the earliest period.
@@ -628,9 +629,10 @@ test('YoY invariant sweep: every metric and period pair of the stored vintage re
     for (let year = snapshot.yearRange.startYear; year <= snapshot.yearRange.endYear; year += 1) {
       allYears.push(year);
     }
-    const rowsByYear = new Map(
-      allYears.map((year) => [year, repository.getEligibleObservations(db, indicator.id, year)]),
-    );
+    const rowsByYear = new Map();
+    for (const year of allYears) {
+      rowsByYear.set(year, await repository.getEligibleObservations(db, indicator.id, year));
+    }
 
     for (const periodA of periods) {
       for (const periodB of periods) {

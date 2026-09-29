@@ -136,7 +136,7 @@ test('buildMetadataChange: same run is comparable and unchanged', async () => {
   const runId = await recordSuccessRun(db, repository, {
     universeSnapshot: { eligibleCount: 7, eligibleIds: ['IND'], aggregateIds: ['WLD'] },
   });
-  const change = buildMetadataChange(db, runId, runId);
+  const change = await buildMetadataChange(db, runId, runId);
   assert.equal(change.comparable, true);
   assert.equal(change.changed, false);
   assert.deepEqual(change.added, []);
@@ -154,7 +154,7 @@ test('buildMetadataChange: lists actual added/removed entities', async () => {
     universeSnapshot: { eligibleCount: 2, eligibleIds: ['IND', 'BRA'], aggregateIds: [] },
   });
 
-  const change = buildMetadataChange(db, runA, runB);
+  const change = await buildMetadataChange(db, runA, runB);
   assert.equal(change.comparable, true);
   assert.equal(change.changed, true);
   assert.deepEqual(change.added, ['BRA']);
@@ -166,7 +166,7 @@ test('buildMetadataChange: missing snapshot is not comparable', async () => {
   const { db } = await seedEdgeCaseDb();
   const { buildMetadataChange } = await import('../src/services/coverageService.js');
 
-  const change = buildMetadataChange(db, null, 9999);
+  const change = await buildMetadataChange(db, null, 9999);
   assert.equal(change.comparable, false);
 });
 
@@ -174,30 +174,30 @@ test('latest-run selection is deterministic (highest fetch_run_id wins)', async 
   const { seedEdgeCaseDb } = await import('./helpers/testDb.js');
   const { db, repository } = await seedEdgeCaseDb();
 
-  const run1 = repository.startFetchRun(db, {
+  const run1 = await repository.startFetchRun(db, {
     trigger: 'test', endpoint: 'stub://x', requestedStartYear: 2004, requestedEndYear: 2005,
     fetchedStartYear: 2003, fetchedEndYear: 2005, indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, run1, { status: 'success' });
-  const run2 = repository.startFetchRun(db, {
+  await repository.finishFetchRun(db, run1, { status: 'success' });
+  const run2 = await repository.startFetchRun(db, {
     trigger: 'test', endpoint: 'stub://x', requestedStartYear: 2004, requestedEndYear: 2005,
     fetchedStartYear: 2003, fetchedEndYear: 2005, indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, run2, { status: 'success' });
+  await repository.finishFetchRun(db, run2, { status: 'success' });
 
-  repository.upsertIngestYearStats(db, run1, [
+  await repository.upsertIngestYearStats(db, run1, [
     { metricKey: 'nominal_current', indicatorCode: 'NY.GDP.PCAP.CD', year: 2005, rowsReceived: 10 },
   ]);
-  repository.upsertIngestYearStats(db, run2, [
+  await repository.upsertIngestYearStats(db, run2, [
     { metricKey: 'nominal_current', indicatorCode: 'NY.GDP.PCAP.CD', year: 2005, rowsReceived: 99 },
   ]);
 
   assert.ok(run2 > run1);
-  const latest = repository.getLatestIngestYearStat(db, 'nominal_current', 2005);
+  const latest = await repository.getLatestIngestYearStat(db, 'nominal_current', 2005);
   assert.equal(latest.fetch_run_id, run2);
   assert.equal(latest.rows_received, 99);
 
-  const all = repository.getIngestYearStats(db, 'nominal_current', { year: 2005 });
+  const all = await repository.getIngestYearStats(db, 'nominal_current', { year: 2005 });
   assert.equal(all[0].fetch_run_id, run2, 'single-year list is latest-first');
 });
 
@@ -211,30 +211,30 @@ test('explainTotalChange uses each run own snapshot universe, not the current co
   // table count of 7) with identical ids, so the test proves each year's
   // coverage used its own run snapshot rather than the current count.
   const snapshotIds = ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'];
-  const runFrom = repository.startFetchRun(db, {
+  const runFrom = await repository.startFetchRun(db, {
     trigger: 'test', endpoint: 'stub://x', requestedStartYear: 2004, requestedEndYear: 2004,
     fetchedStartYear: 2003, fetchedEndYear: 2004, indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, runFrom, {
+  await repository.finishFetchRun(db, runFrom, {
     status: 'success',
     universeSnapshot: { eligibleCount: 9, eligibleIds: snapshotIds, aggregateIds: [] },
   });
-  const runTo = repository.startFetchRun(db, {
+  const runTo = await repository.startFetchRun(db, {
     trigger: 'test', endpoint: 'stub://x', requestedStartYear: 2005, requestedEndYear: 2005,
     fetchedStartYear: 2004, fetchedEndYear: 2005, indicators: ['NY.GDP.PCAP.CD'],
   });
-  repository.finishFetchRun(db, runTo, {
+  await repository.finishFetchRun(db, runTo, {
     status: 'success',
     universeSnapshot: { eligibleCount: 9, eligibleIds: [...snapshotIds], aggregateIds: [] },
   });
-  repository.upsertIngestYearStats(db, runFrom, [
+  await repository.upsertIngestYearStats(db, runFrom, [
     { metricKey: 'nominal_current', indicatorCode: 'NY.GDP.PCAP.CD', year: 2004, rowsReceived: 12 },
   ]);
-  repository.upsertIngestYearStats(db, runTo, [
+  await repository.upsertIngestYearStats(db, runTo, [
     { metricKey: 'nominal_current', indicatorCode: 'NY.GDP.PCAP.CD', year: 2005, rowsReceived: 12 },
   ]);
 
-  const result = explainTotalChange(db, { metricKey: 'nominal_current', fromYear: 2004, toYear: 2005 });
+  const result = await explainTotalChange(db, { metricKey: 'nominal_current', fromYear: 2004, toYear: 2005 });
   assert.equal(result.available, true);
   assert.equal(result.fromEligibleUniverse, 9);
   assert.equal(result.toEligibleUniverse, 9);

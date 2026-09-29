@@ -36,8 +36,10 @@ async function freshDb() {
 /** Reference implementation: the pre-optimization 1 + N DISTINCT algorithm. */
 async function legacyAvailableYears(db) {
   const { listIndicators, listYearsWithData } = await import('../src/db/repository.js');
-  const years = db
-    .prepare(
+  const { queryAll } = await import('../src/db/driver.js');
+  const years = (
+    await queryAll(
+      db,
       `
       SELECT DISTINCT o.year AS year
       FROM observations o
@@ -46,12 +48,11 @@ async function legacyAvailableYears(db) {
       ORDER BY o.year
     `,
     )
-    .all()
-    .map((r) => r.year);
+  ).map((r) => r.year);
 
   const perMetric = {};
-  for (const indicator of listIndicators(db)) {
-    perMetric[indicator.metric_key] = listYearsWithData(db, indicator.id);
+  for (const indicator of await listIndicators(db)) {
+    perMetric[indicator.metric_key] = await listYearsWithData(db, indicator.id);
   }
 
   return {
@@ -76,25 +77,25 @@ async function seedSynthetic(db) {
     seedCountry(db, 'BBB', 'BB', 'BBB', 'Beta', false),
     seedCountry(db, 'AGG', null, 'AGG', 'Aggregates', true),
   ]) {
-    upsertCountry(db, row);
+    await upsertCountry(db, row);
   }
-  upsertIndicator(db, { indicatorCode: 'X.A', key: 'metric_a', name: 'A', unit: 'u' });
-  upsertIndicator(db, { indicatorCode: 'X.B', key: 'metric_b', name: 'B', unit: 'u' });
-  upsertIndicator(db, { indicatorCode: 'X.C', key: 'metric_c', name: 'C', unit: 'u' });
-  const idA = getIndicatorByMetricKey(db, 'metric_a').id;
-  const idB = getIndicatorByMetricKey(db, 'metric_b').id;
-  const idC = getIndicatorByMetricKey(db, 'metric_c').id;
+  await upsertIndicator(db, { indicatorCode: 'X.A', key: 'metric_a', name: 'A', unit: 'u' });
+  await upsertIndicator(db, { indicatorCode: 'X.B', key: 'metric_b', name: 'B', unit: 'u' });
+  await upsertIndicator(db, { indicatorCode: 'X.C', key: 'metric_c', name: 'C', unit: 'u' });
+  const idA = (await getIndicatorByMetricKey(db, 'metric_a')).id;
+  const idB = (await getIndicatorByMetricKey(db, 'metric_b')).id;
+  const idC = (await getIndicatorByMetricKey(db, 'metric_c')).id;
   const put = (countryId, indicatorId, year, value, wb = '2026-07-13') =>
     upsertObservation(db, { countryId, indicatorId, year, value, wbLastUpdated: wb });
-  put('AAA', idA, 2000, 1);
-  put('AAA', idA, 2001, 2);
-  put('BBB', idA, 2001, 3);
+  await put('AAA', idA, 2000, 1);
+  await put('AAA', idA, 2001, 2);
+  await put('BBB', idA, 2001, 3);
   // Note: NULL values cannot occur here at all (observations.value is NOT
   // NULL); the IS NOT NULL predicate in the queries stays defensive.
-  put('BBB', idB, 2001, 4, '2026-07-14');
-  put('BBB', idB, 2005, 5);
-  put('AGG', idA, 2000, 999);
-  put('AGG', idB, 2001, 999);
+  await put('BBB', idB, 2001, 4, '2026-07-14');
+  await put('BBB', idB, 2005, 5);
+  await put('AGG', idA, 2000, 999);
+  await put('AGG', idB, 2001, 999);
   // metric_c stays empty: per-metric [] must survive.
 }
 
@@ -105,7 +106,7 @@ test('1. grouped implementation is identical to the legacy N+1 implementation', 
   try {
     await seedSynthetic(db);
     const expected = await legacyAvailableYears(db);
-    const actual = listAvailableYears(db);
+    const actual = await listAvailableYears(db);
     assert.deepEqual(actual, expected);
     assert.deepEqual(actual.perMetric, {
       metric_a: [2000, 2001],
@@ -125,10 +126,10 @@ test('2. empty database keeps the empty contract', async () => {
   const { listAvailableYears, upsertIndicator } = await import('../src/db/repository.js');
   const db = await freshDb();
   try {
-    upsertIndicator(db, { indicatorCode: 'X.A', key: 'metric_a', name: 'A', unit: 'u' });
+    await upsertIndicator(db, { indicatorCode: 'X.A', key: 'metric_a', name: 'A', unit: 'u' });
     const expected = await legacyAvailableYears(db);
-    assert.deepEqual(listAvailableYears(db), expected);
-    assert.deepEqual(listAvailableYears(db), { years: [], minYear: null, maxYear: null, perMetric: { metric_a: [] } });
+    assert.deepEqual(await listAvailableYears(db), expected);
+    assert.deepEqual(await listAvailableYears(db), { years: [], minYear: null, maxYear: null, perMetric: { metric_a: [] } });
   } finally {
     db.close();
   }
@@ -142,8 +143,8 @@ test('3. grouped implementation matches legacy on ingested data', async () => {
   try {
     stub.reset();
     await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-years' });
-    assert.deepEqual(listAvailableYears(db), await legacyAvailableYears(db));
-    assert.ok(listAvailableYears(db).years.length > 0);
+    assert.deepEqual(await listAvailableYears(db), await legacyAvailableYears(db));
+    assert.ok((await listAvailableYears(db)).years.length > 0);
   } finally {
     db.close();
   }
@@ -155,16 +156,16 @@ test('4. availability resolves in a constant number of statements', async () => 
   const db = await freshDb();
   try {
     await seedSynthetic(db);
-    const original = db.prepare.bind(db);
+    const original = db.execute.bind(db);
     let calls = 0;
-    db.prepare = (...args) => {
+    db.execute = (...args) => {
       calls += 1;
       return original(...args);
     };
     try {
-      listAvailableYears(db);
+      await listAvailableYears(db);
     } finally {
-      db.prepare = original;
+      db.execute = original;
     }
     // listIndicators + one GROUP BY (legacy needed 1 + 1 + N).
     assert.ok(calls <= 3, `expected a constant statement count, saw ${calls}`);
@@ -180,8 +181,8 @@ test('5. warm cache serves the same result reference', async () => {
   const db = await freshDb();
   try {
     await seedSynthetic(db);
-    const first = getCachedAvailableYears(db);
-    const second = getCachedAvailableYears(db);
+    const first = await getCachedAvailableYears(db);
+    const second = await getCachedAvailableYears(db);
     assert.equal(second, first, 'cache hit must return the identical reference');
     assert.deepEqual(first.years, [2000, 2001, 2005]);
   } finally {
@@ -201,17 +202,17 @@ test('6. successful publish advances the generation and refreshes years', async 
   try {
     stub.reset();
     await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-years-publish' });
-    const before = getCachedAvailableYears(db);
-    assert.equal(getCachedAvailableYears(db), before);
+    const before = await getCachedAvailableYears(db);
+    assert.equal(await getCachedAvailableYears(db), before);
 
     // Simulate the next successful publish: one more year plus a recorded
     // success run (what refreshData's staged publish always produces).
-    const indicatorId = getIndicatorByMetricKey(db, 'nominal_current').id;
-    upsertObservation(db, { countryId: 'IND', indicatorId, year: 2026, value: 1, wbLastUpdated: '2026-07-13' });
-    const runId = startFetchRun(db, { trigger: 'test', endpoint: 'test', requestedStartYear: 2026, requestedEndYear: 2026, fetchedStartYear: 2026, fetchedEndYear: 2026, indicators: 'x' });
-    finishFetchRun(db, runId, { status: 'success' });
+    const indicatorId = (await getIndicatorByMetricKey(db, 'nominal_current')).id;
+    await upsertObservation(db, { countryId: 'IND', indicatorId, year: 2026, value: 1, wbLastUpdated: '2026-07-13' });
+    const runId = await startFetchRun(db, { trigger: 'test', endpoint: 'test', requestedStartYear: 2026, requestedEndYear: 2026, fetchedStartYear: 2026, fetchedEndYear: 2026, indicators: 'x' });
+    await finishFetchRun(db, runId, { status: 'success' });
 
-    const after = getCachedAvailableYears(db);
+    const after = await getCachedAvailableYears(db);
     assert.notEqual(after, before, 'new generation must recompute');
     assert.ok(after.years.includes(2026), 'newly published year is available');
     assert.deepEqual(after.perMetric.nominal_current.slice(-1), [2026]);
@@ -231,12 +232,12 @@ test('7. failed run keeps serving the previous generation', async () => {
   try {
     stub.reset();
     await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-years-fail' });
-    const before = getCachedAvailableYears(db);
+    const before = await getCachedAvailableYears(db);
 
-    const runId = startFetchRun(db, { trigger: 'test', endpoint: 'test', requestedStartYear: 2024, requestedEndYear: 2025, fetchedStartYear: 2024, fetchedEndYear: 2025, indicators: 'x' });
-    finishFetchRun(db, runId, { status: 'failed', errorMessage: 'boom' });
+    const runId = await startFetchRun(db, { trigger: 'test', endpoint: 'test', requestedStartYear: 2024, requestedEndYear: 2025, fetchedStartYear: 2024, fetchedEndYear: 2025, indicators: 'x' });
+    await finishFetchRun(db, runId, { status: 'failed', errorMessage: 'boom' });
 
-    assert.equal(getCachedAvailableYears(db), before, 'failed run must not disturb the cache');
+    assert.equal(await getCachedAvailableYears(db), before, 'failed run must not disturb the cache');
   } finally {
     db.close();
     resetYearsCache();
@@ -265,9 +266,9 @@ test('9. max upstream vintage derives from observations', async () => {
   const { getMaxWbLastUpdated } = await import('../src/db/repository.js');
   const db = await freshDb();
   try {
-    assert.equal(getMaxWbLastUpdated(db), null);
+    assert.equal(await getMaxWbLastUpdated(db), null);
     await seedSynthetic(db);
-    assert.equal(getMaxWbLastUpdated(db), '2026-07-14');
+    assert.equal(await getMaxWbLastUpdated(db), '2026-07-14');
   } finally {
     db.close();
   }

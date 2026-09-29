@@ -32,16 +32,16 @@ test('only one acquirer wins the SQLite lock', async () => {
   const { db } = await createMemoryTestDb();
   const repository = await import('../src/db/repository.js');
 
-  assert.equal(repository.acquireRefreshLock(db, { holder: 'a' }), true);
-  assert.equal(repository.acquireRefreshLock(db, { holder: 'b' }), false);
+  assert.equal(await repository.acquireRefreshLock(db, { holder: 'a' }), true);
+  assert.equal(await repository.acquireRefreshLock(db, { holder: 'b' }), false);
 
-  const status = repository.refreshLockStatus(db);
+  const status = await repository.refreshLockStatus(db);
   assert.equal(Boolean(status.locked), true);
   assert.equal(status.holder, 'a');
 
-  repository.releaseRefreshLock(db);
-  assert.equal(repository.acquireRefreshLock(db, { holder: 'b' }), true);
-  repository.releaseRefreshLock(db);
+  await repository.releaseRefreshLock(db);
+  assert.equal(await repository.acquireRefreshLock(db, { holder: 'b' }), true);
+  await repository.releaseRefreshLock(db);
 });
 
 test('concurrent refresh is rejected and the lock is free afterwards', async () => {
@@ -58,7 +58,7 @@ test('concurrent refresh is rejected and the lock is free afterwards', async () 
   await first;
 
   // After completion the SQLite lock must be free again.
-  const status = repository.refreshLockStatus(db);
+  const status = await repository.refreshLockStatus(db);
   assert.equal(Boolean(status.locked), false);
 });
 
@@ -76,10 +76,10 @@ test('failed refresh releases both locks (no permanent wedge)', async () => {
   );
   stub.reset();
 
-  const status = repository.refreshLockStatus(db);
+  const status = await repository.refreshLockStatus(db);
   assert.equal(Boolean(status.locked), false);
 
-  const failed = repository.getLatestFetchRun(db, { status: 'failed' });
+  const failed = await repository.getLatestFetchRun(db, { status: 'failed' });
   assert.ok(failed, 'the failed run is recorded for the audit trail');
 });
 
@@ -88,10 +88,10 @@ test('stale lock recovery frees a crashed holder', async () => {
   const repository = await import('../src/db/repository.js');
   const { recoverRefreshLock } = await import('../src/wb/ingest.js');
 
-  assert.equal(repository.acquireRefreshLock(db, { holder: 'crashed-process' }), true);
+  assert.equal(await repository.acquireRefreshLock(db, { holder: 'crashed-process' }), true);
   // Simulate the crash: in-memory flag is gone (new process), SQLite row stuck.
-  const recovered = recoverRefreshLock(db, 'test recovery');
+  const recovered = await recoverRefreshLock(db, 'test recovery');
   assert.equal(recovered.previous.holder, 'crashed-process');
-  assert.equal(repository.acquireRefreshLock(db, { holder: 'next' }), true);
-  repository.releaseRefreshLock(db);
+  assert.equal(await repository.acquireRefreshLock(db, { holder: 'next' }), true);
+  await repository.releaseRefreshLock(db);
 });

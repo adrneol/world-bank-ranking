@@ -18,7 +18,7 @@ test('default range derives years from stored data instead of throwing', async (
 
   // Would previously throw `ReferenceError: stored is not defined`.
   // Edge dataset minimum is 2002 (USA only); India has no 2002 observation.
-  const result = buildIndiaYearlyRows(db, {});
+  const result = await buildIndiaYearlyRows(db, {});
 
   assert.deepEqual(result.years, [2002, 2003, 2004, 2005]);
   assert.equal(result.startYear, 2002);
@@ -31,7 +31,7 @@ test('default range carries correct India values, ranks and totals', async () =>
   const { db } = await seedEdgeCaseDb();
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
 
-  const result = buildIndiaYearlyRows(db, {});
+  const result = await buildIndiaYearlyRows(db, {});
   const byYear = new Map(result.rows.map((row) => [row.year, row]));
 
   for (const year of [2003, 2004, 2005]) {
@@ -47,7 +47,7 @@ test('default range YoY uses the extra preceding year', async () => {
   const { db } = await seedEdgeCaseDb();
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
 
-  const result = buildIndiaYearlyRows(db, {});
+  const result = await buildIndiaYearlyRows(db, {});
   const byYear = new Map(result.rows.map((row) => [row.year, row]));
 
   // 2003 has no 2002 India observation in the edge dataset.
@@ -67,8 +67,8 @@ test('explicit range still works and matches the default for the same years', as
   const { db } = await seedEdgeCaseDb();
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
 
-  const explicit = buildIndiaYearlyRows(db, { startYear: 2003, endYear: 2005 });
-  const implicit = buildIndiaYearlyRows(db, {});
+  const explicit = await buildIndiaYearlyRows(db, { startYear: 2003, endYear: 2005 });
+  const implicit = await buildIndiaYearlyRows(db, {});
 
   assert.deepEqual(
     explicit.rows.map((r) => r.nominal_current.indiaRank),
@@ -84,7 +84,7 @@ test('empty database returns no rows without throwing', async () => {
   const { db } = await createMemoryTestDb();
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
 
-  const result = buildIndiaYearlyRows(db, {});
+  const result = await buildIndiaYearlyRows(db, {});
   assert.deepEqual(result.rows, []);
   assert.deepEqual(result.years, []);
 });

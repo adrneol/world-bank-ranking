@@ -131,7 +131,7 @@ export async function lookupCountryForIp(db, ip, options = {}) {
         const body = await response.json().catch(() => null);
         const alpha2 = body?.country_code ?? body?.countryCode ?? null;
         if (typeof alpha2 === 'string' && /^[A-Za-z]{2}$/.test(alpha2.trim())) {
-          const row = getCountryByIso2(handle, alpha2);
+          const row = await getCountryByIso2(handle, alpha2);
           if (row && Number(row.is_aggregate) === 0 && typeof row.iso3 === 'string' && row.iso3 !== '') {
             iso3 = row.iso3;
           }

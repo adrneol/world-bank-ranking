@@ -13,8 +13,11 @@
 
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
+  countCountryGroupsByColumn,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
+  listCountryIdsByColumn,
+  listDistinctCountryColumn,
 } from '../db/repository.js';
 import { describeMetric } from '../domain/format.js';
 import {
@@ -68,32 +71,27 @@ function normalizeMid(options, yearA, yearB) {
 }
 
 /** Dynamic group membership (no hardcoding); validated vs DISTINCT DB values. */
-export function resolveFxGroupFilter(db, group) {
+export async function resolveFxGroupFilter(db, group) {
   if (!group || !group.type || !group.value || String(group.value).toLowerCase() === 'all') return null;
   const type = String(group.type);
   if (!['income_level', 'region', 'lending_type'].includes(type)) {
     throw fxError(FX_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown group type "${group.type}".`, 400);
   }
   const col = type === 'income_level' ? 'income_level' : type === 'region' ? 'region' : 'lending_type';
-  const rows = db.prepare(`SELECT DISTINCT ${col} AS v FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL`).all();
+  const rows = await listDistinctCountryColumn(db, col);
   const allowed = new Set(rows.map((r) => String(r.v)));
   if (!allowed.has(String(group.value))) {
     throw fxError(FX_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown ${type} "${group.value}".`, 400);
   }
-  const members = db
-    .prepare(`SELECT id FROM countries WHERE is_aggregate = 0 AND ${col} = ?`)
-    .all(String(group.value))
-    .map((r) => String(r.id).toUpperCase());
+  const members = await listCountryIdsByColumn(db, col, String(group.value));
   return { type, value: String(group.value), members: new Set(members) };
 }
 
-export function listFxCountryGroups(db) {
-  const q = (col) =>
-    db
-      .prepare(
-        `SELECT ${col} AS value, COUNT(*) AS eligibleCount FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY ${col}`,
-      )
-      .all();
+export async function listFxCountryGroups(db) {
+  const groups = {};
+  for (const col of ['income_level', 'region', 'lending_type']) {
+    groups[col] = await countCountryGroupsByColumn(db, col);
+  }
   return {
     default: 'All',
     vintageNote:
@@ -103,9 +101,9 @@ export function listFxCountryGroups(db) {
     nominalNote:
       'Nominal official bilateral movement vs USD only — not real, PPP, competitiveness, or comprehensive currency-strength measurement.',
     supported: {
-      income_level: q('income_level'),
-      region: q('region'),
-      lending_type: q('lending_type'),
+      income_level: groups.income_level,
+      region: groups.region,
+      lending_type: groups.lending_type,
     },
     unsupportedRequestedLabels: {
       requested: ['All', 'Developed', 'Developing', 'Underdeveloped'],
@@ -179,7 +177,7 @@ function buildFxRankedSection({ values, focusIso3, basisId, label, requiredYears
 /**
  * Main entry: build FX movement for fx_official + basis and S/[M]/E.
  */
-export function buildFxMovement(db, options = {}) {
+export async function buildFxMovement(db, options = {}) {
   const { metricKey } = options;
   if (!metricKey || !isFxMetric(metricKey) || !METRICS[metricKey]) {
     throw fxError(FX_ERROR_CODES.INVALID_METRIC, `Unknown or non-Exchange-Rate metric "${metricKey}".`, 400);
@@ -204,10 +202,10 @@ export function buildFxMovement(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   if (!/^[A-Z]{3}$/.test(focusIso3)) throw fxError(FX_ERROR_CODES.UNKNOWN_COUNTRY, `Invalid focus country "${options.focusIso3}".`, 400);
 
-  const groupSet = resolveFxGroupFilter(db, options.group ?? null);
+  const groupSet = await resolveFxGroupFilter(db, options.group ?? null);
   const metric = METRICS[metricKey];
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const focusName = focusDisplayName(db, focusIso3);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const focusName = await focusDisplayName(db, focusIso3);
   const base = {
     metric: describeMetric(metric),
     basis: fxBasisInfo(basisId),
@@ -234,8 +232,9 @@ export function buildFxMovement(db, options = {}) {
   // ---- Basis A: annual level (descriptive only; never ranked/benchmarked)
   if (basisId === FX_BASES.LEVEL) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = getEligibleObservationsRange(db, indicator.id, Math.min(...years), Math.max(...years))
-      .filter((r) => years.includes(Number(r.year)));
+    const rows = (
+      await getEligibleObservationsRange(db, indicator.id, Math.min(...years), Math.max(...years))
+    ).filter((r) => years.includes(Number(r.year)));
     const byIsoYear = indexByIsoYear(rows);
     const grouped = applyGroup([...byIsoYear.keys()]);
     const pick = (isoList, y) => isoList
@@ -268,7 +267,7 @@ export function buildFxMovement(db, options = {}) {
   // ---- Basis B: annual change (needs t-1 and t)
   if (basisId === FX_BASES.ANNUAL_CHANGE) {
     const years = hasMid ? [S, M, E] : [S, E];
-    const rows = getEligibleObservationsRange(db, indicator.id, Math.min(...years) - 1, Math.max(...years));
+    const rows = await getEligibleObservationsRange(db, indicator.id, Math.min(...years) - 1, Math.max(...years));
     const byIsoYear = indexByIsoYear(rows);
     const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
     const grouped = applyGroup([...byIsoYear.keys()]);
@@ -303,8 +302,9 @@ export function buildFxMovement(db, options = {}) {
     ? [{ label: `${S}→${M}`, s: S, e: M }, { label: `${M}→${E}`, s: M, e: E }, { label: `${S}→${E}`, s: S, e: E }]
     : [{ label: `${S}→${E}`, s: S, e: E }];
   const needYears = [...new Set(periods.flatMap((p) => [p.s, p.e]))].sort((a, b) => a - b);
-  const rows = getEligibleObservationsRange(db, indicator.id, Math.min(...needYears), Math.max(...needYears))
-    .filter((r) => needYears.includes(Number(r.year)));
+  const rows = (
+    await getEligibleObservationsRange(db, indicator.id, Math.min(...needYears), Math.max(...needYears))
+  ).filter((r) => needYears.includes(Number(r.year)));
   const byIsoYear = indexByIsoYear(rows);
   const nameMap = new Map(rows.map((r) => [String(r.iso3).toUpperCase(), r.name]));
   const groupedIsos = applyGroup([...byIsoYear.keys()]);

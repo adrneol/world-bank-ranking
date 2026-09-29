@@ -30,13 +30,14 @@ export function integrityCacheKey(fingerprint) {
 /**
  * Return the cached report for `key`, computing (and caching) it on a miss.
  * `compute` performs the real integrity scan and must return the already
- * shaped `{ passed, checks }` / `{ passed: false, error }` payload.
+ * shaped `{ passed, checks }` / `{ passed: false, error }` payload. It may
+ * be async.
  */
-export function getCachedIntegrity(key, compute) {
+export async function getCachedIntegrity(key, compute) {
   if (cached.key === key && cached.value !== null) {
     return { report: cached.value, fromCache: true };
   }
-  const report = compute();
+  const report = await compute();
   cached = { key, value: report };
   return { report, fromCache: false };
 }

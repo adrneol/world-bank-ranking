@@ -24,9 +24,9 @@ import { getCountry } from '../db/repository.js';
  * @param {string} iso3
  * @returns {{iso3:string, name:string|null, kind:string}}
  */
-export function resolveFocus(db, iso3) {
+export async function resolveFocus(db, iso3) {
   const code = String(iso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const row = getCountry(db, code);
+  const row = await getCountry(db, code);
   return {
     iso3: code,
     name: row?.name ?? (code === FOCUS_COUNTRY.iso3 ? FOCUS_COUNTRY.name : null),
@@ -44,8 +44,8 @@ export function resolveFocus(db, iso3) {
  * @param {string} iso3
  * @returns {string}
  */
-export function focusDisplayName(db, iso3) {
-  return resolveFocus(db, iso3).name ?? FOCUS_COUNTRY.name;
+export async function focusDisplayName(db, iso3) {
+  return (await resolveFocus(db, iso3)).name ?? FOCUS_COUNTRY.name;
 }
 
 export default { resolveFocus, focusDisplayName };

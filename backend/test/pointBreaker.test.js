@@ -31,9 +31,9 @@ async function snapshotFixture() {
   if (!fixture) fixture = await seedSnapshotDb();
   return fixture;
 }
-function rowsForYear(db, repository, metricKey, year) {
-  const indicator = repository.getIndicatorByMetricKey(db, metricKey);
-  return repository.getEligibleObservations(db, indicator.id, year);
+async function rowsForYear(db, repository, metricKey, year) {
+  const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
+  return await repository.getEligibleObservations(db, indicator.id, year);
 }
 
 // ---------------------------------------------------------------
@@ -43,7 +43,7 @@ test('Test 1: Point breaker None behaves exactly like the two-year implementatio
   const { db } = await snapshotFixture();
   const { buildLevelComparisonResponse } = await import('../src/services/comparisonService.js');
 
-  const base = buildLevelComparisonResponse(db, {
+  const base = await buildLevelComparisonResponse(db, {
     metricKey: 'nominal_current',
     yearA: 2004,
     yearB: 2014,
@@ -51,7 +51,7 @@ test('Test 1: Point breaker None behaves exactly like the two-year implementatio
     detail: 'full',
   });
   for (const none of [undefined, null, '', 'none', 'None', 'NONE']) {
-    const candidate = buildLevelComparisonResponse(db, {
+    const candidate = await buildLevelComparisonResponse(db, {
       metricKey: 'nominal_current',
       yearA: 2004,
       yearB: 2014,
@@ -106,9 +106,9 @@ test('Test 2: only economies present in all three years belong to COMMON_3', () 
 test('Test 3: all three rankings use exactly the same universe', async () => {
   const { db, repository } = await snapshotFixture();
   const result = buildThreeYearLevelComparison({
-    rowsA: rowsForYear(db, repository, 'nominal_current', 2004),
-    rowsMid: rowsForYear(db, repository, 'nominal_current', 2014),
-    rowsB: rowsForYear(db, repository, 'nominal_current', 2024),
+    rowsA: await rowsForYear(db, repository, 'nominal_current', 2004),
+    rowsMid: await rowsForYear(db, repository, 'nominal_current', 2014),
+    rowsB: await rowsForYear(db, repository, 'nominal_current', 2024),
     focusIso3: 'IND',
   });
   assert.deepEqual([...result.orders.commonA].sort(), [...result.members.common].sort());
@@ -126,9 +126,9 @@ test('Test 3: all three rankings use exactly the same universe', async () => {
 test('Test 4: three-year snapshot values for nominal_current 2004/2014/2024', async () => {
   const { db, repository } = await snapshotFixture();
   const result = buildThreeYearLevelComparison({
-    rowsA: rowsForYear(db, repository, 'nominal_current', 2004),
-    rowsMid: rowsForYear(db, repository, 'nominal_current', 2014),
-    rowsB: rowsForYear(db, repository, 'nominal_current', 2024),
+    rowsA: await rowsForYear(db, repository, 'nominal_current', 2004),
+    rowsMid: await rowsForYear(db, repository, 'nominal_current', 2014),
+    rowsB: await rowsForYear(db, repository, 'nominal_current', 2024),
     focusIso3: 'IND',
   });
   assert.deepEqual(
@@ -204,7 +204,7 @@ test('Test 6: breaker equal to an endpoint or outside the interval is rejected',
     { yearA: 2024, yearB: 2004, yearMid: 1999, label: 'swapped: breaker outside' },
   ];
   for (const entry of invalid) {
-    assert.throws(
+    await assert.rejects(
       () =>
         buildLevelComparisonResponse(db, {
           metricKey: 'nominal_current',
@@ -225,7 +225,7 @@ test('Test 7: adjacent endpoints admit exactly one breaker year', async () => {
   const { db } = await snapshotFixture();
   const { buildLevelComparisonResponse } = await import('../src/services/comparisonService.js');
   // 2004→2006: only 2005 lies strictly between.
-  const ok = buildLevelComparisonResponse(db, {
+  const ok = await buildLevelComparisonResponse(db, {
     metricKey: 'nominal_current',
     yearA: 2004,
     yearB: 2006,
@@ -237,7 +237,7 @@ test('Test 7: adjacent endpoints admit exactly one breaker year', async () => {
   assert.equal(ok.universe.common <= Math.min(ok.universe.setA, ok.universe.setMid, ok.universe.setB), true);
 
   for (const bad of [2004, 2006]) {
-    assert.throws(
+    await assert.rejects(
       () =>
         buildLevelComparisonResponse(db, {
           metricKey: 'nominal_current',
@@ -257,13 +257,13 @@ test('Test 7: adjacent endpoints admit exactly one breaker year', async () => {
 test('Test 8: swapped endpoints keep the breaker between and negate movements', async () => {
   const { db } = await snapshotFixture();
   const { buildLevelComparisonResponse } = await import('../src/services/comparisonService.js');
-  const forward = buildLevelComparisonResponse(db, {
+  const forward = await buildLevelComparisonResponse(db, {
     metricKey: 'nominal_current',
     yearA: 2004,
     yearB: 2024,
     yearMid: 2014,
   });
-  const swapped = buildLevelComparisonResponse(db, {
+  const swapped = await buildLevelComparisonResponse(db, {
     metricKey: 'nominal_current',
     yearA: 2024,
     yearB: 2004,
@@ -339,8 +339,8 @@ test('API: yearMid=None matches omitted param; valid breaker returns three-year 
 // Two-year domain behaviour is untouched by the three-year addition.
 test('Two-year domain regression: 2004->2024 integers unchanged', async () => {
   const { db, repository } = await snapshotFixture();
-  const rowsA = rowsForYear(db, repository, 'nominal_current', 2004);
-  const rowsB = rowsForYear(db, repository, 'nominal_current', 2024);
+  const rowsA = await rowsForYear(db, repository, 'nominal_current', 2004);
+  const rowsB = await rowsForYear(db, repository, 'nominal_current', 2024);
   const result = buildLevelComparison({ rowsA, rowsB, focusIso3: 'IND' });
   assert.deepEqual(result.totals, { a: 209, b: 200, common: 197, exited: 12, entered: 3 });
   assert.equal(result.focus.fullRankA, 171);

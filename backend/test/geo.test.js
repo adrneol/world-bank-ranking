@@ -54,8 +54,8 @@ function seedDb(db) {
 async function seedAsync() {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { upsertCountry } = await import('../src/db/repository.js');
-  const db = createMemoryDb();
-  for (const row of seedDb(db).countries) upsertCountry(db, row);
+  const db = await createMemoryDb();
+  for (const row of seedDb(db).countries) await upsertCountry(db, row);
   return db;
 }
 

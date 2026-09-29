@@ -30,19 +30,19 @@ import { getCacheStatus } from '../wb/ingest.js';
  * @param {object} db
  * @param {{metricKey:string, indicatorId:number, yearA:number, yearB:number, yearMid?:number|null}} options
  */
-export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, yearB, yearMid = null }) {
+export async function buildComparisonVintage(db, { metricKey, indicatorId, yearA, yearB, yearMid = null }) {
   // Authoritative coverage evidence: only successfully PUBLISHED runs count.
   // Failed/partial attempts stay in the audit trail but never describe the
   // current dataset.
-  const statA = getLatestSuccessfulIngestYearStat(db, metricKey, yearA);
-  const statB = getLatestSuccessfulIngestYearStat(db, metricKey, yearB);
+  const statA = await getLatestSuccessfulIngestYearStat(db, metricKey, yearA);
+  const statB = await getLatestSuccessfulIngestYearStat(db, metricKey, yearB);
   const hasMid = Number.isInteger(yearMid);
-  const statMid = hasMid ? getLatestSuccessfulIngestYearStat(db, metricKey, yearMid) : null;
+  const statMid = hasMid ? await getLatestSuccessfulIngestYearStat(db, metricKey, yearMid) : null;
   const vintageYears = hasMid ? [yearA, yearMid, yearB] : [yearA, yearB];
-  const vintageRows = getVintageForIndicatorYears(db, indicatorId, vintageYears);
-  const cache = getCacheStatus(db);
-  const fingerprint = getDatasetFingerprint(db);
-  const lastRun = getLatestFetchRun(db, { status: null });
+  const vintageRows = await getVintageForIndicatorYears(db, indicatorId, vintageYears);
+  const cache = await getCacheStatus(db);
+  const fingerprint = await getDatasetFingerprint(db);
+  const lastRun = await getLatestFetchRun(db, { status: null });
 
   const lastUpdatedValues = vintageRows?.lastUpdatedValues ?? [];
   const distinctVintages = [...new Set(lastUpdatedValues.filter((v) => v !== null))];
@@ -103,7 +103,7 @@ export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, year
         : 'All rows used share one World Bank vintage.',
     },
     retrieval: {
-      lastSuccessAt: getLastSuccessfulFetchTime(db),
+      lastSuccessAt: await getLastSuccessfulFetchTime(db),
       runIdA: statA?.fetch_run_id ?? null,
       runIdB: statB?.fetch_run_id ?? null,
       ...(hasMid ? { runIdMid: statMid?.fetch_run_id ?? null } : {}),
@@ -120,7 +120,7 @@ export function buildComparisonVintage(db, { metricKey, indicatorId, yearA, year
     fingerprint: {
       lastSuccessAt: fingerprint.lastSuccessAt,
       maxFetchedAt: fingerprint.maxFetchedAt,
-      observationCount: fingerprint.observationCount ?? countObservations(db),
+      observationCount: fingerprint.observationCount ?? (await countObservations(db)),
       runId: fingerprint.runId,
     },
     perYear,

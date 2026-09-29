@@ -64,7 +64,7 @@ function baseShape({ metric, focusIso3, focusName, startYear, endYear, operation
  * @param {object} db
  * @param {{metricKey:string, startYear:number, endYear:number, operation?:'SUM'|'AVG', focusIso3?:string}} options
  */
-export function buildPeriodSummary(db, options = {}) {
+export async function buildPeriodSummary(db, options = {}) {
   const { metricKey } = options;
   const metric = metricKey ? METRICS[metricKey] : null;
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
@@ -77,7 +77,7 @@ export function buildPeriodSummary(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   const startYear = Number(options.startYear);
   const endYear = Number(options.endYear);
-  const focusName = focusDisplayName(db, focusIso3);
+  const focusName = await focusDisplayName(db, focusIso3);
   // The response operation is the transform identity (PERIOD_SUM /
   // PERIOD_AVG), never the bare request word — methodology and provenance
   // distinguish the semantic operation everywhere downstream.
@@ -85,7 +85,7 @@ export function buildPeriodSummary(db, options = {}) {
   const semanticCode = SEMANTIC_BY_OPERATION[operation];
   shape.semantic = { code: semanticCode, ...(SEMANTIC_OPERATION_INFO[semanticCode] ?? {}) };
 
-  const indicator = getIndicatorByMetricKey(db, metricKey);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
   if (!indicator) {
     return { ...shape, available: false, reason: 'metric_not_ingested' };
   }
@@ -93,7 +93,7 @@ export function buildPeriodSummary(db, options = {}) {
   // One range read for the focus entity's stored annual observations.
   // The interval end is exclusive ([A, B)), so read through B - 1.
   const rows = Number.isInteger(startYear) && Number.isInteger(endYear) && endYear > startYear
-    ? getCountryObservationsRange(db, indicator.id, focusIso3, startYear, endYear - 1)
+    ? await getCountryObservationsRange(db, indicator.id, focusIso3, startYear, endYear - 1)
     : [];
   const values = rows.map((row) => ({ year: row.year, value: row.value }));
   const result = computeTransform(metric, TRANSFORM_BY_OPERATION[operation], {

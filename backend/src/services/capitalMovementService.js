@@ -17,8 +17,11 @@
 
 import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import {
+  countCountryGroupsByColumn,
   getEligibleObservationsRange,
   getIndicatorByMetricKey,
+  listCountryIdsByColumn,
+  listDistinctCountryColumn,
 } from '../db/repository.js';
 import { describeMetric, formatValue } from '../domain/format.js';
 import {
@@ -77,32 +80,27 @@ function normalizeMid(options, yearA, yearB) {
 }
 
 /** Dynamic group membership (no hardcoding); validated vs DISTINCT DB values. */
-export function resolveCapitalGroupFilter(db, group) {
+export async function resolveCapitalGroupFilter(db, group) {
   if (!group || !group.type || !group.value || String(group.value).toLowerCase() === 'all') return null;
   const type = String(group.type);
   if (!['income_level', 'region', 'lending_type'].includes(type)) {
     throw capitalError(CAPITAL_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown group type "${group.type}".`, 400);
   }
   const col = type === 'income_level' ? 'income_level' : type === 'region' ? 'region' : 'lending_type';
-  const rows = db.prepare(`SELECT DISTINCT ${col} AS v FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL`).all();
+  const rows = await listDistinctCountryColumn(db, col);
   const allowed = new Set(rows.map((r) => String(r.v)));
   if (!allowed.has(String(group.value))) {
     throw capitalError(CAPITAL_ERROR_CODES.UNSUPPORTED_GROUP, `Unknown ${type} "${group.value}".`, 400);
   }
-  const members = db
-    .prepare(`SELECT id FROM countries WHERE is_aggregate = 0 AND ${col} = ?`)
-    .all(String(group.value))
-    .map((r) => String(r.id).toUpperCase());
+  const members = await listCountryIdsByColumn(db, col, String(group.value));
   return { type, value: String(group.value), members: new Set(members) };
 }
 
-export function listCapitalCountryGroups(db) {
-  const q = (col) =>
-    db
-      .prepare(
-        `SELECT ${col} AS value, COUNT(*) AS eligibleCount FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY ${col}`,
-      )
-      .all();
+export async function listCapitalCountryGroups(db) {
+  const groups = {};
+  for (const col of ['income_level', 'region', 'lending_type']) {
+    groups[col] = await countCountryGroupsByColumn(db, col);
+  }
   return {
     default: 'All',
     vintageNote:
@@ -110,9 +108,9 @@ export function listCapitalCountryGroups(db) {
     flowNote:
       'FDI net inflows are flows, not stocks. Cumulative FDI is the sum of annual net flows; negative and zero flows are valid data, never clamped or zero-filled.',
     supported: {
-      income_level: q('income_level'),
-      region: q('region'),
-      lending_type: q('lending_type'),
+      income_level: groups.income_level,
+      region: groups.region,
+      lending_type: groups.lending_type,
     },
     unsupportedRequestedLabels: {
       requested: ['All', 'Developed', 'Developing', 'Underdeveloped'],
@@ -269,7 +267,7 @@ function buildCapitalAnnualResult({ values, focusIso3, basisId, year, metric }) 
 /**
  * Main entry: build Capital movement for one metric+basis and S/[M]/E.
  */
-export function buildCapitalMovement(db, options = {}) {
+export async function buildCapitalMovement(db, options = {}) {
   const { metricKey } = options;
   if (!metricKey || !isCapitalMetric(metricKey) || !METRICS[metricKey]) {
     throw capitalError(CAPITAL_ERROR_CODES.INVALID_METRIC, `Unknown or non-Capital-Flow metric "${metricKey}".`, 400);
@@ -294,10 +292,10 @@ export function buildCapitalMovement(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   if (!/^[A-Z]{3}$/.test(focusIso3)) throw capitalError(CAPITAL_ERROR_CODES.UNKNOWN_COUNTRY, `Invalid focus country "${options.focusIso3}".`, 400);
 
-  const groupSet = resolveCapitalGroupFilter(db, options.group ?? null);
+  const groupSet = await resolveCapitalGroupFilter(db, options.group ?? null);
   const metric = METRICS[metricKey];
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const focusName = focusDisplayName(db, focusIso3);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const focusName = await focusDisplayName(db, focusIso3);
   const base = {
     metric: describeMetric(metric),
     basis: capitalBasisInfo(basisId),
@@ -324,17 +322,17 @@ export function buildCapitalMovement(db, options = {}) {
   // legs). The cumulative share never uses the ratio series — summing annual
   // percentages would be economically wrong, so the legs are read separately.
   const needLegs = basisId === CAPITAL_BASES.RATIO_CUMULATIVE;
-  const fdiLevelIndicator = needLegs ? getIndicatorByMetricKey(db, 'fdi_inflows') : null;
-  const gdpIndicator = needLegs ? getIndicatorByMetricKey(db, CAPITAL_GDP_DENOMINATOR_METRIC) : null;
+  const fdiLevelIndicator = needLegs ? await getIndicatorByMetricKey(db, 'fdi_inflows') : null;
+  const gdpIndicator = needLegs ? await getIndicatorByMetricKey(db, CAPITAL_GDP_DENOMINATOR_METRIC) : null;
   if (needLegs && (!fdiLevelIndicator || !gdpIndicator)) {
     return { ...base, available: false, reason: 'denominator_not_ingested', observed: null, likeForLike: null, verification: { passed: false, checks: [] } };
   }
   // Read the full [S, E] span (inclusive). Period completeness is still
   // enforced strictly via requiredYears (S+1..E); the extra boundary year
   // only feeds the unranked endpoint diagnostic (F_E − F_S).
-  const rows = getEligibleObservationsRange(db, indicator.id, S, E);
-  const fdiLevelRows = needLegs ? getEligibleObservationsRange(db, fdiLevelIndicator.id, S + 1, E) : [];
-  const gdpRows = needLegs ? getEligibleObservationsRange(db, gdpIndicator.id, S + 1, E) : [];
+  const rows = await getEligibleObservationsRange(db, indicator.id, S, E);
+  const fdiLevelRows = needLegs ? await getEligibleObservationsRange(db, fdiLevelIndicator.id, S + 1, E) : [];
+  const gdpRows = needLegs ? await getEligibleObservationsRange(db, gdpIndicator.id, S + 1, E) : [];
   const fdiByIsoYear = indexByIsoYear(needLegs ? fdiLevelRows : rows);
   // For ratio average/annual the working map is the raw WDI ratio series.
   const ratioByIsoYear = metricKey === 'fdi_inflows_pct_gdp' && !needLegs ? fdiByIsoYear : new Map();

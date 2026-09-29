@@ -12,7 +12,7 @@
  */
 
 import config, { METRICS, PRODUCTION_METRIC_KEYS } from '../config.js';
-import { closeDb, getDb } from '../db/index.js';
+import { closeDb, describeDbTarget, getDb, initDatabase, pingDatabase } from '../db/index.js';
 import { countObservations, getYearRange } from '../db/repository.js';
 import { refreshData } from '../wb/ingest.js';
 
@@ -42,7 +42,14 @@ async function main() {
   console.log('');
 
   const db = getDb();
-  const before = countObservations(db);
+  const target = describeDbTarget();
+  console.log(
+    `  Database backend: ${target.mode}` +
+      (target.mode === 'turso' ? ` (${target.host ?? 'unknown host'})` : ` (${target.file})`),
+  );
+  await initDatabase(db, { localFile: target.mode === 'local' });
+  await pingDatabase(db);
+  const before = await countObservations(db);
 
   const summary = await refreshData({
     startYear: args.start,
@@ -52,8 +59,8 @@ async function main() {
     onWarn: (w) => console.warn(`  [warn] ${w.message}`),
   });
 
-  const after = countObservations(db);
-  const range = getYearRange(db);
+  const after = await countObservations(db);
+  const range = await getYearRange(db);
 
   console.log('');
   console.log(`Refresh status        : ${summary.status}`);

@@ -5,6 +5,12 @@
  * JavaScript objects, which keeps the numerical logic independently testable
  * and makes the storage engine replaceable.
  *
+ * Phase 6A: all functions are async and run through `./driver.js` against a
+ * libSQL handle, so the Turso Cloud primary and the local SQLite-file
+ * fallback share one code path. SQL text and result shapes are unchanged
+ * from the node:sqlite implementation (SELECT rows arrive as objects keyed
+ * by column/alias names); only sync→async changed.
+ *
  * Numerical representation (see schema.sql design notes):
  * Raw World Bank values are stored twice: as SQLite REAL (the queryable
  * numeric used for ORDER BY, range scans, ranking comparisons and YoY
@@ -14,7 +20,8 @@
  * lives in domain/format.js and is presentation-only.
  */
 
-import { getDb, transaction } from './index.js';
+import { getDb } from './index.js';
+import { batchRun, queryAll, queryGet, queryRun, transaction } from './driver.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -60,8 +67,10 @@ function regionParts(region) {
 // countries
 // ============================================================
 
-export function upsertCountry(db, row) {
-  db.prepare(`
+export async function upsertCountry(db, row) {
+  await queryRun(
+    db,
+    `
     INSERT INTO countries (
       id, iso2, iso3, name, region, region_id, admin_region, income_level,
       lending_type, capital_city, is_aggregate, aggregate_reason, updated_at
@@ -79,39 +88,80 @@ export function upsertCountry(db, row) {
       is_aggregate     = excluded.is_aggregate,
       aggregate_reason = excluded.aggregate_reason,
       updated_at       = excluded.updated_at
-  `).run(
-    row.id,
-    nz(row.iso2),
-    nz(row.iso3 ?? row.id),
-    row.name,
-    nz(row.region),
-    nz(row.regionId),
-    nz(row.adminRegion),
-    nz(row.incomeLevel),
-    nz(row.lendingType),
-    nz(row.capitalCity),
-    row.isAggregate ? 1 : 0,
-    nz(row.aggregateReason),
-    nowIso(),
+  `,
+    [
+      row.id,
+      nz(row.iso2),
+      nz(row.iso3 ?? row.id),
+      row.name,
+      nz(row.region),
+      nz(row.regionId),
+      nz(row.adminRegion),
+      nz(row.incomeLevel),
+      nz(row.lendingType),
+      nz(row.capitalCity),
+      row.isAggregate ? 1 : 0,
+      nz(row.aggregateReason),
+      nowIso(),
+    ],
   );
 }
 
 /** Bulk upsert metadata without opening a transaction (for use inside a publish transaction). */
-export function upsertCountriesInner(db, rows) {
-  for (const row of rows) upsertCountry(db, row);
+export async function upsertCountriesInner(db, rows) {
+  await batchRun(
+    db,
+    rows.map((row) => ({
+      sql: `
+    INSERT INTO countries (
+      id, iso2, iso3, name, region, region_id, admin_region, income_level,
+      lending_type, capital_city, is_aggregate, aggregate_reason, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      iso2             = excluded.iso2,
+      iso3             = excluded.iso3,
+      name             = excluded.name,
+      region           = excluded.region,
+      region_id        = excluded.region_id,
+      admin_region     = excluded.admin_region,
+      income_level     = excluded.income_level,
+      lending_type     = excluded.lending_type,
+      capital_city     = excluded.capital_city,
+      is_aggregate     = excluded.is_aggregate,
+      aggregate_reason = excluded.aggregate_reason,
+      updated_at       = excluded.updated_at
+  `,
+      args: [
+        row.id,
+        nz(row.iso2),
+        nz(row.iso3 ?? row.id),
+        row.name,
+        nz(row.region),
+        nz(row.regionId),
+        nz(row.adminRegion),
+        nz(row.incomeLevel),
+        nz(row.lendingType),
+        nz(row.capitalCity),
+        row.isAggregate ? 1 : 0,
+        nz(row.aggregateReason),
+        nowIso(),
+      ],
+    })),
+  );
   return rows.length;
 }
 
 /** Bulk upsert metadata inside a single transaction. */
 export function upsertCountries(db, rows) {
-  return transaction(db, () => upsertCountriesInner(db, rows));
+  return transaction(db, async (tx) => upsertCountriesInner(tx, rows));
 }
 
-export function getCountry(db, iso3) {
+export async function getCountry(db, iso3) {
   return (
-    db
-      .prepare('SELECT * FROM countries WHERE id = ? OR iso3 = ? LIMIT 1')
-      .get(String(iso3).toUpperCase(), String(iso3).toUpperCase()) ?? null
+    (await queryGet(db, 'SELECT * FROM countries WHERE id = ? OR iso3 = ? LIMIT 1', [
+      String(iso3).toUpperCase(),
+      String(iso3).toUpperCase(),
+    ])) ?? null
   );
 }
 
@@ -121,28 +171,28 @@ export function getCountry(db, iso3) {
  * for unknown codes — including World Bank aggregate rows, which carry no
  * usable iso2 and therefore never match.
  */
-export function getCountryByIso2(db, iso2) {
+export async function getCountryByIso2(db, iso2) {
   const code = String(iso2 ?? '').trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(code)) return null;
-  return db.prepare('SELECT * FROM countries WHERE UPPER(iso2) = ? LIMIT 1').get(code) ?? null;
+  return (await queryGet(db, 'SELECT * FROM countries WHERE UPPER(iso2) = ? LIMIT 1', [code])) ?? null;
 }
 
 /** All metadata rows, aggregates included unless excluded. */
-export function listCountries(db, { includeAggregates = true } = {}) {
+export async function listCountries(db, { includeAggregates = true } = {}) {
   const sql = includeAggregates
     ? 'SELECT * FROM countries ORDER BY name'
     : 'SELECT * FROM countries WHERE is_aggregate = 0 ORDER BY name';
-  return db.prepare(sql).all();
+  return queryAll(db, sql);
 }
 
 /** Non-aggregate countries/economies, sorted by ISO3. */
-export function listEligibleCountries(db) {
-  return db.prepare('SELECT * FROM countries WHERE is_aggregate = 0 ORDER BY id').all();
+export async function listEligibleCountries(db) {
+  return queryAll(db, 'SELECT * FROM countries WHERE is_aggregate = 0 ORDER BY id');
 }
 
 /** Entities that were flagged as aggregates. */
-export function listAggregateCountries(db) {
-  return db.prepare('SELECT * FROM countries WHERE is_aggregate = 1 ORDER BY id').all();
+export async function listAggregateCountries(db) {
+  return queryAll(db, 'SELECT * FROM countries WHERE is_aggregate = 1 ORDER BY id');
 }
 
 /**
@@ -152,24 +202,65 @@ export function listAggregateCountries(db) {
  * denominator of any ranking: the denominator is the count of those entities
  * holding a valid observation for a given year and indicator.
  */
-export function countEligibleCountries(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 0').get().n;
+export async function countEligibleCountries(db) {
+  const row = await queryGet(db, 'SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 0');
+  return row.n;
 }
 
-export function countAllCountries(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM countries').get().n;
+export async function countAllCountries(db) {
+  const row = await queryGet(db, 'SELECT COUNT(*) AS n FROM countries');
+  return row.n;
 }
 
-export function countAggregateCountries(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 1').get().n;
+export async function countAggregateCountries(db) {
+  const row = await queryGet(db, 'SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 1');
+  return row.n;
+}
+
+/**
+ * Country-group discovery for movement family sections (no hardcoding).
+ * `col` is an internal allowlisted column name, never end-user input.
+ */
+const COUNTRY_GROUP_COLUMNS = Object.freeze(['income_level', 'region', 'admin_region', 'lending_type']);
+
+function assertGroupColumn(col) {
+  if (!COUNTRY_GROUP_COLUMNS.includes(col)) throw new Error(`Invalid country group column: ${col}`);
+  return col;
+}
+
+/** Distinct non-null values of a metadata column across eligible countries. */
+export async function listDistinctCountryColumn(db, col) {
+  assertGroupColumn(col);
+  return queryAll(
+    db,
+    `SELECT DISTINCT ${col} AS v FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL`,
+  );
+}
+
+/** Eligible country ids holding one metadata value (uppercase ISO3). */
+export async function listCountryIdsByColumn(db, col, value) {
+  assertGroupColumn(col);
+  const rows = await queryAll(db, `SELECT id FROM countries WHERE is_aggregate = 0 AND ${col} = ?`, [value]);
+  return rows.map((r) => String(r.id).toUpperCase());
+}
+
+/** Per-value eligible counts of a metadata column (group catalog). */
+export async function countCountryGroupsByColumn(db, col) {
+  assertGroupColumn(col);
+  return queryAll(
+    db,
+    `SELECT ${col} AS value, COUNT(*) AS eligibleCount FROM countries WHERE is_aggregate = 0 AND ${col} IS NOT NULL GROUP BY ${col} ORDER BY ${col}`,
+  );
 }
 
 // ============================================================
 // indicators
 // ============================================================
 
-export function upsertIndicator(db, metric) {
-  db.prepare(`
+export async function upsertIndicator(db, metric) {
+  await queryRun(
+    db,
+    `
     INSERT INTO indicators (code, metric_key, name, unit, source, source_note, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(code) DO UPDATE SET
@@ -179,27 +270,29 @@ export function upsertIndicator(db, metric) {
       source      = excluded.source,
       source_note = excluded.source_note,
       updated_at  = excluded.updated_at
-  `).run(
-    metric.indicatorCode,
-    metric.key,
-    nz(metric.name ?? metric.label),
-    nz(metric.unit),
-    nz(metric.source ?? 'World Development Indicators'),
-    nz(metric.sourceNote),
-    nowIso(),
+  `,
+    [
+      metric.indicatorCode,
+      metric.key,
+      nz(metric.name ?? metric.label),
+      nz(metric.unit),
+      nz(metric.source ?? 'World Development Indicators'),
+      nz(metric.sourceNote),
+      nowIso(),
+    ],
   );
 }
 
-export function getIndicatorByMetricKey(db, metricKey) {
-  return db.prepare('SELECT * FROM indicators WHERE metric_key = ?').get(metricKey) ?? null;
+export async function getIndicatorByMetricKey(db, metricKey) {
+  return (await queryGet(db, 'SELECT * FROM indicators WHERE metric_key = ?', [metricKey])) ?? null;
 }
 
-export function getIndicatorByCode(db, code) {
-  return db.prepare('SELECT * FROM indicators WHERE code = ?').get(code) ?? null;
+export async function getIndicatorByCode(db, code) {
+  return (await queryGet(db, 'SELECT * FROM indicators WHERE code = ?', [code])) ?? null;
 }
 
-export function listIndicators(db) {
-  return db.prepare('SELECT * FROM indicators ORDER BY id').all();
+export async function listIndicators(db) {
+  return queryAll(db, 'SELECT * FROM indicators ORDER BY id');
 }
 
 // ============================================================
@@ -211,10 +304,24 @@ export function listIndicators(db) {
  * The numeric value is stored exactly as received (REAL, no rounding) along
  * with its canonical decimal string (value_raw TEXT, for audit). Callers may
  * omit valueRaw, in which case it defaults to String(value).
+ *
+ * Transport note (Phase 6A): REAL values are bound as canonical decimal
+ * STRINGS, never as JSON numbers. Remote database protocols can serialize
+ * JSON numbers with fewer than 17 significant digits, silently shifting
+ * sub-ulp values (observed: tiny historic FX/index magnitudes drifted by
+ * 1 ulp through Turso). SQLite parses the decimal text into the exact
+ * nearest double, so string binding round-trips bitwise-identically on every
+ * backend while storing the identical REAL. Callers must still pass the
+ * numeric value (validation/type contract unchanged); only the binding form
+ * differs.
  */
-export function upsertObservation(db, { countryId, indicatorId, year, value, valueRaw, wbLastUpdated }) {
+export async function upsertObservation(db, { countryId, indicatorId, year, value, valueRaw, wbLastUpdated }) {
   const raw = valueRaw ?? (value === null || value === undefined ? null : String(value));
-  db.prepare(`
+  // Bind finite REALs as text; anything else passes through untouched.
+  const numericBinding = typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
+  await queryRun(
+    db,
+    `
     INSERT INTO observations (country_id, indicator_id, year, value, value_raw, wb_last_updated, fetched_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(country_id, indicator_id, year) DO UPDATE SET
@@ -222,22 +329,48 @@ export function upsertObservation(db, { countryId, indicatorId, year, value, val
       value_raw       = excluded.value_raw,
       wb_last_updated = excluded.wb_last_updated,
       fetched_at      = excluded.fetched_at
-  `).run(countryId, indicatorId, year, value, nz(raw), nz(wbLastUpdated), nowIso());
+  `,
+    [countryId, indicatorId, year, numericBinding, nz(raw), nz(wbLastUpdated), nowIso()],
+  );
 }
 
 /** Bulk upsert observations without opening a transaction (for use inside a publish transaction). Returns rows written. */
-export function upsertObservationsInner(db, rows) {
-  let n = 0;
-  for (const row of rows) {
-    upsertObservation(db, row);
-    n += 1;
-  }
-  return n;
+export async function upsertObservationsInner(db, rows) {
+  await batchRun(
+    db,
+    rows.map((row) => {
+      const raw = row.valueRaw ?? (row.value === null || row.value === undefined ? null : String(row.value));
+      // REAL-as-text binding: see upsertObservation (Phase 6A transport note).
+      const numericBinding =
+        typeof row.value === 'number' && Number.isFinite(row.value) ? String(row.value) : row.value;
+      return {
+        sql: `
+    INSERT INTO observations (country_id, indicator_id, year, value, value_raw, wb_last_updated, fetched_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(country_id, indicator_id, year) DO UPDATE SET
+      value           = excluded.value,
+      value_raw       = excluded.value_raw,
+      wb_last_updated = excluded.wb_last_updated,
+      fetched_at      = excluded.fetched_at
+  `,
+        args: [
+          row.countryId,
+          row.indicatorId,
+          row.year,
+          numericBinding,
+          nz(raw),
+          nz(row.wbLastUpdated),
+          nowIso(),
+        ],
+      };
+    }),
+  );
+  return rows.length;
 }
 
 /** Bulk upsert observations in one transaction. Returns rows written. */
 export function upsertObservations(db, rows) {
-  return transaction(db, () => upsertObservationsInner(db, rows));
+  return transaction(db, async (tx) => upsertObservationsInner(tx, rows));
 }
 
 /**
@@ -251,19 +384,22 @@ export function upsertObservations(db, rows) {
  *
  * @returns {number} deleted row count
  */
-export function deleteObservationsForIndicatorYears(db, indicatorId, startYear, endYear) {
-  return db.prepare(
+export async function deleteObservationsForIndicatorYears(db, indicatorId, startYear, endYear) {
+  const info = await queryRun(
+    db,
     'DELETE FROM observations WHERE indicator_id = ? AND year BETWEEN ? AND ?',
-  ).run(indicatorId, startYear, endYear).changes;
+    [indicatorId, startYear, endYear],
+  );
+  return info.changes;
 }
 
-export function getObservation(db, countryId, indicatorId, year) {
+export async function getObservation(db, countryId, indicatorId, year) {
   return (
-    db
-      .prepare(
-        'SELECT * FROM observations WHERE country_id = ? AND indicator_id = ? AND year = ?',
-      )
-      .get(countryId, indicatorId, year) ?? null
+    (await queryGet(
+      db,
+      'SELECT * FROM observations WHERE country_id = ? AND indicator_id = ? AND year = ?',
+      [countryId, indicatorId, year],
+    )) ?? null
   );
 }
 
@@ -276,9 +412,10 @@ export function getObservation(db, countryId, indicatorId, year) {
  *
  * @returns {{iso3:string, name:string, value:number, valueRaw:string|null}[]}
  */
-export function getEligibleObservations(db, indicatorId, year) {
-  return db
-    .prepare(`
+export async function getEligibleObservations(db, indicatorId, year) {
+  return queryAll(
+    db,
+    `
       SELECT o.country_id AS iso3,
               c.name       AS name,
               o.value      AS value,
@@ -289,14 +426,16 @@ export function getEligibleObservations(db, indicatorId, year) {
         AND o.year = ?
         AND c.is_aggregate = 0
         AND o.value IS NOT NULL
-    `)
-    .all(indicatorId, year);
+    `,
+    [indicatorId, year],
+  );
 }
 
 /** Eligible observations for one indicator across a year range. */
-export function getEligibleObservationsRange(db, indicatorId, startYear, endYear) {
-  return db
-    .prepare(`
+export async function getEligibleObservationsRange(db, indicatorId, startYear, endYear) {
+  return queryAll(
+    db,
+    `
       SELECT o.country_id AS iso3,
               c.name       AS name,
               o.year       AS year,
@@ -309,8 +448,9 @@ export function getEligibleObservationsRange(db, indicatorId, startYear, endYear
         AND c.is_aggregate = 0
         AND o.value IS NOT NULL
       ORDER BY o.year, o.country_id
-    `)
-    .all(indicatorId, startYear, endYear);
+    `,
+    [indicatorId, startYear, endYear],
+  );
 }
 
 /**
@@ -326,20 +466,20 @@ export function getEligibleObservationsRange(db, indicatorId, startYear, endYear
  * @param {number[]} years e.g. [yearA, yearB]
  * @returns {{iso3:string, name:string, year:number, value:number, valueRaw:string|null, wbLastUpdated:string|null, fetchedAt:string|null}[]}
  */
-export function getEligibleObservationsForYears(db, indicatorId, years) {
+export async function getEligibleObservationsForYears(db, indicatorId, years) {
   const unique = [...new Set((years ?? []).filter((y) => Number.isInteger(y)))].sort((a, b) => a - b);
   if (unique.length === 0) return [];
   const placeholders = unique.map(() => '?').join(',');
-  return db
-    .prepare(
-      `
+  return queryAll(
+    db,
+    `
       SELECT o.country_id AS iso3,
-             c.name       AS name,
-             o.year       AS year,
-             o.value      AS value,
-             o.value_raw  AS valueRaw,
-             o.wb_last_updated AS wbLastUpdated,
-             o.fetched_at AS fetchedAt
+              c.name       AS name,
+              o.year       AS year,
+              o.value      AS value,
+              o.value_raw  AS valueRaw,
+              o.wb_last_updated AS wbLastUpdated,
+              o.fetched_at AS fetchedAt
       FROM observations o
       JOIN countries c ON c.id = o.country_id
       WHERE o.indicator_id = ?
@@ -348,8 +488,8 @@ export function getEligibleObservationsForYears(db, indicatorId, years) {
         AND o.value IS NOT NULL
       ORDER BY o.year, o.country_id
     `,
-    )
-    .all(indicatorId, ...unique);
+    [indicatorId, ...unique],
+  );
 }
 
 /**
@@ -358,13 +498,11 @@ export function getEligibleObservationsForYears(db, indicatorId, years) {
  * @param {object} db
  * @param {string[]} iso3List
  */
-export function getCountriesByIso3List(db, iso3List) {
+export async function getCountriesByIso3List(db, iso3List) {
   const unique = [...new Set((iso3List ?? []).map((s) => String(s).toUpperCase()))].sort();
   if (unique.length === 0) return [];
   const placeholders = unique.map(() => '?').join(',');
-  return db
-    .prepare(`SELECT * FROM countries WHERE id IN (${placeholders}) ORDER BY id`)
-    .all(...unique);
+  return queryAll(db, `SELECT * FROM countries WHERE id IN (${placeholders}) ORDER BY id`, unique);
 }
 
 /**
@@ -372,17 +510,17 @@ export function getCountriesByIso3List(db, iso3List) {
  *
  * @returns {{lastUpdatedValues:string[], fetchedAtMin:string|null, fetchedAtMax:string|null, rowCount:number}|null}
  */
-export function getVintageForIndicatorYears(db, indicatorId, years) {
+export async function getVintageForIndicatorYears(db, indicatorId, years) {
   const unique = [...new Set((years ?? []).filter((y) => Number.isInteger(y)))].sort((a, b) => a - b);
   if (unique.length === 0) return null;
   const placeholders = unique.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `
+  const rows = await queryAll(
+    db,
+    `
       SELECT o.wb_last_updated AS wbLastUpdated,
-             MIN(o.fetched_at) AS fetchedAtMin,
-             MAX(o.fetched_at) AS fetchedAtMax,
-             COUNT(*) AS rowCount
+              MIN(o.fetched_at) AS fetchedAtMin,
+              MAX(o.fetched_at) AS fetchedAtMax,
+              COUNT(*) AS rowCount
       FROM observations o
       JOIN countries c ON c.id = o.country_id
       WHERE o.indicator_id = ?
@@ -391,8 +529,8 @@ export function getVintageForIndicatorYears(db, indicatorId, years) {
         AND o.value IS NOT NULL
       GROUP BY o.wb_last_updated
     `,
-    )
-    .all(indicatorId, ...unique);
+    [indicatorId, ...unique],
+  );
   if (!rows || rows.length === 0) return null;
   let fetchedAtMin = null;
   let fetchedAtMax = null;
@@ -414,11 +552,12 @@ export function getVintageForIndicatorYears(db, indicatorId, years) {
  * Lets the frontend detect whether two successive responses came from the
  * same retrieval generation.
  */
-export function getDatasetFingerprint(db) {
-  const lastSuccessAt = getLastSuccessfulFetchTime(db);
-  const maxFetched = db.prepare('SELECT MAX(fetched_at) AS t FROM observations').get()?.t ?? null;
-  const observationCount = countObservations(db);
-  const latestRun = getLatestFetchRun(db, { status: 'success' });
+export async function getDatasetFingerprint(db) {
+  const lastSuccessAt = await getLastSuccessfulFetchTime(db);
+  const maxRow = await queryGet(db, 'SELECT MAX(fetched_at) AS t FROM observations');
+  const maxFetched = maxRow?.t ?? null;
+  const observationCount = await countObservations(db);
+  const latestRun = await getLatestFetchRun(db, { status: 'success' });
   return {
     lastSuccessAt,
     maxFetchedAt: maxFetched,
@@ -428,21 +567,24 @@ export function getDatasetFingerprint(db) {
 }
 
 /** Observations for one country across a year range (e.g. India's timeline). */
-export function getCountryObservationsRange(db, indicatorId, iso3, startYear, endYear) {
-  return db
-    .prepare(`
+export async function getCountryObservationsRange(db, indicatorId, iso3, startYear, endYear) {
+  return queryAll(
+    db,
+    `
       SELECT year, value, value_raw AS valueRaw
       FROM observations
       WHERE indicator_id = ? AND country_id = ? AND year BETWEEN ? AND ?
       ORDER BY year
-    `)
-    .all(indicatorId, String(iso3).toUpperCase(), startYear, endYear);
+    `,
+    [indicatorId, String(iso3).toUpperCase(), startYear, endYear],
+  );
 }
 
 /** How many eligible entities hold a valid value for indicator+year. */
-export function countEligibleObservations(db, indicatorId, year) {
-  return db
-    .prepare(`
+export async function countEligibleObservations(db, indicatorId, year) {
+  const row = await queryGet(
+    db,
+    `
       SELECT COUNT(*) AS n
       FROM observations o
       JOIN countries c ON c.id = o.country_id
@@ -450,8 +592,10 @@ export function countEligibleObservations(db, indicatorId, year) {
         AND o.year = ?
         AND c.is_aggregate = 0
         AND o.value IS NOT NULL
-    `)
-    .get(indicatorId, year).n;
+    `,
+    [indicatorId, year],
+  );
+  return row.n;
 }
 
 /**
@@ -462,67 +606,68 @@ export function countEligibleObservations(db, indicatorId, year) {
  *
  * @returns {Set<string>} uppercase country ids
  */
-export function getObservedCountryIds(db, indicatorId, year = null) {
+export async function getObservedCountryIds(db, indicatorId, year = null) {
   const rows =
     year === null || year === undefined
-      ? db
-          .prepare(
-            'SELECT DISTINCT country_id AS id FROM observations WHERE indicator_id = ? AND value IS NOT NULL',
-          )
-          .all(indicatorId)
-      : db
-          .prepare(
-            'SELECT DISTINCT country_id AS id FROM observations WHERE indicator_id = ? AND year = ? AND value IS NOT NULL',
-          )
-          .all(indicatorId, year);
+      ? await queryAll(
+          db,
+          'SELECT DISTINCT country_id AS id FROM observations WHERE indicator_id = ? AND value IS NOT NULL',
+          [indicatorId],
+        )
+      : await queryAll(
+          db,
+          'SELECT DISTINCT country_id AS id FROM observations WHERE indicator_id = ? AND year = ? AND value IS NOT NULL',
+          [indicatorId, year],
+        );
   return new Set(rows.map((r) => String(r.id).toUpperCase()));
 }
 
 /** Total stored observations, optionally for one indicator. */
-export function countObservations(db, indicatorId = null) {
+export async function countObservations(db, indicatorId = null) {
   if (indicatorId === null) {
-    return db.prepare('SELECT COUNT(*) AS n FROM observations').get().n;
+    const row = await queryGet(db, 'SELECT COUNT(*) AS n FROM observations');
+    return row.n;
   }
-  return db
-    .prepare('SELECT COUNT(*) AS n FROM observations WHERE indicator_id = ?')
-    .get(indicatorId).n;
+  const row = await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE indicator_id = ?', [indicatorId]);
+  return row.n;
 }
 
 /** Available year range for the whole database or one indicator (eligible observations only). */
-export function getYearRange(db, indicatorId = null) {
+export async function getYearRange(db, indicatorId = null) {
   const row =
     indicatorId === null
-      ? db
-          .prepare(
-            `SELECT MIN(o.year) AS minYear, MAX(o.year) AS maxYear
-             FROM observations o
-             JOIN countries c ON c.id = o.country_id
-             WHERE c.is_aggregate = 0`,
-          )
-          .get()
-      : db
-          .prepare(
-            `SELECT MIN(o.year) AS minYear, MAX(o.year) AS maxYear
-             FROM observations o
-             JOIN countries c ON c.id = o.country_id
-             WHERE o.indicator_id = ? AND c.is_aggregate = 0`,
-          )
-          .get(indicatorId);
+      ? await queryGet(
+          db,
+          `SELECT MIN(o.year) AS minYear, MAX(o.year) AS maxYear
+              FROM observations o
+              JOIN countries c ON c.id = o.country_id
+              WHERE c.is_aggregate = 0`,
+        )
+      : await queryGet(
+          db,
+          `SELECT MIN(o.year) AS minYear, MAX(o.year) AS maxYear
+              FROM observations o
+              JOIN countries c ON c.id = o.country_id
+              WHERE o.indicator_id = ? AND c.is_aggregate = 0`,
+          [indicatorId],
+        );
   return { minYear: row?.minYear ?? null, maxYear: row?.maxYear ?? null };
 }
 
 /** Distinct years holding at least one eligible observation, ascending. */
-export function listYearsWithData(db, indicatorId) {
-  return db
-    .prepare(`
+export async function listYearsWithData(db, indicatorId) {
+  const rows = await queryAll(
+    db,
+    `
       SELECT DISTINCT o.year AS year
       FROM observations o
       JOIN countries c ON c.id = o.country_id
       WHERE o.indicator_id = ? AND c.is_aggregate = 0 AND o.value IS NOT NULL
       ORDER BY o.year
-    `)
-    .all(indicatorId)
-    .map((r) => r.year);
+    `,
+    [indicatorId],
+  );
+  return rows.map((r) => r.year);
 }
 
 /**
@@ -540,14 +685,14 @@ export function listYearsWithData(db, indicatorId) {
  * same null min/max on empty. See test/years.test.js for the equivalence
  * proof and backend/phase4-baseline notes for measured plans.
  */
-export function listAvailableYears(db) {
-  const indicators = listIndicators(db);
+export async function listAvailableYears(db) {
+  const indicators = await listIndicators(db);
   const perMetric = {};
   for (const indicator of indicators) perMetric[indicator.metric_key] = [];
 
-  const rows = db
-    .prepare(
-      `
+  const rows = await queryAll(
+    db,
+    `
       SELECT i.metric_key AS metric_key, o.year AS year
       FROM observations o
       JOIN countries c ON c.id = o.country_id
@@ -556,8 +701,7 @@ export function listAvailableYears(db) {
       GROUP BY i.metric_key, o.year
       ORDER BY i.metric_key, o.year
     `,
-    )
-    .all();
+  );
 
   const yearSet = new Set();
   for (const row of rows) {
@@ -580,20 +724,21 @@ export function listAvailableYears(db) {
  * `lastupdated` metadata from its own retrieval). Null when nothing stored.
  * Read-only derivation — no ingestion semantics involved.
  */
-export function getMaxWbLastUpdated(db) {
-  return (
-    db.prepare('SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL').get()?.v ??
-    null
+export async function getMaxWbLastUpdated(db) {
+  const row = await queryGet(
+    db,
+    'SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL',
   );
+  return row?.v ?? null;
 }
 
 /**
  * Country-level coverage for one indicator+year:
  *   eligible universe, valid observations, entities lacking an observation.
  */
-export function getCoverageCounts(db, indicatorId, year) {
-  const eligible = countEligibleCountries(db);
-  const valid = countEligibleObservations(db, indicatorId, year);
+export async function getCoverageCounts(db, indicatorId, year) {
+  const eligible = await countEligibleCountries(db);
+  const valid = await countEligibleObservations(db, indicatorId, year);
   return {
     eligibleUniverse: eligible,
     validObservations: valid,
@@ -605,27 +750,33 @@ export function getCoverageCounts(db, indicatorId, year) {
 // fetch_runs
 // ============================================================
 
-export function startFetchRun(db, meta) {
-  const info = db.prepare(`
+export async function startFetchRun(db, meta) {
+  const rows = await queryAll(
+    db,
+    `
     INSERT INTO fetch_runs (
       started_at, status, trigger, endpoint, requested_start_year, requested_end_year,
       fetched_start_year, fetched_end_year, indicators
-    ) VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    nowIso(),
-    nz(meta.trigger),
-    nz(meta.endpoint),
-    nz(meta.requestedStartYear),
-    nz(meta.requestedEndYear),
-    nz(meta.fetchedStartYear),
-    nz(meta.fetchedEndYear),
-    nz(Array.isArray(meta.indicators) ? meta.indicators.join(',') : meta.indicators),
+    ) VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?) RETURNING id
+  `,
+    [
+      nowIso(),
+      nz(meta.trigger),
+      nz(meta.endpoint),
+      nz(meta.requestedStartYear),
+      nz(meta.requestedEndYear),
+      nz(meta.fetchedStartYear),
+      nz(meta.fetchedEndYear),
+      nz(Array.isArray(meta.indicators) ? meta.indicators.join(',') : meta.indicators),
+    ],
   );
-  return Number(info.lastInsertRowid);
+  return Number(rows[0]?.id);
 }
 
-export function finishFetchRun(db, id, patch) {
-  db.prepare(`
+export async function finishFetchRun(db, id, patch) {
+  await queryRun(
+    db,
+    `
     UPDATE fetch_runs SET
       completed_at            = ?,
       status                  = ?,
@@ -646,26 +797,28 @@ export function finishFetchRun(db, id, patch) {
       universe_snapshot       = ?,
       error_message           = ?
     WHERE id = ?
-  `).run(
-    nowIso(),
-    patch.status ?? 'success',
-    nz(patch.wbLastUpdated),
-    patch.countriesRows ?? 0,
-    patch.rowsRetrieved ?? 0,
-    patch.rowsUpserted ?? 0,
-    patch.rowsNullSkipped ?? 0,
-    patch.rowsAggregateExcluded ?? 0,
-    patch.rowsAggregateStored ?? 0,
-    patch.rowsBlankIso3Skipped ?? 0,
-    patch.rowsUnknownCountry ?? 0,
-    patch.rowsWithValue ?? 0,
-    patch.rowsNonFiniteSkipped ?? 0,
-    patch.rowsInvalidYear ?? 0,
-    patch.pagesFetched ?? 0,
-    patch.requests ?? 0,
-    patch.universeSnapshot ? JSON.stringify(patch.universeSnapshot) : null,
-    nz(patch.errorMessage),
-    id,
+  `,
+    [
+      nowIso(),
+      patch.status ?? 'success',
+      nz(patch.wbLastUpdated),
+      patch.countriesRows ?? 0,
+      patch.rowsRetrieved ?? 0,
+      patch.rowsUpserted ?? 0,
+      patch.rowsNullSkipped ?? 0,
+      patch.rowsAggregateExcluded ?? 0,
+      patch.rowsAggregateStored ?? 0,
+      patch.rowsBlankIso3Skipped ?? 0,
+      patch.rowsUnknownCountry ?? 0,
+      patch.rowsWithValue ?? 0,
+      patch.rowsNonFiniteSkipped ?? 0,
+      patch.rowsInvalidYear ?? 0,
+      patch.pagesFetched ?? 0,
+      patch.requests ?? 0,
+      patch.universeSnapshot ? JSON.stringify(patch.universeSnapshot) : null,
+      nz(patch.errorMessage),
+      id,
+    ],
   );
 }
 
@@ -678,9 +831,13 @@ export function finishFetchRun(db, id, patch) {
  * @param {number} runId
  * @param {object[]} rows one entry per metric and year
  */
-export function upsertIngestYearStatsInner(db, runId, rows) {
+export async function upsertIngestYearStatsInner(db, runId, rows) {
   if (!Array.isArray(rows) || rows.length === 0) return 0;
-  const statement = db.prepare(`
+  const statements = [];
+  for (const row of rows) {
+    if (row?.year === null || row?.year === undefined) continue;
+    statements.push({
+      sql: `
     INSERT INTO ingest_year_stats (
       fetch_run_id, metric_key, indicator_code, year,
       rows_received, rows_with_value, rows_written, rows_null_skipped,
@@ -699,29 +856,27 @@ export function upsertIngestYearStatsInner(db, runId, rows) {
       rows_aggregate_excluded = excluded.rows_aggregate_excluded,
       rows_aggregate_stored   = excluded.rows_aggregate_stored,
       rows_unknown_country    = excluded.rows_unknown_country
-  `);
-  let n = 0;
-  for (const row of rows) {
-    if (row?.year === null || row?.year === undefined) continue;
-    statement.run(
-      runId,
-      row.metricKey,
-      nz(row.indicatorCode),
-      row.year,
-      row.rowsReceived ?? 0,
-      row.rowsWithValue ?? 0,
-      row.rowsWritten ?? 0,
-      row.rowsNullSkipped ?? 0,
-      row.rowsNonFiniteSkipped ?? 0,
-      row.rowsInvalidYear ?? 0,
-      row.rowsBlankIso3Skipped ?? 0,
-      row.rowsAggregateExcluded ?? 0,
-      row.rowsAggregateStored ?? 0,
-      row.rowsUnknownCountry ?? 0,
-    );
-    n += 1;
+  `,
+      args: [
+        runId,
+        row.metricKey,
+        nz(row.indicatorCode),
+        row.year,
+        row.rowsReceived ?? 0,
+        row.rowsWithValue ?? 0,
+        row.rowsWritten ?? 0,
+        row.rowsNullSkipped ?? 0,
+        row.rowsNonFiniteSkipped ?? 0,
+        row.rowsInvalidYear ?? 0,
+        row.rowsBlankIso3Skipped ?? 0,
+        row.rowsAggregateExcluded ?? 0,
+        row.rowsAggregateStored ?? 0,
+        row.rowsUnknownCountry ?? 0,
+      ],
+    });
   }
-  return n;
+  await batchRun(db, statements);
+  return statements.length;
 }
 
 /**
@@ -733,7 +888,7 @@ export function upsertIngestYearStatsInner(db, runId, rows) {
  * @param {object[]} rows one entry per metric and year
  */
 export function upsertIngestYearStats(db, runId, rows) {
-  return transaction(db, () => upsertIngestYearStatsInner(db, runId, rows));
+  return transaction(db, async (tx) => upsertIngestYearStatsInner(tx, runId, rows));
 }
 
 /**
@@ -744,21 +899,19 @@ export function upsertIngestYearStats(db, runId, rows) {
  * latest applicable run. The multi-year form is ordered by year ascending
  * with the latest run first within each year, for the same reason.
  */
-export function getIngestYearStats(db, metricKey, options = {}) {
+export async function getIngestYearStats(db, metricKey, options = {}) {
   if (options.year !== undefined && options.year !== null) {
     return (
-      db
-        .prepare(
-          'SELECT * FROM ingest_year_stats WHERE metric_key = ? AND year = ? ORDER BY fetch_run_id DESC',
-        )
-        .all(metricKey, options.year) ?? []
+      (await queryAll(
+        db,
+        'SELECT * FROM ingest_year_stats WHERE metric_key = ? AND year = ? ORDER BY fetch_run_id DESC',
+        [metricKey, options.year],
+      )) ?? []
     );
   }
-  return db
-    .prepare(
-      'SELECT * FROM ingest_year_stats WHERE metric_key = ? ORDER BY year ASC, fetch_run_id DESC',
-    )
-    .all(metricKey);
+  return queryAll(db, 'SELECT * FROM ingest_year_stats WHERE metric_key = ? ORDER BY year ASC, fetch_run_id DESC', [
+    metricKey,
+  ]);
 }
 
 /**
@@ -769,9 +922,9 @@ export function getIngestYearStats(db, metricKey, options = {}) {
  * attempts. It is suitable for audit history, but MUST NOT be used as current
  * authoritative coverage evidence — use getLatestSuccessfulIngestYearStat.
  */
-export function getLatestIngestYearStat(db, metricKey, year) {
+export async function getLatestIngestYearStat(db, metricKey, year) {
   if (year === null || year === undefined) return null;
-  return getIngestYearStats(db, metricKey, { year })[0] ?? null;
+  return (await getIngestYearStats(db, metricKey, { year }))[0] ?? null;
 }
 
 /**
@@ -781,17 +934,17 @@ export function getLatestIngestYearStat(db, metricKey, year) {
  * authoritative coverage evidence.
  * Returns null when no successful run ingested that metric/year.
  */
-export function getLatestSuccessfulIngestYearStat(db, metricKey, year) {
+export async function getLatestSuccessfulIngestYearStat(db, metricKey, year) {
   if (year === null || year === undefined) return null;
   return (
-    db
-      .prepare(
-        `SELECT s.* FROM ingest_year_stats s
-         JOIN fetch_runs r ON r.id = s.fetch_run_id
-         WHERE s.metric_key = ? AND s.year = ? AND r.status = 'success'
-         ORDER BY s.fetch_run_id DESC LIMIT 1`,
-      )
-      .get(metricKey, year) ?? null
+    (await queryGet(
+      db,
+      `SELECT s.* FROM ingest_year_stats s
+          JOIN fetch_runs r ON r.id = s.fetch_run_id
+          WHERE s.metric_key = ? AND s.year = ? AND r.status = 'success'
+          ORDER BY s.fetch_run_id DESC LIMIT 1`,
+      [metricKey, year],
+    )) ?? null
   );
 }
 
@@ -801,16 +954,16 @@ export function getLatestSuccessfulIngestYearStat(db, metricKey, year) {
  *
  * @returns {{runId:number, completedAt:string|null, snapshot:object}|null}
  */
-export function getLatestUniverseSnapshot(db, options = {}) {
+export async function getLatestUniverseSnapshot(db, options = {}) {
   const excludeRunId = options.excludeRunId ?? null;
-  const row = db
-    .prepare(
-      `SELECT id, completed_at, universe_snapshot
-       FROM fetch_runs
-       WHERE status = 'success' AND universe_snapshot IS NOT NULL AND id != ?
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get(excludeRunId ?? -1);
+  const row = await queryGet(
+    db,
+    `SELECT id, completed_at, universe_snapshot
+        FROM fetch_runs
+        WHERE status = 'success' AND universe_snapshot IS NOT NULL AND id != ?
+        ORDER BY id DESC LIMIT 1`,
+    [excludeRunId ?? -1],
+  );
   if (!row || !row.universe_snapshot) return null;
   return {
     runId: row.id,
@@ -825,13 +978,11 @@ export function getLatestUniverseSnapshot(db, options = {}) {
  *
  * @returns {{runId:number, completedAt:string|null, snapshot:object}|null}
  */
-export function getUniverseSnapshotByRun(db, runId) {
+export async function getUniverseSnapshotByRun(db, runId) {
   if (runId === null || runId === undefined) return null;
-  const row = db
-    .prepare(
-      'SELECT id, completed_at, universe_snapshot FROM fetch_runs WHERE id = ? LIMIT 1',
-    )
-    .get(runId);
+  const row = await queryGet(db, 'SELECT id, completed_at, universe_snapshot FROM fetch_runs WHERE id = ? LIMIT 1', [
+    runId,
+  ]);
   if (!row || !row.universe_snapshot) return null;
   return {
     runId: row.id,
@@ -840,25 +991,21 @@ export function getUniverseSnapshotByRun(db, runId) {
   };
 }
 
-export function getLatestFetchRun(db, { status = 'success' } = {}) {
+export async function getLatestFetchRun(db, { status = 'success' } = {}) {
   if (status) {
     return (
-      db
-        .prepare('SELECT * FROM fetch_runs WHERE status = ? ORDER BY id DESC LIMIT 1')
-        .get(status) ?? null
+      (await queryGet(db, 'SELECT * FROM fetch_runs WHERE status = ? ORDER BY id DESC LIMIT 1', [status])) ?? null
     );
   }
-  return db.prepare('SELECT * FROM fetch_runs ORDER BY id DESC LIMIT 1').get() ?? null;
+  return (await queryGet(db, 'SELECT * FROM fetch_runs ORDER BY id DESC LIMIT 1')) ?? null;
 }
 
-export function listFetchRuns(db, limit = 20) {
-  return db.prepare('SELECT * FROM fetch_runs ORDER BY id DESC LIMIT ?').all(limit);
+export async function listFetchRuns(db, limit = 20) {
+  return queryAll(db, 'SELECT * FROM fetch_runs ORDER BY id DESC LIMIT ?', [limit]);
 }
 
-export function getLastSuccessfulFetchTime(db) {
-  const row = db
-    .prepare("SELECT MAX(completed_at) AS t FROM fetch_runs WHERE status = 'success'")
-    .get();
+export async function getLastSuccessfulFetchTime(db) {
+  const row = await queryGet(db, "SELECT MAX(completed_at) AS t FROM fetch_runs WHERE status = 'success'");
   return row?.t ?? null;
 }
 
@@ -867,9 +1014,12 @@ export function getLastSuccessfulFetchTime(db) {
 // ============================================================
 
 /** Current lock row (always id = 1). */
-export function refreshLockStatus(db) {
+export async function refreshLockStatus(db) {
   return (
-    db.prepare('SELECT id, locked, run_id AS runId, holder, updated_at AS updatedAt FROM refresh_locks WHERE id = 1').get() ?? null
+    (await queryGet(
+      db,
+      'SELECT id, locked, run_id AS runId, holder, updated_at AS updatedAt FROM refresh_locks WHERE id = 1',
+    )) ?? null
   );
 }
 
@@ -878,16 +1028,20 @@ export function refreshLockStatus(db) {
  * false when another holder owns it. Exactly one concurrent acquirer can win,
  * even across processes, because the UPDATE matches only when locked = 0.
  */
-export function acquireRefreshLock(db, { runId = null, holder = null } = {}) {
-  const info = db
-    .prepare('UPDATE refresh_locks SET locked = 1, run_id = ?, holder = ?, updated_at = ? WHERE id = 1 AND locked = 0')
-    .run(nz(runId), nz(holder), nowIso());
+export async function acquireRefreshLock(db, { runId = null, holder = null } = {}) {
+  const info = await queryRun(
+    db,
+    'UPDATE refresh_locks SET locked = 1, run_id = ?, holder = ?, updated_at = ? WHERE id = 1 AND locked = 0',
+    [nz(runId), nz(holder), nowIso()],
+  );
   return info.changes === 1;
 }
 
 /** Release the lock unconditionally (idempotent). Also clears the run association. */
-export function releaseRefreshLock(db) {
-  db.prepare("UPDATE refresh_locks SET locked = 0, run_id = NULL, holder = NULL, updated_at = ? WHERE id = 1").run(nowIso());
+export async function releaseRefreshLock(db) {
+  await queryRun(db, 'UPDATE refresh_locks SET locked = 0, run_id = NULL, holder = NULL, updated_at = ? WHERE id = 1', [
+    nowIso(),
+  ]);
 }
 
 /**
@@ -895,17 +1049,17 @@ export function releaseRefreshLock(db) {
  * Called immediately after startFetchRun so the lock row always identifies
  * the active run. Must only be called while this caller holds the lock.
  */
-export function setRefreshLockRunId(db, runId) {
-  db.prepare('UPDATE refresh_locks SET run_id = ?, updated_at = ? WHERE id = 1').run(nz(runId), nowIso());
+export async function setRefreshLockRunId(db, runId) {
+  await queryRun(db, 'UPDATE refresh_locks SET run_id = ?, updated_at = ? WHERE id = 1', [nz(runId), nowIso()]);
 }
 
 /**
  * Recover a stale lock (e.g. after a crash left locked = 1 with no live
  * holder). Releases it and returns the previous row for the audit trail.
  */
-export function forceReleaseRefreshLock(db, reason = null) {
-  const previous = refreshLockStatus(db);
-  releaseRefreshLock(db);
+export async function forceReleaseRefreshLock(db, reason = null) {
+  const previous = await refreshLockStatus(db);
+  await releaseRefreshLock(db);
   return { previous, reason };
 }
 
@@ -914,9 +1068,11 @@ export function forceReleaseRefreshLock(db, reason = null) {
 // ============================================================
 
 /** True when no observation has been ingested yet. */
-export function isDatabaseEmpty(db) {
-  return countObservations(db) === 0;
+export async function isDatabaseEmpty(db) {
+  return (await countObservations(db)) === 0;
 }
 
-export { getDb, transaction, regionParts };
+export { getDb } from './index.js';
+export { transaction } from './driver.js';
+export { regionParts };
 export default { getDb };

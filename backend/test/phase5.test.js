@@ -16,6 +16,7 @@ import test from 'node:test';
 
 import { PHASE5_INDICATOR_CODES, PHASE5_METRIC_KEYS, liveIndia2024, liveWorld2024 } from './fixtures/phase5.js';
 import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
+import { queryGet } from '../src/db/driver.js';
 
 let stub = null;
 
@@ -36,13 +37,13 @@ test.after(async () => {
 
 async function freshDb() {
   const { createMemoryDb } = await import('../src/db/index.js');
-  return createMemoryDb();
+  return await createMemoryDb();
 }
 
 async function ingestFull(db, years = { startYear: 2024, endYear: 2025 }) {
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
-  return refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
+  return await refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
 }
 
 async function startApp(db) {
@@ -94,18 +95,18 @@ test('Phase 5.20.2/21: live-verified raw values survive ingestion exactly', asyn
     ['population_total', 2024],
   ];
   for (const [metricKey, year] of checks) {
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
     assert.ok(indicator, `${metricKey} indicator row stored`);
     assert.equal(indicator.code, PHASE5_INDICATOR_CODES[metricKey]);
-    const rows = repository.getEligibleObservations(db, indicator.id, year);
+    const rows = await repository.getEligibleObservations(db, indicator.id, year);
     const india = rows.find((row) => row.iso3 === 'IND');
     assert.ok(india, `${metricKey} IND ${year} stored`);
     assert.equal(india.value, liveIndia2024(metricKey), `${metricKey} raw value exact`);
     assert.equal(Number(india.valueRaw), liveIndia2024(metricKey), `${metricKey} valueRaw round-trips`);
   }
   // Signed current-account flow stays negative (never rectified).
-  const ca = repository.getIndicatorByMetricKey(db, 'current_account');
-  const caIndia = repository.getEligibleObservations(db, ca.id, 2024).find((row) => row.iso3 === 'IND');
+  const ca = await repository.getIndicatorByMetricKey(db, 'current_account');
+  const caIndia = (await repository.getEligibleObservations(db, ca.id, 2024)).find((row) => row.iso3 === 'IND');
   assert.ok(caIndia.value < 0, 'negative flow preserved');
   db.close();
 });
@@ -117,14 +118,14 @@ test('Phase 5.20.3/4: nulls, blank ISO3 and unknown countries never stored', asy
   assert.ok(summary.rowsBlankIso3Skipped > 0, 'blank-ISO3 income groups counted');
   assert.ok(summary.rowsUnknownCountry > 0, 'unknown ISO3 counted');
   const repository = await import('../src/db/repository.js');
-  const exportsIndicator = repository.getIndicatorByMetricKey(db, 'exports_current');
+  const exportsIndicator = await repository.getIndicatorByMetricKey(db, 'exports_current');
   // PAK 2025 exports are null in the fixture: no row, no zero.
-  assert.equal(repository.getObservation(db, 'PAK', exportsIndicator.id, 2025), null);
-  const zeroRows = db.prepare('SELECT COUNT(*) AS n FROM observations WHERE value = 0').get().n;
+  assert.equal(await repository.getObservation(db, 'PAK', exportsIndicator.id, 2025), null);
+  const zeroRows = (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE value = 0', [])).n;
   assert.equal(zeroRows, 0, 'missing must never become zero');
   // Explicit null WLD rows (FX, CPI index, CA, reserves) are skipped, not stored.
-  const fx = repository.getIndicatorByMetricKey(db, 'fx_official');
-  assert.equal(repository.getObservation(db, 'WLD', fx.id, 2024), null);
+  const fx = await repository.getIndicatorByMetricKey(db, 'fx_official');
+  assert.equal(await repository.getObservation(db, 'WLD', fx.id, 2024), null);
   db.close();
 });
 
@@ -133,18 +134,18 @@ test('Phase 5.20.4/15/16: aggregates stored typed, ranked nowhere, comparable di
   await ingestFull(db);
   const repository = await import('../src/db/repository.js');
   // Stored: live-verified WLD CPI value readable directly.
-  const cpi = repository.getIndicatorByMetricKey(db, 'inflation_cpi');
-  const wld = repository.getObservation(db, 'WLD', cpi.id, 2024);
+  const cpi = await repository.getIndicatorByMetricKey(db, 'inflation_cpi');
+  const wld = await repository.getObservation(db, 'WLD', cpi.id, 2024);
   assert.ok(wld, 'WLD CPI observation stored');
   assert.equal(wld.value, liveWorld2024('inflation_cpi'));
   // Ranked nowhere: eligible reads exclude every aggregate id.
-  const aggregates = repository.listAggregateCountries(db);
+  const aggregates = await repository.listAggregateCountries(db);
   assert.ok(aggregates.length > 0);
   const aggregateIds = new Set(aggregates.map((row) => row.id));
   for (const metricKey of PHASE5_METRIC_KEYS) {
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
     for (const year of [2024, 2025]) {
-      const rows = repository.getEligibleObservations(db, indicator.id, year);
+      const rows = await repository.getEligibleObservations(db, indicator.id, year);
       assert.ok(!rows.some((row) => aggregateIds.has(row.iso3)), `${metricKey}/${year}: no aggregate in ranking universe`);
     }
   }
@@ -156,7 +157,7 @@ test('Phase 5.20.6/7/12: partial and total failures publish nothing (atomic)', a
   const { refreshData } = await import('../src/wb/ingest.js');
   const lockState = async (db) => {
     const { getRefreshLockState } = await import('../src/wb/ingest.js');
-    return getRefreshLockState(db);
+    return await getRefreshLockState(db);
   };
   // Partial: one indicator's series fails (metadata path untouched).
   {
@@ -166,8 +167,8 @@ test('Phase 5.20.6/7/12: partial and total failures publish nothing (atomic)', a
     const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' });
     assert.equal(summary.status, 'partial');
     assert.ok(summary.perIndicator.some((r) => r.metricKey === 'inflation_cpi' && r.error));
-    assert.equal(repository.countObservations(db), 0, 'partial refresh publishes nothing');
-    assert.equal(repository.listIndicators(db).length, 0);
+    assert.equal(await repository.countObservations(db), 0, 'partial refresh publishes nothing');
+    assert.equal((await repository.listIndicators(db)).length, 0);
     assert.equal((await lockState(db)).locked, false);
     db.close();
   }
@@ -180,8 +181,8 @@ test('Phase 5.20.6/7/12: partial and total failures publish nothing (atomic)', a
       refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' }),
       (error) => error.datasetPreserved === true,
     );
-    assert.equal(repository.countObservations(db), 0);
-    assert.equal(repository.getLatestFetchRun(db, { status: null }).status, 'failed');
+    assert.equal((await repository.countObservations(db)), 0);
+    assert.equal((await repository.getLatestFetchRun(db, { status: null })).status, 'failed');
     assert.equal((await lockState(db)).locked, false);
     db.close();
   }
@@ -192,8 +193,8 @@ test('Phase 5.20.11: stale rows are deleted by reconcile, not retained', async (
   const db = await freshDb();
   await ingestFull(db);
   const repository = await import('../src/db/repository.js');
-  const exportsIndicator = repository.getIndicatorByMetricKey(db, 'exports_current');
-  const before = repository.getObservation(db, 'PAK', exportsIndicator.id, 2024);
+  const exportsIndicator = await repository.getIndicatorByMetricKey(db, 'exports_current');
+  const before = await repository.getObservation(db, 'PAK', exportsIndicator.id, 2024);
   assert.ok(before, 'PAK 2024 exports present after first ingest');
   // Second ingest where the World Bank no longer returns PAK 2024 exports.
   stub.reset();
@@ -206,8 +207,8 @@ test('Phase 5.20.11: stale rows are deleted by reconcile, not retained', async (
   const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' });
   stub.state.seriesRowsFor = null;
   assert.equal(summary.status, 'success');
-  assert.equal(repository.getObservation(db, 'PAK', exportsIndicator.id, 2024), null, 'withdrawn value removed, not retained');
-  assert.ok(repository.getObservation(db, 'IND', exportsIndicator.id, 2024), 'untouched rows survive');
+  assert.equal(await repository.getObservation(db, 'PAK', exportsIndicator.id, 2024), null, 'withdrawn value removed, not retained');
+  assert.ok(await repository.getObservation(db, 'IND', exportsIndicator.id, 2024), 'untouched rows survive');
   db.close();
   stub.reset();
 });
@@ -328,7 +329,7 @@ test('Phase 5.28: existing GDP analytics unchanged beside the new series', async
   await ingestFull(db);
   const repository = await import('../src/db/repository.js');
   // All twenty indicators present; the eight GDP codes byte-identical.
-  const indicators = repository.listIndicators(db);
+  const indicators = await repository.listIndicators(db);
   assert.equal(indicators.length, 20);
   const { base, close } = await startApp(db);
   try {

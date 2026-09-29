@@ -153,7 +153,7 @@ function growthMethodology(hasMid, metric = null) {
  * @param {object} db
  * @param {{metricKey:string, yearA:number, yearB:number, yearMid?:number, focusIso3?:string, detail?:string}} options
  */
-export function buildGrowthComparisonResponse(db, options = {}) {
+export async function buildGrowthComparisonResponse(db, options = {}) {
   const { metricKey } = options;
   if (!metricKey || !METRICS[metricKey]) {
     throw comparisonError(
@@ -181,7 +181,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
         mode: 'yoy',
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, order },
       universe: null,
       focusMovement: null,
@@ -223,8 +223,8 @@ export function buildGrowthComparisonResponse(db, options = {}) {
   }
   const hasMid = yearMid !== null;
 
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const eligibleUniverse = countEligibleCountries(db);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const eligibleUniverse = await countEligibleCountries(db);
   const emptyUniverse = (intervals) => ({
     intervals,
     common: 0,
@@ -243,7 +243,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
         ...(hasMid ? { pointBreaker: { active: true, yearMid } } : {}),
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, ...(hasMid ? { mid: yearMid } : {}), order },
       universe: emptyUniverse(intervals),
       focusMovement: null,
@@ -255,7 +255,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
     };
   }
 
-  const yearsWithData = new Set(listYearsWithData(db, indicator.id));
+  const yearsWithData = new Set(await listYearsWithData(db, indicator.id));
   const requiredYears = hasMid ? [yearA, yearMid, yearB] : [yearA, yearB];
   if (!requiredYears.every((y) => yearsWithData.has(y))) {
     return {
@@ -266,7 +266,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
         ...(hasMid ? { pointBreaker: { active: true, yearMid } } : {}),
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, ...(hasMid ? { mid: yearMid } : {}), order },
       universe: emptyUniverse(intervals),
       focusMovement: null,
@@ -280,7 +280,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
 
   // One atomic read for all selected years (no year-1 fetch: interval bases
   // are the selected endpoints themselves).
-  const allRows = getEligibleObservationsForYears(db, indicator.id, requiredYears);
+  const allRows = await getEligibleObservationsForYears(db, indicator.id, requiredYears);
   const rowsFor = (y) => allRows.filter((r) => r.year === y);
   const toDomain = (rows) =>
     rows.map((r) => ({ iso3: r.iso3, name: r.name, value: r.value, valueRaw: r.valueRaw }));
@@ -305,7 +305,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
   // row universe is a subset of the level-observed union, so membership is
   // checked against the level rows actually read.
   const levelIso3 = [...new Set(allRows.map((r) => r.iso3))].sort();
-  const metaRows = getCountriesByIso3List(db, levelIso3);
+  const metaRows = await getCountriesByIso3List(db, levelIso3);
   const metaById = new Map(metaRows.map((m) => [m.id, m]));
   let membershipOk = metaRows.length === levelIso3.length;
   if (membershipOk) {
@@ -332,7 +332,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
     );
   }
 
-  const vintage = buildComparisonVintage(db, {
+  const vintage = await buildComparisonVintage(db, {
     metricKey,
     indicatorId: indicator.id,
     yearA,
@@ -344,13 +344,13 @@ export function buildGrowthComparisonResponse(db, options = {}) {
   const statMid = vintage.perYear.mid;
   const metadataUniverseComparison = hasMid
     ? {
-        aToMid: buildMetadataChange(db, statA?.fetchRunId ?? null, statMid?.fetchRunId ?? null),
-        midToB: buildMetadataChange(db, statMid?.fetchRunId ?? null, statB?.fetchRunId ?? null),
-        aToB: buildMetadataChange(db, statA?.fetchRunId ?? null, statB?.fetchRunId ?? null),
+        aToMid: await buildMetadataChange(db, statA?.fetchRunId ?? null, statMid?.fetchRunId ?? null),
+        midToB: await buildMetadataChange(db, statMid?.fetchRunId ?? null, statB?.fetchRunId ?? null),
+        aToB: await buildMetadataChange(db, statA?.fetchRunId ?? null, statB?.fetchRunId ?? null),
       }
-    : buildMetadataChange(db, statA?.fetchRunId ?? null, statB?.fetchRunId ?? null);
+    : await buildMetadataChange(db, statA?.fetchRunId ?? null, statB?.fetchRunId ?? null);
 
-  const latestRun = getLatestFetchRun(db, { status: 'success' });
+  const latestRun = await getLatestFetchRun(db, { status: 'success' });
   const completeness = {
     a: statA ? { fetchRunId: statA.fetchRunId, status: latestRun?.status ?? null } : null,
     ...(hasMid
@@ -548,7 +548,7 @@ export function buildGrowthComparisonResponse(db, options = {}) {
       ...(hasMid ? { pointBreaker: { active: true, yearMid } } : {}),
     },
     metric: describeMetric(metric),
-    focus: { iso3: focusIso3, name: allRows.find((r) => r.iso3 === focusIso3)?.name ?? focusDisplayName(db, focusIso3) },
+    focus: { iso3: focusIso3, name: allRows.find((r) => r.iso3 === focusIso3)?.name ?? (await focusDisplayName(db, focusIso3)) },
     years: { a: yearA, b: yearB, ...(hasMid ? { mid: yearMid } : {}), order },
     universe: {
       intervals,

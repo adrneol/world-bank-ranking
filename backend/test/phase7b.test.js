@@ -39,13 +39,13 @@ test.after(async () => {
 
 async function freshDb() {
   const { createMemoryDb } = await import('../src/db/index.js');
-  return createMemoryDb();
+  return await createMemoryDb();
 }
 
 async function ingestFull(db, years = { startYear: 2024, endYear: 2025 }) {
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
-  return refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
+  return await refreshData({ db, startYear: years.startYear, endYear: years.endYear, trigger: 'test' });
 }
 
 async function startApp(db) {
@@ -281,7 +281,7 @@ test('Phase 7B.7: exports growth carries Annual-flow endpoint semantics; GDP has
   const db = await freshDb();
   await ingestFull(db);
   const { buildGrowthComparisonResponse } = await import('../src/services/growthComparisonService.js');
-  const flow = buildGrowthComparisonResponse(db, { metricKey: 'exports_current', yearA: 2024, yearB: 2025 });
+  const flow = await buildGrowthComparisonResponse(db, { metricKey: 'exports_current', yearA: 2024, yearB: 2025 });
   assert.equal(flow.comparison.available, true);
   assert.equal(flow.flowSemantics.intervalMeaning, 'Annual flow: B vs A — endpoint comparison of annual flows, never a period sum.');
   assert.equal(flow.focusMovement.growth.AB.endpointMeaning, 'Annual flow: 2025 vs 2024 — endpoint comparison, not a period sum.');
@@ -291,7 +291,7 @@ test('Phase 7B.7: exports growth carries Annual-flow endpoint semantics; GDP has
   const ab = flow.focusMovement.growth.AB;
   assert.equal(ab.startValue, liveIndia2024('exports_current'));
   assert.ok(Math.abs(ab.indiaGrowthPercent - 6) < 1e-9);
-  const level = buildGrowthComparisonResponse(db, { metricKey: 'nominal_current', yearA: 2024, yearB: 2025 });
+  const level = await buildGrowthComparisonResponse(db, { metricKey: 'nominal_current', yearA: 2024, yearB: 2025 });
   assert.equal('flowSemantics' in level, false);
   assert.equal('endpointMeaning' in (level.focusMovement.growth.AB ?? {}), false);
   db.close();

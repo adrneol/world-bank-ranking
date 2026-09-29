@@ -39,13 +39,15 @@ async function seedViaStub(db) {
   return refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-seed' });
 }
 
-function runCount(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM fetch_runs').get().n;
+async function runCount(db) {
+  const { queryGet } = await import('../src/db/driver.js');
+  return (await queryGet(db, 'SELECT COUNT(*) AS n FROM fetch_runs')).n;
 }
 
-function backdateLatestRun(db, hoursAgo) {
+async function backdateLatestRun(db, hoursAgo) {
+  const { queryRun } = await import('../src/db/driver.js');
   const iso = new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
-  db.prepare('UPDATE fetch_runs SET started_at = ?, completed_at = ? WHERE id = (SELECT MAX(id) FROM fetch_runs)').run(iso, iso);
+  await queryRun(db, 'UPDATE fetch_runs SET started_at = ?, completed_at = ? WHERE id = (SELECT MAX(id) FROM fetch_runs)', [iso, iso]);
 }
 
 async function serve(db) {
@@ -74,29 +76,29 @@ async function waitForIdle(timeoutMs = 60000) {
   }
 }
 
-function indiaNominal2025(db) {
-  return db
-    .prepare(
-      `SELECT o.value AS value FROM observations o
+async function indiaNominal2025(db) {
+  const { queryGet } = await import('../src/db/driver.js');
+  return queryGet(
+    db,
+    `SELECT o.value AS value FROM observations o
        JOIN indicators i ON i.id = o.indicator_id
        WHERE o.country_id = 'IND' AND i.metric_key = 'nominal_current' AND o.year = 2025`,
-    )
-    .get();
+  );
 }
 
 // a. fresh cache -> no refresh is triggered.
 test('a. fresh cache serves requests without triggering a refresh', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await seedViaStub(db);
-  const before = runCount(db);
+  const before = await runCount(db);
 
   const api = await serve(db);
   try {
     const res = await api.get('/api/india/gdp-ranking?startYear=2024&endYear=2025');
     assert.equal(res.status, 200);
     assert.equal(res.header, null, 'no background refresh on a fresh cache');
-    assert.equal(runCount(db), before, 'no new fetch_runs row');
+    assert.equal(await runCount(db), before, 'no new fetch_runs row');
   } finally {
     await api.close();
     db.close();
@@ -106,10 +108,10 @@ test('a. fresh cache serves requests without triggering a refresh', async () => 
 // b. expired cache -> exactly one background refresh restores freshness.
 test('b. expired cache triggers exactly one background refresh', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await seedViaStub(db);
-  backdateLatestRun(db, 48);
-  const before = runCount(db);
+  await backdateLatestRun(db, 48);
+  const before = await runCount(db);
 
   const api = await serve(db);
   try {
@@ -117,7 +119,7 @@ test('b. expired cache triggers exactly one background refresh', async () => {
     assert.equal(res.status, 200);
     assert.equal(res.header, 'stale', 'stale request announces the triggered refresh');
     await waitForIdle();
-    assert.equal(runCount(db), before + 1, 'exactly one refresh ran');
+    assert.equal(await runCount(db), before + 1, 'exactly one refresh ran');
 
     const status = await api.get('/api/data-status');
     assert.equal(status.body.fresh, true, 'cache is fresh again after the refresh');
@@ -131,10 +133,10 @@ test('b. expired cache triggers exactly one background refresh', async () => {
 // c. concurrent stale requests -> only one refresh runs.
 test('c. concurrent stale requests produce a single refresh', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await seedViaStub(db);
-  backdateLatestRun(db, 48);
-  const before = runCount(db);
+  await backdateLatestRun(db, 48);
+  const before = await runCount(db);
 
   const api = await serve(db);
   try {
@@ -147,7 +149,7 @@ test('c. concurrent stale requests produce a single refresh', async () => {
     ]);
     for (const res of responses) assert.equal(res.status, 200, 'stale requests still serve current data');
     await waitForIdle();
-    assert.equal(runCount(db), before + 1, 'concurrent stale requests share one refresh');
+    assert.equal(await runCount(db), before + 1, 'concurrent stale requests share one refresh');
   } finally {
     await api.close();
     db.close();
@@ -158,11 +160,12 @@ test('c. concurrent stale requests produce a single refresh', async () => {
 test('d. failed refresh preserves old data and backs off automatically', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { refreshData } = await import('../src/wb/ingest.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await seedViaStub(db);
-  const goodValue = indiaNominal2025(db);
+  const goodValue = await indiaNominal2025(db);
   assert.ok(goodValue, 'seeded India 2025 nominal observation exists');
-  const goodCount = db.prepare('SELECT COUNT(*) AS n FROM observations').get().n;
+  const { queryGet, queryRun } = await import('../src/db/driver.js');
+  const goodCount = (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations')).n;
 
   // Total failure AFTER writes began: arm the stub outage once country
   // metadata has been received (countries upsert proceeds, then every
@@ -188,10 +191,10 @@ test('d. failed refresh preserves old data and backs off automatically', async (
   stub.reset();
   assert.equal(armed, true, 'outage was armed after the metadata stage');
 
-  const failed = db.prepare('SELECT status FROM fetch_runs ORDER BY id DESC LIMIT 1').get();
+  const failed = await queryGet(db, 'SELECT status FROM fetch_runs ORDER BY id DESC LIMIT 1');
   assert.equal(failed.status, 'failed', 'the failed run stays recorded for provenance');
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM observations').get().n, goodCount);
-  assert.deepEqual(indiaNominal2025(db), goodValue);
+  assert.equal((await queryGet(db, 'SELECT COUNT(*) AS n FROM observations')).n, goodCount);
+  assert.deepEqual(await indiaNominal2025(db), goodValue);
 
   // HTTP level: while the API is down, old rankings stay served and the
   // post-failure cooldown suppresses an automatic retry loop.
@@ -199,8 +202,8 @@ test('d. failed refresh preserves old data and backs off automatically', async (
   // the seed success recent would (correctly) count as fresh.
   stub.failNext({ status: 500, times: 200, body: 'down' });
   const oldIso = new Date(Date.now() - 48 * 3_600_000).toISOString();
-  db.prepare('UPDATE fetch_runs SET started_at = ?, completed_at = ?').run(oldIso, oldIso);
-  const before = runCount(db);
+  await queryRun(db, 'UPDATE fetch_runs SET started_at = ?, completed_at = ?', [oldIso, oldIso]);
+  const before = await runCount(db);
   const api = await serve(db);
   try {
     const res = await api.get('/api/ranking?indicator=nominal_current&year=2025');
@@ -208,16 +211,16 @@ test('d. failed refresh preserves old data and backs off automatically', async (
     await waitForIdle();
     stub.reset();
 
-    assert.equal(runCount(db), before + 1, 'the failed run is recorded in fetch_runs');
-    const latest = db.prepare('SELECT status FROM fetch_runs ORDER BY id DESC LIMIT 1').get();
+    assert.equal(await runCount(db), before + 1, 'the failed run is recorded in fetch_runs');
+    const latest = await queryGet(db, 'SELECT status FROM fetch_runs ORDER BY id DESC LIMIT 1');
     assert.equal(latest.status, 'failed');
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM observations').get().n, goodCount);
-    assert.deepEqual(indiaNominal2025(db), goodValue);
+    assert.equal((await queryGet(db, 'SELECT COUNT(*) AS n FROM observations')).n, goodCount);
+    assert.deepEqual(await indiaNominal2025(db), goodValue);
 
     const again = await api.get('/api/years');
     assert.equal(again.status, 200);
     assert.equal(again.header, null, 'post-failure cooldown suppresses automatic retries');
-    assert.equal(runCount(db), before + 1, 'no retry loop while the API is down');
+    assert.equal(await runCount(db), before + 1, 'no retry loop while the API is down');
   } finally {
     await api.close();
     db.close();
@@ -227,20 +230,20 @@ test('d. failed refresh preserves old data and backs off automatically', async (
 // e. request after successful refresh -> no duplicate refresh.
 test('e. no duplicate refresh once the cache is fresh again', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await seedViaStub(db);
-  backdateLatestRun(db, 48);
+  await backdateLatestRun(db, 48);
 
   const api = await serve(db);
   try {
     await api.get('/api/years');
     await waitForIdle();
-    const afterRefresh = runCount(db);
+    const afterRefresh = await runCount(db);
 
     const res = await api.get('/api/india/gdp-ranking?startYear=2024&endYear=2025');
     assert.equal(res.status, 200);
     assert.equal(res.header, null);
-    assert.equal(runCount(db), afterRefresh, 'fresh cache triggers nothing further');
+    assert.equal(await runCount(db), afterRefresh, 'fresh cache triggers nothing further');
   } finally {
     await api.close();
     db.close();
@@ -251,23 +254,23 @@ test('e. no duplicate refresh once the cache is fresh again', async () => {
 test('g. stale/fresh boundary follows cache age against the configured TTL', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { getCacheStatus } = await import('../src/wb/ingest.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await seedViaStub(db);
   try {
-    const { lastSuccessAt } = getCacheStatus(db);
+    const { lastSuccessAt } = await getCacheStatus(db);
     assert.ok(lastSuccessAt, 'seed records a success time');
     const base = new Date(lastSuccessAt).getTime();
     const hour = 3_600_000;
 
-    const justUnder = getCacheStatus(db, { ttlHours: 24, now: base + 24 * hour - 1000 });
+    const justUnder = await getCacheStatus(db, { ttlHours: 24, now: base + 24 * hour - 1000 });
     assert.equal(justUnder.fresh, true, '23:59:59 stays fresh');
     assert.equal(justUnder.refreshDue, false);
 
-    const exact = getCacheStatus(db, { ttlHours: 24, now: base + 24 * hour });
+    const exact = await getCacheStatus(db, { ttlHours: 24, now: base + 24 * hour });
     assert.equal(exact.fresh, false, 'exactly 24:00:00 is due (strict < comparison)');
     assert.equal(exact.refreshDue, true);
 
-    const over = getCacheStatus(db, { ttlHours: 24, now: base + 25 * hour });
+    const over = await getCacheStatus(db, { ttlHours: 24, now: base + 25 * hour });
     assert.equal(over.refreshDue, true);
     assert.ok(over.ageHours > 24 && over.ageHours < 26, 'age derives from retrieval time, not wall clock drift');
   } finally {
@@ -279,7 +282,7 @@ test('g. stale/fresh boundary follows cache age against the configured TTL', asy
 test('f. empty database ingests on demand via ensureDataPresent', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { ensureDataPresent } = await import('../src/wb/ingest.js');
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   stub.reset();
 
   const result = await ensureDataPresent(db, { trigger: 'boot' });

@@ -29,23 +29,23 @@ test('integrityCacheKey is stable within a generation and changes across it', ()
   assert.notEqual(integrityCacheKey(null), integrityCacheKey(gen1));
 });
 
-test('first call computes, second call with the same key reuses (no rescan)', () => {
+test('first call computes, second call with the same key reuses (no rescan)', async () => {
   let scans = 0;
   const compute = () => {
     scans += 1;
     return { passed: true, checks: [] };
   };
   const key = integrityCacheKey({ runId: 1, lastSuccessAt: '2026-01-01T00:00:00.000Z', observationCount: 10 });
-  const first = getCachedIntegrity(key, compute);
+  const first = await getCachedIntegrity(key, compute);
   assert.equal(first.fromCache, false);
   assert.equal(scans, 1);
-  const second = getCachedIntegrity(key, compute);
+  const second = await getCachedIntegrity(key, compute);
   assert.equal(second.fromCache, true);
   assert.equal(scans, 1, 'rapid poll within one generation must not rescan');
   assert.deepEqual(second.report, first.report);
 });
 
-test('a new published generation invalidates the memo exactly once', () => {
+test('a new published generation invalidates the memo exactly once', async () => {
   let scans = 0;
   const compute = () => {
     scans += 1;
@@ -53,12 +53,12 @@ test('a new published generation invalidates the memo exactly once', () => {
   };
   const oldKey = integrityCacheKey({ runId: 1, lastSuccessAt: '2026-01-01T00:00:00.000Z', observationCount: 10 });
   const newKey = integrityCacheKey({ runId: 2, lastSuccessAt: '2026-01-02T00:00:00.000Z', observationCount: 12 });
-  getCachedIntegrity(oldKey, compute);
-  const afterPublish = getCachedIntegrity(newKey, compute);
+  await getCachedIntegrity(oldKey, compute);
+  const afterPublish = await getCachedIntegrity(newKey, compute);
   assert.equal(afterPublish.fromCache, false);
   assert.equal(scans, 2);
   assert.equal(afterPublish.report.passed, true, 'recomputed report reflects the new generation');
-  const repeat = getCachedIntegrity(newKey, compute);
+  const repeat = await getCachedIntegrity(newKey, compute);
   assert.equal(repeat.fromCache, true);
   assert.equal(scans, 2);
 });

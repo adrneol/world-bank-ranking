@@ -1,30 +1,40 @@
 /**
- * SQLite connection factory.
+ * DATABASE CONNECTION FACTORY (Phase 6A).
  *
- * Uses Node's built-in `node:sqlite` (no native compilation step). All database
- * access in this application goes through this module and `repository.js`, so
- * the storage engine can be replaced without touching domain logic.
+ * One libSQL client serves BOTH backends through the helpers in
+ * `./driver.js`, so repository/service code never knows which physical
+ * database answers:
+ *
+ *   Turso Cloud primary  — TURSO_DATABASE_URL (+ TURSO_AUTH_TOKEN)
+ *   Local SQLite fallback — backend/data/worldbank.db (`file:` URL)
+ *
+ * Selection: explicit DB_MODE wins ('turso' | 'local'); otherwise Turso is
+ * used whenever TURSO_DATABASE_URL is configured. `getDb()` stays
+ * synchronous (client construction is lazy — no I/O happens here);
+ * `initDatabase()` performs the async schema/pragma setup exactly once per
+ * handle. Credentials are never logged; use describeDbTarget() for logs.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { createClient } from '@libsql/client';
 import { fileURLToPath } from 'node:url';
 import config from '../config.js';
+import { queryExec } from './driver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
-/** @type {DatabaseSync|null} */
 let db = null;
+let dbDescriptor = null;
 
 /**
  * Columns added after the first release.
  *
  * `CREATE TABLE IF NOT EXISTS` cannot add a column to a table that already
- * exists, so an existing local cache is upgraded in place here: no table, row or
- * value is ever removed. Keys are table names, values map a column to its SQL
- * definition.
+ * exists, so an existing database is upgraded in place here: no table, row
+ * or value is ever removed. Keys are table names, values map a column to
+ * its SQL definition.
  */
 const ADDED_COLUMNS = Object.freeze({
   fetch_runs: Object.freeze({
@@ -44,19 +54,40 @@ const ADDED_COLUMNS = Object.freeze({
   }),
 });
 
+/** Resolved backend: 'turso' or 'local'. Explicit DB_MODE wins. */
+export function resolveDbMode() {
+  if (config.dbMode === 'turso' || config.dbMode === 'local') return config.dbMode;
+  return config.tursoDatabaseUrl !== '' ? 'turso' : 'local';
+}
+
+/** Log-safe target description (host only for Turso — never credentials). */
+export function describeDbTarget() {
+  if (resolveDbMode() === 'turso') {
+    let host = '(unparseable)';
+    try {
+      host = new URL(config.tursoDatabaseUrl).host;
+    } catch {
+      // Keep the placeholder.
+    }
+    return { mode: 'turso', host };
+  }
+  return { mode: 'local', file: config.databaseFile };
+}
+
 /** Column names currently present on a table (empty set for a missing table). */
-function existingColumns(handle, table) {
-  return new Set(handle.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name));
+async function existingColumns(handle, table) {
+  const rows = await handle.execute(`PRAGMA table_info(${table})`);
+  return new Set(rows.rows.map((row) => row.name));
 }
 
 /** Add any column the current code expects but the stored table is missing. */
-function applyColumnMigrations(handle) {
+async function applyColumnMigrations(handle) {
   for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
-    const present = existingColumns(handle, table);
+    const present = await existingColumns(handle, table);
     if (present.size === 0) continue;
     for (const [column, definition] of Object.entries(columns)) {
       if (!present.has(column)) {
-        handle.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+        await handle.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
       }
     }
   }
@@ -67,100 +98,122 @@ function applyColumnMigrations(handle) {
  * Idempotent: every statement uses IF NOT EXISTS / a column presence check.
  * Also backfills value_raw for rows written before the column existed.
  */
-function applySchema(handle) {
+async function applySchema(handle) {
   const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-  handle.exec(schema);
-  applyColumnMigrations(handle);
+  await queryExec(handle, schema);
+  await applyColumnMigrations(handle);
   try {
-    handle.exec('UPDATE observations SET value_raw = CAST(value AS TEXT) WHERE value_raw IS NULL;');
+    await handle.execute('UPDATE observations SET value_raw = CAST(value AS TEXT) WHERE value_raw IS NULL;');
   } catch {
     // Table may not exist yet in exotic flows; fresh schema already has values.
   }
 }
 
 /**
- * Open (once) and return the shared database handle.
- *
- * @param {{ file?: string }} [options]
- * @returns {DatabaseSync}
+ * Async one-time setup for a handle: pragmas (local file only — remote
+ * databases manage their own journaling) plus the idempotent schema.
  */
-export function getDb(options = {}) {
-  const file = options.file ?? config.databaseFile;
-
-  if (db && db.__file !== file) {
-    closeDb();
-  }
-  if (db) return db;
-
-  if (file !== ':memory:') {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-  }
-
-  const handle = new DatabaseSync(file);
-  handle.__file = file;
-  // WAL keeps reads fast while an ingest writes; memory DBs ignore it.
-  if (file !== ':memory:') {
+export async function initDatabase(handle, { localFile = false } = {}) {
+  if (localFile) {
     try {
-      handle.exec('PRAGMA journal_mode = WAL;');
+      await handle.execute('PRAGMA journal_mode = WAL;');
     } catch {
       // Non-fatal: some filesystems do not support WAL.
     }
   }
-  handle.exec('PRAGMA foreign_keys = ON;');
-  applySchema(handle);
+  try {
+    await handle.execute('PRAGMA foreign_keys = ON;');
+  } catch {
+    // Non-fatal: enforced explicitly by publish logic regardless.
+  }
+  await applySchema(handle);
+}
 
-  db = handle;
+/**
+ * Open (once) and return the shared database handle. Synchronous:
+ * construction performs no I/O — call `initDatabase()` before serving.
+ */
+export function getDb() {
+  if (db) return db;
+  const mode = resolveDbMode();
+  if (mode === 'turso') {
+    if (config.tursoDatabaseUrl === '') {
+      throw new Error('DB_MODE=turso but TURSO_DATABASE_URL is not set.');
+    }
+    db = createClient({ url: config.tursoDatabaseUrl, authToken: config.tursoAuthToken || undefined });
+    dbDescriptor = { mode: 'turso' };
+    return db;
+  }
+  const file = config.databaseFile;
+  if (file !== ':memory:') {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+  }
+  db = createClient({ url: file === ':memory:' ? ':memory:' : `file:${file}` });
+  dbDescriptor = { mode: 'local', file };
   return db;
+}
+
+/** Which backend the shared handle serves (null before first open). */
+export function getDbDescriptor() {
+  return dbDescriptor;
+}
+
+/** Lightweight reachability check (used at boot for fallback decisions). */
+export async function pingDatabase(handle) {
+  await handle.execute('SELECT 1;');
 }
 
 /** Close the shared handle, if open. */
 export function closeDb() {
   if (db) {
     try {
-      db.close();
+      const result = db.close();
+      if (result && typeof result.then === 'function') result.catch(() => {});
     } catch {
       // Already closed.
     }
     db = null;
+    dbDescriptor = null;
+  }
+}
+
+/**
+ * Open the local SQLite file ONLY if it already exists and already holds
+ * observations. Returns `{ handle, file }` or null. Never creates, seeds,
+ * or fabricates data: missing/empty/unreadable files all resolve to null
+ * so callers can distinguish "usable fallback" from "nothing to serve".
+ * The idempotent schema upgrade still applies (additive columns only).
+ */
+export async function openExistingLocalDb() {
+  const file = config.databaseFile;
+  try {
+    if (file === ':memory:') return null;
+    if (!fs.existsSync(file)) return null;
+    const handle = createClient({ url: `file:${file}` });
+    await initDatabase(handle, { localFile: true });
+    const count = await handle.execute('SELECT COUNT(*) AS n FROM observations');
+    if (!count.rows[0] || Number(count.rows[0].n) === 0) {
+      try {
+        handle.close();
+      } catch {
+        // Already closed.
+      }
+      return null;
+    }
+    return { handle, file };
+  } catch {
+    return null;
   }
 }
 
 /**
  * Create a brand new in-memory database with the schema applied.
  * Used by unit tests so they never touch the real cache file.
- *
- * @returns {DatabaseSync}
  */
-export function createMemoryDb() {
-  const handle = new DatabaseSync(':memory:');
-  handle.__file = ':memory:';
-  handle.exec('PRAGMA foreign_keys = ON;');
-  applySchema(handle);
+export async function createMemoryDb() {
+  const handle = createClient({ url: ':memory:' });
+  await initDatabase(handle);
   return handle;
-}
-
-/**
- * Run `fn` inside a transaction. Rolls back on any thrown error.
- *
- * @template T
- * @param {DatabaseSync} handle
- * @param {() => T} fn
- * @returns {T}
- */
-export function transaction(handle, fn) {
-  handle.exec('BEGIN');
-  try {
-    const result = fn();
-    handle.exec('COMMIT');
-    return result;
-  } catch (error) {
-    try {
-      handle.exec('ROLLBACK');
-    } catch {
-      // Ignore rollback failures; the original error is what matters.
-    }
-    throw error;
-  }
 }
 
 export { SCHEMA_PATH };

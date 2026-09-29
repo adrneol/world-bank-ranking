@@ -19,18 +19,18 @@ import {
   getLatestSuccessfulIngestYearStat,
   getUniverseSnapshotByRun,
   getYearRange,
-  listAvailableYears,
 } from '../db/repository.js';
 import { buildYoyCoverage, explainCoverageChange, summarizeCoverage } from '../domain/coverage.js';
 import { describeMetric } from '../domain/format.js';
 import { directionFor, rankByValue } from '../domain/ranking.js';
 import { sourceAttribution } from './attribution.js';
+import { getCachedAvailableYears } from './yearsCache.js';
 
 /** Coverage counters for one metric and year, from stored observations only. */
-export function coverageForMetricYear(db, indicatorId, year, eligibleUniverse) {
+export async function coverageForMetricYear(db, indicatorId, year, eligibleUniverse) {
   return summarizeCoverage({
     eligibleUniverse,
-    validObservations: countEligibleObservations(db, indicatorId, year),
+    validObservations: await countEligibleObservations(db, indicatorId, year),
   });
 }
 
@@ -40,63 +40,67 @@ export function coverageForMetricYear(db, indicatorId, year, eligibleUniverse) {
  * @param {object} db
  * @param {{year?:number, metricKeys?:string[], focusIso3?:string}} [options]
  */
-export function buildCoveragePanel(db, options = {}) {
+export async function buildCoveragePanel(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   // Subject-scoped (per-capita four by default, so existing URLs are unchanged).
   const metricKeys =
     options.metricKeys ?? (options.subject ? metricKeysForSubject(options.subject) : METRIC_KEYS);
   const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
-  const available = listAvailableYears(db);
-  const eligibleUniverse = countEligibleCountries(db);
+  const available = await getCachedAvailableYears(db);
+  const eligibleUniverse = await countEligibleCountries(db);
   const year = options.year ?? available.maxYear;
 
-  const metrics = metricKeys.map((metricKey) => {
-    const metric = METRICS[metricKey];
-    const indicator = getIndicatorByMetricKey(db, metricKey);
-    if (!indicator || year === null) {
+  const metrics = await Promise.all(
+    metricKeys.map(async (metricKey) => {
+      const metric = METRICS[metricKey];
+      const indicator = await getIndicatorByMetricKey(db, metricKey);
+      if (!indicator || year === null) {
+        return {
+          metric: describeMetric(metric),
+          year,
+          available: false,
+          reason: indicator ? 'no_stored_data' : 'metric_not_ingested',
+          eligibleUniverse,
+          validObservations: 0,
+          missingObservations: eligibleUniverse,
+          focus: { iso3: focusIso3, available: false, rank: null, total: 0 },
+        };
+      }
+
+      const coverage = await coverageForMetricYear(db, indicator.id, year, eligibleUniverse);
+      // Focus rank honors the metric's declared direction; NEUTRAL metrics
+      // (raw index levels, quoted FX) receive no country rank. Counts stay.
+      const direction = directionFor(metric);
+      const { ranked } = direction
+        ? rankByValue(await getEligibleObservations(db, indicator.id, year), direction)
+        : { ranked: [] };
+      const focusRow = ranked.find((row) => row.iso3 === focusIso3) ?? null;
+
       return {
         metric: describeMetric(metric),
         year,
-        available: false,
-        reason: indicator ? 'no_stored_data' : 'metric_not_ingested',
-        eligibleUniverse,
-        validObservations: 0,
-        missingObservations: eligibleUniverse,
-        focus: { iso3: focusIso3, available: false, rank: null, total: 0 },
+        available: coverage.validObservations > 0,
+        reason: null,
+        eligibleUniverse: coverage.eligibleUniverse,
+        validObservations: coverage.validObservations,
+        missingObservations: coverage.missingObservations,
+        focus: {
+          iso3: focusIso3,
+          available: Boolean(focusRow),
+          rank: focusRow ? focusRow.rank : null,
+          focusRankReason: focusRow ? null : direction ? null : 'RANK_UNSUPPORTED',
+          total: coverage.validObservations,
+        },
+        // Explicit reminder of what the two numbers mean (specification section 5).
+        meanings: {
+          eligibleUniverse:
+            'Eligible World Bank country/economy metadata entities: those the universe rule does not classify as aggregates.',
+          validObservations:
+            'Ranking denominator: eligible entities holding a valid World Bank observation for this metric and year.',
+        },
       };
-    }
-
-    const coverage = coverageForMetricYear(db, indicator.id, year, eligibleUniverse);
-    // Focus rank honors the metric's declared direction; NEUTRAL metrics
-    // (raw index levels, quoted FX) receive no country rank. Counts stay.
-    const direction = directionFor(metric);
-    const { ranked } = direction ? rankByValue(getEligibleObservations(db, indicator.id, year), direction) : { ranked: [] };
-    const focusRow = ranked.find((row) => row.iso3 === focusIso3) ?? null;
-
-    return {
-      metric: describeMetric(metric),
-      year,
-      available: coverage.validObservations > 0,
-      reason: null,
-      eligibleUniverse: coverage.eligibleUniverse,
-      validObservations: coverage.validObservations,
-      missingObservations: coverage.missingObservations,
-      focus: {
-        iso3: focusIso3,
-        available: Boolean(focusRow),
-        rank: focusRow ? focusRow.rank : null,
-        focusRankReason: focusRow ? null : (direction ? null : 'RANK_UNSUPPORTED'),
-        total: coverage.validObservations,
-      },
-      // Explicit reminder of what the two numbers mean (specification section 5).
-      meanings: {
-        eligibleUniverse:
-          'Eligible World Bank country/economy metadata entities: those the universe rule does not classify as aggregates.',
-        validObservations:
-          'Ranking denominator: eligible entities holding a valid World Bank observation for this metric and year.',
-      },
-    };
-  });
+    }),
+  );
 
   return {
     year,
@@ -117,64 +121,66 @@ export function buildCoveragePanel(db, options = {}) {
  * The YoY denominator is reported separately from the level denominator: the two
  * can only ever be equal by coincidence.
  */
-export function buildYoyCoveragePanel(db, options = {}) {
+export async function buildYoyCoveragePanel(db, options = {}) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   // Subject-scoped (per-capita four by default, so existing URLs are unchanged).
   const metricKeys =
     options.metricKeys ?? (options.subject ? metricKeysForSubject(options.subject) : METRIC_KEYS);
   const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
-  const eligibleUniverse = countEligibleCountries(db);
+  const eligibleUniverse = await countEligibleCountries(db);
 
-  const metrics = metricKeys.map((metricKey) => {
-    const metric = METRICS[metricKey];
-    const indicator = getIndicatorByMetricKey(db, metricKey);
-    if (!indicator) {
+  const metrics = await Promise.all(
+    metricKeys.map(async (metricKey) => {
+      const metric = METRICS[metricKey];
+      const indicator = await getIndicatorByMetricKey(db, metricKey);
+      if (!indicator) {
+        return {
+          metric: describeMetric(metric),
+          available: false,
+          reason: 'metric_not_ingested',
+          year: options.year ?? null,
+        };
+      }
+
+      // Generic percent-change YoY coverage is only meaningful for metrics
+      // that declare YOY. Rates, ratios and indexes report unsupported instead
+      // of a misleading relative percent (e.g. CPI −12% for 6%→3%).
+      if (!metric.validChangeTypes.includes('YOY')) {
+        return {
+          metric: describeMetric(metric),
+          available: false,
+          reason: 'unsupported_transformation_for_metric',
+          year: options.year ?? null,
+        };
+      }
+
+      const year = options.year ?? (await getYearRange(db, indicator.id)).maxYear;
+      if (year === null || year === undefined) {
+        return {
+          metric: describeMetric(metric),
+          available: false,
+          reason: 'no_stored_data',
+          year: null,
+        };
+      }
+
+      const coverage = buildYoyCoverage({
+        metricKey,
+        year,
+        eligibleUniverse,
+        currentRows: await getEligibleObservations(db, indicator.id, year),
+        previousRows: await getEligibleObservations(db, indicator.id, year - 1),
+        focusIso3,
+      });
+
       return {
         metric: describeMetric(metric),
-        available: false,
-        reason: 'metric_not_ingested',
-        year: options.year ?? null,
+        available: coverage.currentValidObservations > 0,
+        reason: null,
+        ...coverage,
       };
-    }
-
-    // Generic percent-change YoY coverage is only meaningful for metrics
-    // that declare YOY. Rates, ratios and indexes report unsupported instead
-    // of a misleading relative percent (e.g. CPI −12% for 6%→3%).
-    if (!metric.validChangeTypes.includes('YOY')) {
-      return {
-        metric: describeMetric(metric),
-        available: false,
-        reason: 'unsupported_transformation_for_metric',
-        year: options.year ?? null,
-      };
-    }
-
-    const year = options.year ?? getYearRange(db, indicator.id).maxYear;
-    if (year === null || year === undefined) {
-      return {
-        metric: describeMetric(metric),
-        available: false,
-        reason: 'no_stored_data',
-        year: null,
-      };
-    }
-
-    const coverage = buildYoyCoverage({
-      metricKey,
-      year,
-      eligibleUniverse,
-      currentRows: getEligibleObservations(db, indicator.id, year),
-      previousRows: getEligibleObservations(db, indicator.id, year - 1),
-      focusIso3,
-    });
-
-    return {
-      metric: describeMetric(metric),
-      available: coverage.currentValidObservations > 0,
-      reason: null,
-      ...coverage,
-    };
-  });
+    }),
+  );
 
   return {
     year: options.year ?? null,
@@ -191,7 +197,7 @@ export function buildYoyCoveragePanel(db, options = {}) {
  * data. Returns comparable=false when a snapshot is missing, in which case a
  * change can neither be confirmed nor ruled out from the stored data.
  */
-export function buildMetadataChange(db, fromRunId, toRunId) {
+export async function buildMetadataChange(db, fromRunId, toRunId) {
   if (
     fromRunId === null ||
     fromRunId === undefined ||
@@ -212,8 +218,8 @@ export function buildMetadataChange(db, fromRunId, toRunId) {
     return { comparable: true, changed: false, added: [], removed: [], fromRunId, toRunId };
   }
 
-  const fromSnapshot = getUniverseSnapshotByRun(db, fromRunId);
-  const toSnapshot = getUniverseSnapshotByRun(db, toRunId);
+  const fromSnapshot = await getUniverseSnapshotByRun(db, fromRunId);
+  const toSnapshot = await getUniverseSnapshotByRun(db, toRunId);
   if (!fromSnapshot || !toSnapshot) {
     return { comparable: false, added: [], removed: [], fromRunId, toRunId };
   }
@@ -239,14 +245,14 @@ export function buildMetadataChange(db, fromRunId, toRunId) {
  * @param {object} db
  * @param {{metricKey?:string, fromYear?:number, toYear?:number, focusIso3?:string}} [options]
  */
-export function explainTotalChange(db, options = {}) {
+export async function explainTotalChange(db, options = {}) {
   const metricKey = options.metricKey ?? METRIC_KEYS[0];
   const metric = METRICS[metricKey];
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
 
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const eligibleUniverse = countEligibleCountries(db);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const eligibleUniverse = await countEligibleCountries(db);
 
   if (!indicator) {
     return {
@@ -258,7 +264,7 @@ export function explainTotalChange(db, options = {}) {
     };
   }
 
-  const stored = getYearRange(db, indicator.id);
+  const stored = await getYearRange(db, indicator.id);
   const fromYear = options.fromYear ?? stored.minYear;
   const toYear = options.toYear ?? stored.maxYear;
 
@@ -275,16 +281,16 @@ export function explainTotalChange(db, options = {}) {
   // Latest ingest counters for each year and metric from the latest
   // SUCCESSFULLY PUBLISHED run (failed/partial attempts never describe the
   // current dataset; they remain visible in the run history).
-  const fromStats = getLatestSuccessfulIngestYearStat(db, metricKey, fromYear);
-  const toStats = getLatestSuccessfulIngestYearStat(db, metricKey, toYear);
+  const fromStats = await getLatestSuccessfulIngestYearStat(db, metricKey, fromYear);
+  const toStats = await getLatestSuccessfulIngestYearStat(db, metricKey, toYear);
 
   // Historical universe rule (spec section 6): each year's coverage must be
   // explained against the universe snapshot recorded on the fetch run that
   // produced that year's data — never against the current countries table.
   // When a snapshot is missing, fall back to the current count and mark the
   // comparison as not comparable (CASE D) rather than rewriting history.
-  const fromSnapshot = getUniverseSnapshotByRun(db, fromStats?.fetch_run_id ?? null);
-  const toSnapshot = getUniverseSnapshotByRun(db, toStats?.fetch_run_id ?? null);
+  const fromSnapshot = await getUniverseSnapshotByRun(db, fromStats?.fetch_run_id ?? null);
+  const toSnapshot = await getUniverseSnapshotByRun(db, toStats?.fetch_run_id ?? null);
   const fromEligibleUniverse =
     Number.isFinite(Number(fromSnapshot?.snapshot?.eligibleCount))
       ? Number(fromSnapshot.snapshot.eligibleCount)
@@ -299,17 +305,17 @@ export function explainTotalChange(db, options = {}) {
     focusIso3,
     from: {
       year: fromYear,
-      coverage: coverageForMetricYear(db, indicator.id, fromYear, fromEligibleUniverse),
+      coverage: await coverageForMetricYear(db, indicator.id, fromYear, fromEligibleUniverse),
       filtering: fromStats,
       runId: fromStats?.fetch_run_id ?? null,
     },
     to: {
       year: toYear,
-      coverage: coverageForMetricYear(db, indicator.id, toYear, toEligibleUniverse),
+      coverage: await coverageForMetricYear(db, indicator.id, toYear, toEligibleUniverse),
       filtering: toStats,
       runId: toStats?.fetch_run_id ?? null,
     },
-    metadataChange: buildMetadataChange(
+    metadataChange: await buildMetadataChange(
       db,
       fromStats?.fetch_run_id ?? null,
       toStats?.fetch_run_id ?? null,

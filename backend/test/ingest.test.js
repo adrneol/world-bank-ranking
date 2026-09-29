@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
+import { queryGet } from '../src/db/driver.js';
 
 let stub = null;
 
@@ -35,7 +36,7 @@ test('refreshData ingests metadata plus EVERY configured indicator (both subject
   const { ALL_METRIC_KEYS, METRIC_KEYS } = await import('../src/config.js');
   stub.reset();
 
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' });
 
   assert.equal(summary.status, 'success');
@@ -55,44 +56,46 @@ test('refreshData ingests metadata plus EVERY configured indicator (both subject
   }
 
   // India 2025 nominal current must be present at full precision.
-  const indicator = repository.getIndicatorByMetricKey(db, 'nominal_current');
+  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
   assert.ok(indicator);
-  const rows = repository.getEligibleObservations(db, indicator.id, 2025);
+  const rows = await repository.getEligibleObservations(db, indicator.id, 2025);
   const india = rows.find((row) => row.iso3 === 'IND');
   assert.ok(india, 'India 2025 nominal observation stored');
   assert.equal(typeof india.value, 'number');
 
   // Official aggregate observations are stored (typed by metadata) but must
   // never enter the eligible ranking universe.
-  const aggregates = repository.listAggregateCountries(db);
+  const aggregates = await repository.listAggregateCountries(db);
   assert.ok(aggregates.length > 0);
   const aggregateIds = new Set(aggregates.map((row) => row.id));
   assert.equal(rows.some((row) => aggregateIds.has(row.iso3)), false);
-  const aggregateStored = db.prepare(
+  const aggregateStored = (await queryGet(
+    db,
     `SELECT COUNT(*) AS n FROM observations o
      JOIN countries c ON c.id = o.country_id
      WHERE c.is_aggregate = 1`,
-  ).get().n;
+    [],
+  )).n;
   assert.ok(aggregateStored > 0, 'official aggregate observations are stored with entity typing');
 
   // Total GDP travels through the SAME pipeline: the live-verified IND 2025
   // value must be stored verbatim (raw precision preserved).
   const { liveIndia2025 } = await import('./fixtures/totalGdp.js');
-  const totalIndicator = repository.getIndicatorByMetricKey(db, 'total_current');
+  const totalIndicator = await repository.getIndicatorByMetricKey(db, 'total_current');
   assert.ok(totalIndicator, 'Total GDP indicator registered by the same refresh');
   assert.equal(totalIndicator.code, 'NY.GDP.MKTP.CD');
-  const indiaTotal = repository
-    .getEligibleObservations(db, totalIndicator.id, 2025)
-    .find((row) => row.iso3 === 'IND');
+  const indiaTotal = (await repository.getEligibleObservations(db, totalIndicator.id, 2025)).find(
+    (row) => row.iso3 === 'IND',
+  );
   assert.ok(indiaTotal, 'India 2025 Total GDP observation stored');
   assert.equal(indiaTotal.value, liveIndia2025('total_current'));
   assert.equal(Number(indiaTotal.valueRaw), liveIndia2025('total_current'));
 
   // Audit trail recorded.
-  const run = repository.getLatestFetchRun(db, { status: 'success' });
+  const run = await repository.getLatestFetchRun(db, { status: 'success' });
   assert.ok(run);
   assert.ok(run.universe_snapshot, 'universe snapshot stored');
-  const stats = repository.getIngestYearStats(db, 'nominal_current', { year: 2025 });
+  const stats = await repository.getIngestYearStats(db, 'nominal_current', { year: 2025 });
   assert.ok(stats.length >= 1, 'per-year counters recorded');
   db.close();
 });
@@ -103,14 +106,14 @@ test('null observations are skipped, never stored as zero', async () => {
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' });
 
-  const count = repository.countObservations(db);
-  const zeroRows = db.prepare('SELECT COUNT(*) AS n FROM observations WHERE value = 0').get().n;
+  const count = await repository.countObservations(db);
+  const zeroRows = (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE value = 0', [])).n;
   // Zero is a valid stored value only if the API returned zero; nulls must not become rows.
   // The stub snapshot contains nulls, so stored rows must be fewer than raw rows received.
-  const run = repository.getLatestFetchRun(db, { status: 'success' });
+  const run = await repository.getLatestFetchRun(db, { status: 'success' });
   assert.ok(run.rows_null_skipped > 0, 'null rows counted and skipped');
   assert.ok(count > 0 && zeroRows >= 0);
   db.close();
@@ -121,7 +124,7 @@ test('concurrent refreshes are rejected with REFRESH_IN_PROGRESS', async () => {
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   const first = refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' });
   await assert.rejects(
     refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' }),
@@ -137,15 +140,15 @@ test('cache status reports empty, fresh and refresh-due correctly', async () => 
   const { getCacheStatus, refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const db = createMemoryDb();
-  const empty = getCacheStatus(db, { ttlHours: 24, now: Date.now() });
+  const db = await createMemoryDb();
+  const empty = await getCacheStatus(db, { ttlHours: 24, now: Date.now() });
   assert.equal(empty.empty, true);
   assert.equal(empty.refreshDue, true);
 
   await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test' });
-  const lastSuccess = repository.getLastSuccessfulFetchTime(db);
+  const lastSuccess = await repository.getLastSuccessfulFetchTime(db);
   assert.ok(lastSuccess);
-  const fresh = getCacheStatus(db, { ttlHours: 24, now: new Date(lastSuccess).getTime() + 1000 });
+  const fresh = await getCacheStatus(db, { ttlHours: 24, now: new Date(lastSuccess).getTime() + 1000 });
   assert.equal(fresh.empty, false);
   assert.equal(fresh.fresh, true);
   assert.equal(fresh.refreshDue, false);

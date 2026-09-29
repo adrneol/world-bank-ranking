@@ -38,6 +38,7 @@ import {
 } from '../src/config.js';
 import { describeMeasure, describeMetric } from '../src/domain/format.js';
 import { seedEdgeCaseDb } from './helpers/testDb.js';
+import { queryGet } from '../src/db/driver.js';
 
 const FROZEN_GDP_KEYS = [
   'nominal_current',
@@ -235,7 +236,7 @@ test('Phase 5.8: promoted keys resolve as metrics; unknown keys fail closed', ()
 test('Phase 5.9: integrity measures the twenty-metric production universe', async () => {
   const { db } = await seedEdgeCaseDb();
   const { runIntegrityChecks } = await import('../src/services/integrity.js');
-  const report = runIntegrityChecks(db);
+  const report = await runIntegrityChecks(db);
   const h = report.checks.find((c) => c.check === 'H.registry_indicators');
   // Edge-case DB seeds one indicator; H fails loudly for the partial set
   // exactly as before (proves H still measures the production universe).
@@ -254,7 +255,7 @@ test('Phase 5.9: integrity measures the twenty-metric production universe', asyn
   );
   // No fetch_runs row was recorded for the rejected attempts (guard runs
   // before bookkeeping) and no lock was left behind.
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM fetch_runs').get().n, 0);
+  assert.equal((await queryGet(db, 'SELECT COUNT(*) AS n FROM fetch_runs', [])).n, 0);
   const { isRefreshInProgress } = await import('../src/wb/ingest.js');
   assert.equal(isRefreshInProgress(), false);
 });

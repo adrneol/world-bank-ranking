@@ -34,7 +34,8 @@ test('canonicalDecimalString round-trips every finite number', async () => {
 
 test('stored rows carry a valueRaw that round-trips to the numeric value', async () => {
   const { db, repository } = await seedEdgeCaseDb();
-  const rows = db.prepare('SELECT value, value_raw FROM observations').all();
+  const { queryAll } = await import('../src/db/driver.js');
+  const rows = await queryAll(db, 'SELECT value, value_raw FROM observations');
   assert.ok(rows.length > 0);
   for (const row of rows) {
     assert.equal(typeof row.value, 'number');
@@ -62,17 +63,17 @@ test('ranking uses numeric values, not display strings', async () => {
 
 test('identical inputs always produce identical rankings (determinism)', async () => {
   const { db, repository } = await seedEdgeCaseDb();
-  const indicator = repository.getIndicatorByMetricKey(db, 'nominal_current');
+  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
   const { rankByValue: rank } = await import('../src/domain/ranking.js');
-  const first = rank(repository.getEligibleObservations(db, indicator.id, 2005));
-  const second = rank(repository.getEligibleObservations(db, indicator.id, 2005));
+  const first = rank(await repository.getEligibleObservations(db, indicator.id, 2005));
+  const second = rank(await repository.getEligibleObservations(db, indicator.id, 2005));
   assert.deepEqual(first, second);
 });
 
 test('valueRaw is audit-only: stripping it never changes a rank', async () => {
   const { db, repository } = await seedEdgeCaseDb();
-  const indicator = repository.getIndicatorByMetricKey(db, 'nominal_current');
-  const rows = repository.getEligibleObservations(db, indicator.id, 2005);
+  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
+  const rows = await repository.getEligibleObservations(db, indicator.id, 2005);
   assert.ok(rows.every((r) => typeof r.valueRaw === 'string' || r.valueRaw === null));
   const withRaw = rankByValue(rows);
   const stripped = rankByValue(rows.map(({ valueRaw, ...rest }) => rest));

@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
+import { queryAll, queryExec, queryGet } from '../src/db/driver.js';
 
 // Keep retry backoff tiny for the failure-path tests (set before src import,
 // mirroring refreshLock.test.js / ttlRefresh.test.js).
@@ -47,21 +48,21 @@ async function seedFullDb() {
   // earlier test: a seed is defined as a clean full refresh.
   stub.reset();
   rowsTransform = null;
-  const db = createMemoryDb();
+  const db = await createMemoryDb();
   const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-seed' });
   assert.equal(summary.status, 'success');
   return { db, repository, seedRunId: summary.runId };
 }
 
 /** Baseline facts about the published dataset for before/after comparison. */
-function datasetSnapshot(db) {
-  const obs = db
-    .prepare(
-      `SELECT i.metric_key AS metricKey, o.country_id AS iso3, o.year AS year, o.value AS value
+async function datasetSnapshot(db) {
+  const obs = await queryAll(
+    db,
+    `SELECT i.metric_key AS metricKey, o.country_id AS iso3, o.year AS year, o.value AS value
        FROM observations o JOIN indicators i ON i.id = o.indicator_id
        ORDER BY 1, 2, 3`,
-    )
-    .all();
+    [],
+  );
   return {
     count: obs.length,
     rows: obs,
@@ -70,8 +71,8 @@ function datasetSnapshot(db) {
   };
 }
 
-function lockState(db, repository) {
-  const s = repository.refreshLockStatus(db);
+async function lockState(db, repository) {
+  const s = await repository.refreshLockStatus(db);
   return { locked: Boolean(s.locked), runId: s.runId ?? null };
 }
 
@@ -84,9 +85,9 @@ test('A. partial refresh publishes nothing and records a partial run', async () 
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const before = datasetSnapshot(db);
+  const before = await datasetSnapshot(db);
   assert.ok(before.count > 0, 'seeded dataset exists');
-  const lastSuccessBefore = repository.getLastSuccessfulFetchTime(db);
+  const lastSuccessBefore = await repository.getLastSuccessfulFetchTime(db);
   assert.ok(lastSuccessBefore, 'a successful run exists');
 
   // Fail ONLY total_constant's series (metadata path untouched, every other
@@ -104,19 +105,19 @@ test('A. partial refresh publishes nothing and records a partial run', async () 
   assert.equal(summary.perIndicator.filter((r) => !r.error).length, 19);
 
   // The published dataset is EXACTLY the old one.
-  const after = datasetSnapshot(db);
+  const after = await datasetSnapshot(db);
   assert.deepEqual(after, before);
 
   // The run is recorded as partial (with the failure stored), and freshness
   // still points at the previous success.
-  const latest = repository.getLatestFetchRun(db, { status: null });
+  const latest = await repository.getLatestFetchRun(db, { status: null });
   assert.equal(latest.status, 'partial');
   assert.match(latest.error_message ?? '', /total_constant/);
-  assert.equal(repository.getLastSuccessfulFetchTime(db), lastSuccessBefore);
-  assert.equal(repository.getLatestFetchRun(db, { status: 'success' }).id, seedRunId);
+  assert.equal(await repository.getLastSuccessfulFetchTime(db), lastSuccessBefore);
+  assert.equal((await repository.getLatestFetchRun(db, { status: 'success' })).id, seedRunId);
 
   // Lock released with no run association left behind.
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 
@@ -129,8 +130,8 @@ test('B. total indicator failure publishes nothing and records a failed run', as
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const before = datasetSnapshot(db);
-  const lastSuccessBefore = repository.getLastSuccessfulFetchTime(db);
+  const before = await datasetSnapshot(db);
+  const lastSuccessBefore = await repository.getLastSuccessfulFetchTime(db);
 
   // Metadata succeeds; EVERY series fails (matches all series paths only).
   stub.failNextMatching({ status: 500, times: 500, substring: '/country/all/indicator/' });
@@ -140,13 +141,13 @@ test('B. total indicator failure publishes nothing and records a failed run', as
   );
   stub.reset();
 
-  const after = datasetSnapshot(db);
+  const after = await datasetSnapshot(db);
   assert.deepEqual(after, before);
 
-  const latest = repository.getLatestFetchRun(db, { status: null });
+  const latest = await repository.getLatestFetchRun(db, { status: null });
   assert.equal(latest.status, 'failed');
-  assert.equal(repository.getLastSuccessfulFetchTime(db), lastSuccessBefore);
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.equal(await repository.getLastSuccessfulFetchTime(db), lastSuccessBefore);
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 
@@ -159,14 +160,14 @@ test('C. country metadata failure publishes nothing and records a failed run', a
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const before = datasetSnapshot(db);
+  const before = await datasetSnapshot(db);
   stub.failNext({ status: 500, times: 500, body: 'down' });
   await assert.rejects(refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-meta-fail' }));
   stub.reset();
 
-  assert.deepEqual(datasetSnapshot(db), before);
-  assert.equal(repository.getLatestFetchRun(db, { status: null }).status, 'failed');
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.deepEqual(await datasetSnapshot(db), before);
+  assert.equal((await repository.getLatestFetchRun(db, { status: null })).status, 'failed');
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 
@@ -180,14 +181,10 @@ test('D. successful refresh removes stale rows the World Bank dropped', async ()
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const indicator = repository.getIndicatorByMetricKey(db, 'nominal_current');
-  const beforeInd = repository
-    .getEligibleObservations(db, indicator.id, 2024)
-    .find((r) => r.iso3 === 'IND');
+  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
+  const beforeInd = (await repository.getEligibleObservations(db, indicator.id, 2024)).find((r) => r.iso3 === 'IND');
   assert.ok(beforeInd, 'precondition: IND 2024 nominal observation exists');
-  const beforeUsa = repository
-    .getEligibleObservations(db, indicator.id, 2025)
-    .find((r) => r.iso3 === 'USA');
+  const beforeUsa = (await repository.getEligibleObservations(db, indicator.id, 2025)).find((r) => r.iso3 === 'USA');
   assert.ok(beforeUsa, 'precondition: USA 2025 nominal observation exists');
 
   // New payload: IND 2024 nominal is missing; USA 2025 nominal changed by +1.
@@ -209,26 +206,20 @@ test('D. successful refresh removes stale rows the World Bank dropped', async ()
   }
 
   // The dropped value is GONE (not zero, not stale).
-  const gone = repository
-    .getEligibleObservations(db, indicator.id, 2024)
-    .find((r) => r.iso3 === 'IND');
+  const gone = (await repository.getEligibleObservations(db, indicator.id, 2024)).find((r) => r.iso3 === 'IND');
   assert.equal(gone, undefined);
   assert.equal(
-    db.prepare('SELECT COUNT(*) AS n FROM observations WHERE value = 0').get().n,
+    (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE value = 0', [])).n,
     0,
     'no zero was invented for the missing observation',
   );
   // The changed value is replaced verbatim.
-  const usaNow = repository
-    .getEligibleObservations(db, indicator.id, 2025)
-    .find((r) => r.iso3 === 'USA');
+  const usaNow = (await repository.getEligibleObservations(db, indicator.id, 2025)).find((r) => r.iso3 === 'USA');
   assert.equal(usaNow.value, beforeUsa.value + 1);
   // Untouched series are byte-identical (Total GDP never refreshes here, but
   // prove the other metric in range is intact too).
-  const total = repository.getIndicatorByMetricKey(db, 'total_current');
-  const totalInd = repository
-    .getEligibleObservations(db, total.id, 2024)
-    .find((r) => r.iso3 === 'IND');
+  const total = await repository.getIndicatorByMetricKey(db, 'total_current');
+  const totalInd = (await repository.getEligibleObservations(db, total.id, 2024)).find((r) => r.iso3 === 'IND');
   assert.ok(totalInd, 'unrelated refreshed metric keeps its rows');
   db.close();
 });
@@ -246,12 +237,12 @@ test('E. successful refresh publishes the complete staged snapshot', async () =>
   assert.equal(summary.status, 'success');
   assert.ok(summary.runId > seedRunId);
 
-  const latestSuccess = repository.getLatestFetchRun(db, { status: 'success' });
+  const latestSuccess = await repository.getLatestFetchRun(db, { status: 'success' });
   assert.equal(latestSuccess.id, summary.runId);
-  const stat = repository.getLatestSuccessfulIngestYearStat(db, 'nominal_current', 2025);
+  const stat = await repository.getLatestSuccessfulIngestYearStat(db, 'nominal_current', 2025);
   assert.ok(stat, 'authoritative stat exists');
   assert.equal(stat.fetch_run_id, summary.runId);
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 
@@ -272,19 +263,19 @@ test('F. failed/partial runs stay auditable but never describe current coverage'
 
   // The unscoped latest-stat lookup sees the partial attempt (this is exactly
   // why authoritative readers must NOT use it).
-  const rawLatest = repository.getLatestIngestYearStat(db, 'nominal_current', 2025);
+  const rawLatest = await repository.getLatestIngestYearStat(db, 'nominal_current', 2025);
   assert.equal(rawLatest.fetch_run_id, partial.runId);
 
   // The authoritative lookup still points at the successful publish.
-  const authoritative = repository.getLatestSuccessfulIngestYearStat(db, 'nominal_current', 2025);
+  const authoritative = await repository.getLatestSuccessfulIngestYearStat(db, 'nominal_current', 2025);
   assert.ok(authoritative);
   assert.equal(authoritative.fetch_run_id, seedRunId);
 
   // Both runs remain visible in the audit history.
-  const runs = repository.listFetchRuns(db, 5).map((r) => r.status);
+  const runs = (await repository.listFetchRuns(db, 5)).map((r) => r.status);
   assert.ok(runs.includes('success'), 'success run retained');
   assert.ok(runs.includes('partial'), 'partial run retained');
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 
@@ -295,19 +286,19 @@ test('F. failed/partial runs stay auditable but never describe current coverage'
 test('G. lock carries the active run id and is cleared on release', async () => {
   const dbModule = await import('../src/db/index.js');
   const repository = await import('../src/db/repository.js');
-  const db = dbModule.createMemoryDb();
+  const db = await dbModule.createMemoryDb();
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
   // Repository-level lifecycle first (deterministic, no timing involved).
-  assert.equal(repository.acquireRefreshLock(db, { holder: 'g-test' }), true);
-  const runId = repository.startFetchRun(db, { trigger: 'g-test' });
-  repository.setRefreshLockRunId(db, runId);
-  let status = repository.refreshLockStatus(db);
+  assert.equal(await repository.acquireRefreshLock(db, { holder: 'g-test' }), true);
+  const runId = await repository.startFetchRun(db, { trigger: 'g-test' });
+  await repository.setRefreshLockRunId(db, runId);
+  let status = await repository.refreshLockStatus(db);
   assert.equal(Boolean(status.locked), true);
   assert.equal(status.runId, runId);
-  repository.releaseRefreshLock(db);
-  status = repository.refreshLockStatus(db);
+  await repository.releaseRefreshLock(db);
+  status = await repository.refreshLockStatus(db);
   assert.equal(Boolean(status.locked), false);
   assert.equal(status.runId, null);
 
@@ -319,17 +310,17 @@ test('G. lock carries the active run id and is cleared on release', async () => 
     startYear: 2024,
     endYear: 2025,
     trigger: 'test-lock-runid',
-    onProgress: (p) => {
+    onProgress: async (p) => {
       if (!seenDuringRefresh && p && String(p.stage ?? '').startsWith('indicator:')) {
-        seenDuringRefresh = repository.refreshLockStatus(db);
+        seenDuringRefresh = await repository.refreshLockStatus(db);
       }
     },
   });
   assert.ok(seenDuringRefresh, 'observed the lock mid-refresh');
   assert.equal(Boolean(seenDuringRefresh.locked), true);
-  const running = repository.getLatestFetchRun(db, { status: null });
+  const running = await repository.getLatestFetchRun(db, { status: null });
   assert.equal(seenDuringRefresh.runId, running.id);
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 
@@ -343,19 +334,17 @@ test('P. a publish failure leaves no deleted rows and no staged rows behind', as
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
 
-  const indicator = repository.getIndicatorByMetricKey(db, 'nominal_current');
-  const beforeCount = repository.countObservations(db);
-  const beforeInd = repository
-    .getEligibleObservations(db, indicator.id, 2025)
-    .find((r) => r.iso3 === 'IND');
+  const indicator = await repository.getIndicatorByMetricKey(db, 'nominal_current');
+  const beforeCount = await repository.countObservations(db);
+  const beforeInd = (await repository.getEligibleObservations(db, indicator.id, 2025)).find((r) => r.iso3 === 'IND');
   assert.ok(beforeInd, 'precondition: IND 2025 nominal observation exists');
-  const beforeCountries = repository.countAllCountries(db);
+  const beforeCountries = await repository.countAllCountries(db);
 
   // Sabotage the publish transaction AFTER the observation reconciliation:
   // per-year stats cannot be written, so the whole publish (countries,
   // indicators, DELETE of old rows, INSERT of staged rows, stats, run status)
   // must roll back as one unit.
-  db.exec('DROP TABLE ingest_year_stats');
+  await queryExec(db, 'DROP TABLE ingest_year_stats');
   await assert.rejects(
     refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-publish-fail' }),
     (error) => error instanceof Error,
@@ -363,17 +352,15 @@ test('P. a publish failure leaves no deleted rows and no staged rows behind', as
 
   // Nothing from the publish survived: old rows are back (not deleted),
   // staged rows never landed, metadata untouched.
-  assert.equal(repository.countObservations(db), beforeCount);
-  const afterInd = repository
-    .getEligibleObservations(db, indicator.id, 2025)
-    .find((r) => r.iso3 === 'IND');
+  assert.equal(await repository.countObservations(db), beforeCount);
+  const afterInd = (await repository.getEligibleObservations(db, indicator.id, 2025)).find((r) => r.iso3 === 'IND');
   assert.deepEqual(afterInd, beforeInd);
-  assert.equal(repository.countAllCountries(db), beforeCountries);
+  assert.equal(await repository.countAllCountries(db), beforeCountries);
 
   // The run itself is still recorded as failed (fetch_runs is audit history,
   // written outside the rolled-back transaction).
-  assert.equal(repository.getLatestFetchRun(db, { status: null }).status, 'failed');
-  assert.deepEqual(lockState(db, repository), { locked: false, runId: null });
+  assert.equal((await repository.getLatestFetchRun(db, { status: null })).status, 'failed');
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
   db.close();
 });
 

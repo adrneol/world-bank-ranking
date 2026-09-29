@@ -56,13 +56,13 @@ function gapUnitFor(metric) {
  *
  * @returns {{values: Record<number, object|null>, vintageLegs: string[]}}
  */
-function readEntityValues(db, entity, indicator, years) {
+async function readEntityValues(db, entity, indicator, years) {
   const values = {};
   const vintageLegs = [];
   for (const year of years) values[year] = null;
 
   for (const year of years) {
-    const row = getObservation(db, entity.iso3, indicator.id, year);
+    const row = await getObservation(db, entity.iso3, indicator.id, year);
     if (row && row.value !== null && row.value !== undefined && Number.isFinite(Number(row.value))) {
       values[year] = {
         value: Number(row.value),
@@ -322,7 +322,7 @@ export function buildGroupRatioSeries(entity, numRowsByYear, denRowsByYear, year
  *   metricKey:string, yearA:number, yearB?:number,
  *   operation?:string, groupMode?:string}} options
  */
-export function buildCompareResponse(db, options = {}) {
+export async function buildCompareResponse(db, options = {}) {
   const metric = METRICS[options.metricKey];
   if (!metric) {
     throw entityError(ENTITY_ERROR_CODES.INVALID_INDICATOR, `Unknown indicator "${options.metricKey}".`);
@@ -344,8 +344,8 @@ export function buildCompareResponse(db, options = {}) {
     throw entityError(ENTITY_ERROR_CODES.MISSING_YEAR, 'yearB must be an integer year.');
   }
 
-  const entityA = resolveEntity(db, parseEntitySpec(options.entityA, options.labelA ?? null));
-  const entityB = resolveEntity(db, parseEntitySpec(options.entityB, options.labelB ?? null));
+  const entityA = await resolveEntity(db, parseEntitySpec(options.entityA, options.labelA ?? null));
+  const entityB = await resolveEntity(db, parseEntitySpec(options.entityB, options.labelB ?? null));
   const hasGroup = [entityA.kind, entityB.kind].includes(ENTITY_KINDS.CUSTOM_GROUP);
 
   if (groupMode === 'like_for_like' && !hasGroup) {
@@ -369,7 +369,7 @@ export function buildCompareResponse(db, options = {}) {
     throw entityError(capability.reason, `Comparison not supported for this entity/metric/operation combination (${capability.reason}).`);
   }
 
-  const indicator = getIndicatorByMetricKey(db, options.metricKey);
+  const indicator = await getIndicatorByMetricKey(db, options.metricKey);
   const years = yearB === null || yearB === yearA ? [yearA] : [yearA, yearB];
   if (!indicator) {
     return {
@@ -391,7 +391,7 @@ export function buildCompareResponse(db, options = {}) {
   // aggregates are read directly per year (they are excluded from eligible
   // reads by the universe rule, by design). Weighted-ratio metrics additionally
   // resolve their canonical denominator legs (requiredDenominator linkage).
-  const eligibleRows = getEligibleObservationsForYears(db, indicator.id, years);
+  const eligibleRows = await getEligibleObservationsForYears(db, indicator.id, years);
   const eligibleByYear = new Map(years.map((y) => [y, []]));
   for (const row of eligibleRows) {
     if (eligibleByYear.has(row.year)) {
@@ -415,10 +415,10 @@ export function buildCompareResponse(db, options = {}) {
     // never from the ratio indicator itself: averaging or summing the
     // published member ratios would reconstruct the forbidden statistic.
     for (const [mapKey, seriesKey] of [['num', numKey], ['den', denKey]]) {
-      const seriesIndicator = getIndicatorByMetricKey(db, seriesKey);
+      const seriesIndicator = await getIndicatorByMetricKey(db, seriesKey);
       const byYear = new Map(years.map((y) => [y, []]));
       if (seriesIndicator) {
-        for (const row of getEligibleObservationsForYears(db, seriesIndicator.id, years)) {
+        for (const row of await getEligibleObservationsForYears(db, seriesIndicator.id, years)) {
           if (byYear.has(row.year)) {
             byYear.get(row.year).push(row);
           }
@@ -480,7 +480,7 @@ export function buildCompareResponse(db, options = {}) {
       };
       continue;
     }
-    const { values, vintageLegs } = readEntityValues(db, entity, indicator, years);
+    const { values, vintageLegs } = await readEntityValues(db, entity, indicator, years);
     for (const vintage of vintageLegs) vintageValues.add(vintage);
     results[slot] = {
       kind: entity.kind,
@@ -639,29 +639,29 @@ function applyOperation({ entityA, entityB, results, metric, years, yearA, yearB
  * coverage): validates a request-defined member set and reports what a
  * comparison could compute, without performing one. No persistence.
  */
-export function buildGroupEvaluation(db, options = {}) {
+export async function buildGroupEvaluation(db, options = {}) {
   const rawMembers = options.members;
   const memberText = Array.isArray(rawMembers) ? rawMembers.join(',') : (rawMembers ?? '');
   const spec = parseEntitySpec(`group:${memberText}`, options.label ?? null);
-  const entity = resolveEntity(db, spec);
+  const entity = await resolveEntity(db, spec);
   const metric = METRICS[options.metricKey];
   if (!metric) {
     throw entityError(ENTITY_ERROR_CODES.INVALID_INDICATOR, `Unknown indicator "${options.metricKey}".`);
   }
   const canValue = metric.aggregation === 'SUM' || metric.aggregation === 'WEIGHTED_RATIO';
-  const indicator = getIndicatorByMetricKey(db, options.metricKey);
+  const indicator = await getIndicatorByMetricKey(db, options.metricKey);
   // Weighted-ratio preview additionally resolves denominator legs so the
   // evaluation shows numerator AND denominator coverage per year.
   const denMetric = metric.aggregation === 'WEIGHTED_RATIO' && metric.requiredDenominator?.metricKey
     ? (METRICS[metric.requiredDenominator.metricKey] ?? null)
     : null;
-  const denIndicator = denMetric ? getIndicatorByMetricKey(db, denMetric.key) : null;
+  const denIndicator = denMetric ? await getIndicatorByMetricKey(db, denMetric.key) : null;
   let coverage = null;
   if (indicator && (options.yearA !== undefined || options.yearB !== undefined)) {
     const years = [options.yearA, options.yearB].filter((y) => Number.isInteger(y));
     if (years.length > 0) {
-      const rows = getEligibleObservationsForYears(db, indicator.id, years);
-      const denRows = denIndicator ? getEligibleObservationsForYears(db, denIndicator.id, years) : [];
+      const rows = await getEligibleObservationsForYears(db, indicator.id, years);
+      const denRows = denIndicator ? await getEligibleObservationsForYears(db, denIndicator.id, years) : [];
       const memberSet = new Set(entity.members);
       coverage = {};
       for (const year of years) {

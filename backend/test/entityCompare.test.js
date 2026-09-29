@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { METRICS } from '../src/config.js';
+import { queryRun } from '../src/db/driver.js';
 import { createMemoryTestDb, seedEdgeCaseDb } from './helpers/testDb.js';
 import {
   ENTITY_ERROR_CODES,
@@ -45,17 +46,17 @@ async function seedSumDb() {
     { id: 'IDN', iso2Code: 'ID', name: 'Indonesia', region: { id: 'EAS', value: 'East Asia & Pacific' } },
     { id: 'WLD', iso2Code: '1W', name: 'World', region: { id: 'NA', value: 'Aggregates' } },
   ]);
-  repository.upsertCountries(db, universe.countries);
+  await repository.upsertCountries(db, universe.countries);
   for (const key of ['total_current', 'nominal_current']) {
-    repository.upsertIndicator(db, {
+    await repository.upsertIndicator(db, {
       ...METRICS[key],
       name: key,
       unit: METRICS[key].unit,
       source: 'World Development Indicators',
     });
   }
-  const total = repository.getIndicatorByMetricKey(db, 'total_current');
-  const perCapita = repository.getIndicatorByMetricKey(db, 'nominal_current');
+  const total = await repository.getIndicatorByMetricKey(db, 'total_current');
+  const perCapita = await repository.getIndicatorByMetricKey(db, 'nominal_current');
   const rows = [];
   const totalValues = {
     IND: { 2004: 721e9, 2005: 834e9 },
@@ -79,7 +80,7 @@ async function seedSumDb() {
       rows.push({ countryId: iso3, indicatorId: perCapita.id, year: Number(year), value, wbLastUpdated: '2026-07-13' });
     }
   }
-  repository.upsertObservations(db, rows);
+  await repository.upsertObservations(db, rows);
   return { db, repository };
 }
 
@@ -100,8 +101,8 @@ async function getJSON(base, path) {
 }
 
 /** assert.throws matching error.code (messages carry human text, codes are exact). */
-function throwsCode(fn, code) {
-  assert.throws(fn, (error) => error && error.code === code);
+async function throwsCode(fn, code) {
+  await assert.rejects(async () => await fn(), (error) => error && error.code === code);
 }
 
 // ---------------------------------------------------------------------------
@@ -111,22 +112,22 @@ test('Phase 4.1: country entities resolve from database metadata', async () => {
   const { db } = await seedEdgeCaseDb();
   assert.deepEqual(parseEntitySpec('country:IND'), { kind: 'country', iso3: 'IND' });
   assert.deepEqual(parseEntitySpec('country:ind'), { kind: 'country', iso3: 'IND' });
-  const resolved = resolveEntity(db, parseEntitySpec('country:USA'));
+  const resolved = await resolveEntity(db, parseEntitySpec('country:USA'));
   assert.deepEqual(resolved, { kind: 'country', iso3: 'USA', name: 'United States', source: 'WORLD_BANK' });
 });
 
 test('Phase 4.2: invalid countries are rejected, never defaulted', async () => {
   const { db } = await seedEdgeCaseDb();
-  throwsCode(() => parseEntitySpec('country:ZZ'), 'INVALID_ENTITY');
-  throwsCode(() => parseEntitySpec('country:'), 'INVALID_ENTITY');
-  throwsCode(() => resolveEntity(db, parseEntitySpec('country:XYZ')), 'INVALID_COUNTRY');
+  await throwsCode(() => parseEntitySpec('country:ZZ'), 'INVALID_ENTITY');
+  await throwsCode(() => parseEntitySpec('country:'), 'INVALID_ENTITY');
+  await throwsCode(() => resolveEntity(db, parseEntitySpec('country:XYZ')), 'INVALID_COUNTRY');
   // No silent India substitution anywhere in the resolution path.
-  throwsCode(() => resolveEntity(db, parseEntitySpec('country:WLD')), 'INVALID_COUNTRY');
+  await throwsCode(() => resolveEntity(db, parseEntitySpec('country:WLD')), 'INVALID_COUNTRY');
 });
 
 test('Phase 4.3: official aggregates resolve only when World Bank publishes them', async () => {
   const { db } = await seedEdgeCaseDb();
-  const resolved = resolveEntity(db, parseEntitySpec('aggregate:WLD'));
+  const resolved = await resolveEntity(db, parseEntitySpec('aggregate:WLD'));
   assert.equal(resolved.kind, 'wb_aggregate');
   assert.equal(resolved.name, 'World');
   assert.equal(resolved.source, 'WORLD_BANK');
@@ -134,37 +135,37 @@ test('Phase 4.3: official aggregates resolve only when World Bank publishes them
 
 test('Phase 4.4: unavailable aggregates and kind mismatches fail explicitly', async () => {
   const { db } = await seedEdgeCaseDb();
-  throwsCode(() => resolveEntity(db, parseEntitySpec('aggregate:XXX')), 'NO_OFFICIAL_AGGREGATE');
-  throwsCode(() => resolveEntity(db, parseEntitySpec('aggregate:IND')), 'INVALID_ENTITY');
-  throwsCode(() => parseEntitySpec('continent:AFR'), 'INVALID_ENTITY');
-  throwsCode(() => parseEntitySpec('IND'), 'INVALID_ENTITY');
-  throwsCode(() => parseEntitySpec(''), 'INVALID_ENTITY');
+  await throwsCode(() => resolveEntity(db, parseEntitySpec('aggregate:XXX')), 'NO_OFFICIAL_AGGREGATE');
+  await throwsCode(() => resolveEntity(db, parseEntitySpec('aggregate:IND')), 'INVALID_ENTITY');
+  await throwsCode(() => parseEntitySpec('continent:AFR'), 'INVALID_ENTITY');
+  await throwsCode(() => parseEntitySpec('IND'), 'INVALID_ENTITY');
+  await throwsCode(() => parseEntitySpec(''), 'INVALID_ENTITY');
 });
 
 test('Phase 4.5: custom groups validate strictly (no silent drops)', async () => {
   const { db } = await seedEdgeCaseDb();
-  const resolved = resolveEntity(db, parseEntitySpec('group:IND,USA,BRA'));
+  const resolved = await resolveEntity(db, parseEntitySpec('group:IND,USA,BRA'));
   assert.equal(resolved.kind, 'custom_group');
   assert.equal(resolved.source, 'USER_DEFINED');
   assert.deepEqual(resolved.members, ['BRA', 'IND', 'USA']);
   assert.match(resolved.label, /User-selected group/);
-  const labelled = resolveEntity(db, parseEntitySpec('group:USA,BRA', 'Rivals'));
+  const labelled = await resolveEntity(db, parseEntitySpec('group:USA,BRA', 'Rivals'));
   assert.equal(labelled.label, 'Rivals');
   assert.deepEqual(labelled.memberNames.USA, 'United States');
 });
 
 test('Phase 4.6-8: duplicates, invalid members, empty and oversize groups fail', async () => {
   const { db } = await seedEdgeCaseDb();
-  throwsCode(() => parseEntitySpec('group:IND,IND'), 'INVALID_GROUP');
-  throwsCode(() => parseEntitySpec('group:IND,ind'), 'INVALID_GROUP');
-  throwsCode(() => resolveEntity(db, parseEntitySpec('group:IND,XYZ')), 'INVALID_GROUP_MEMBER');
-  throwsCode(() => resolveEntity(db, parseEntitySpec('group:IND,WLD')), 'INVALID_GROUP_MEMBER');
-  throwsCode(() => parseEntitySpec('group:'), 'EMPTY_GROUP');
-  throwsCode(() => parseEntitySpec('group:  , '), 'EMPTY_GROUP');
+  await throwsCode(() => parseEntitySpec('group:IND,IND'), 'INVALID_GROUP');
+  await throwsCode(() => parseEntitySpec('group:IND,ind'), 'INVALID_GROUP');
+  await throwsCode(() => resolveEntity(db, parseEntitySpec('group:IND,XYZ')), 'INVALID_GROUP_MEMBER');
+  await throwsCode(() => resolveEntity(db, parseEntitySpec('group:IND,WLD')), 'INVALID_GROUP_MEMBER');
+  await throwsCode(() => parseEntitySpec('group:'), 'EMPTY_GROUP');
+  await throwsCode(() => parseEntitySpec('group:  , '), 'EMPTY_GROUP');
   const tooMany = `group:${Array.from({ length: MAX_GROUP_MEMBERS + 1 }, (_, i) => `A${String(i).padStart(2, '0')}`).join(',')}`;
-  throwsCode(() => parseEntitySpec(tooMany), 'INVALID_GROUP');
-  throwsCode(() => parseEntitySpec('group:IND,ZZ'), 'INVALID_GROUP_MEMBER');
-  throwsCode(() => parseEntitySpec('country:IND', 'Custom'), 'INVALID_ENTITY');
+  await throwsCode(() => parseEntitySpec(tooMany), 'INVALID_GROUP');
+  await throwsCode(() => parseEntitySpec('group:IND,ZZ'), 'INVALID_GROUP_MEMBER');
+  await throwsCode(() => parseEntitySpec('country:IND', 'Custom'), 'INVALID_ENTITY');
 });
 
 // ---------------------------------------------------------------------------
@@ -536,7 +537,7 @@ test('Phase 4.37: vintage coherence is measured over used legs only', async () =
     await close();
   }
   // Mixed vintage across legs: values still served, warning attached, never silent.
-  db.prepare("UPDATE observations SET wb_last_updated = '2025-01-01' WHERE country_id = 'CHN'").run();
+  await queryRun(db, "UPDATE observations SET wb_last_updated = '2025-01-01' WHERE country_id = 'CHN'");
   const { base: base2, close: close2 } = await startApp(db);
   try {
     const mixed = await getJSON(base2, '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2005&operation=level');
@@ -617,7 +618,7 @@ test('Phase 4 groups/evaluate: validation, capability and coverage preview', asy
 
 test('Phase 4 service-level: buildCompareResponse and buildGroupEvaluation without HTTP', async () => {
   const { db } = await seedSumDb();
-  const direct = buildCompareResponse(db, {
+  const direct = await buildCompareResponse(db, {
     entityA: 'country:USA',
     entityB: 'group:IND,CHN',
     metricKey: 'total_current',
@@ -630,7 +631,7 @@ test('Phase 4 service-level: buildCompareResponse and buildGroupEvaluation witho
   assert.equal(direct.results.b.observed['2005'].value, 834e9 + 2286e9);
   assert.equal(direct.results.comparison.a.value, 13036e9 - 11963e9);
 
-  const evaluation = buildGroupEvaluation(db, { members: 'IND,CHN', metricKey: 'total_current', yearA: 2005 });
+  const evaluation = await buildGroupEvaluation(db, { members: 'IND,CHN', metricKey: 'total_current', yearA: 2005 });
   assert.equal(evaluation.valid, true);
   assert.equal(evaluation.coverage['2005'].missingCount, 0);
 });

@@ -54,7 +54,7 @@ test('Prices movement rejects non-Prices metrics (400)', async () => {
 
 test('CPI Index period change 2004→2024 (India, full precision)', async () => {
   const db = getDb();
-  const r = buildPricesMovement(db, {
+  const r = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi_index',
     basis: 'cpi_index_period_change',
     yearA: 2004,
@@ -78,7 +78,7 @@ test('CPI Index period change 2004→2024 (India, full precision)', async () => 
 
 test('CPI annual basis carries no rank (unranked by design)', async () => {
   const db = getDb();
-  const r = buildPricesMovement(db, {
+  const r = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi_index',
     basis: 'cpi_index_annual',
     yearA: 2004,
@@ -95,7 +95,7 @@ test('CPI annual basis carries no rank (unranked by design)', async () => {
 
 test('CPI Inflation average 2004→2014 ≈ 8.27% (full precision)', async () => {
   const db = getDb();
-  const r = buildPricesMovement(db, {
+  const r = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
     basis: 'cpi_inflation_average',
     yearA: 2004,
@@ -108,14 +108,14 @@ test('CPI Inflation average 2004→2014 ≈ 8.27% (full precision)', async () =>
 
 test('CPI Inflation cumulative 2004→2014 ≈ CPI period change (validation relationship)', async () => {
   const db = getDb();
-  const cum = buildPricesMovement(db, {
+  const cum = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
     basis: 'cpi_inflation_cumulative',
     yearA: 2004,
     yearB: 2014,
     focusIso3: 'IND',
   });
-  const idx = buildPricesMovement(db, {
+  const idx = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi_index',
     basis: 'cpi_index_period_change',
     yearA: 2004,
@@ -129,7 +129,7 @@ test('CPI Inflation cumulative 2004→2014 ≈ CPI period change (validation rel
 
 test('Inflation like-for-like uses one common universe across periods', async () => {
   const db = getDb();
-  const r = buildPricesMovement(db, {
+  const r = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
     basis: 'cpi_inflation_average',
     yearA: 2004,
@@ -147,7 +147,7 @@ test('Inflation like-for-like uses one common universe across periods', async ()
 
 test('Missing focus observation yields focusAvailable=false (never fabricated)', async () => {
   const db = getDb();
-  const r = buildPricesMovement(db, {
+  const r = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
     basis: 'cpi_inflation_average',
     yearA: 1960,
@@ -163,7 +163,7 @@ test('Missing focus observation yields focusAvailable=false (never fabricated)',
 
 test('Country-group discovery exposes income/region/lending, NOT Developed labels', async () => {
   const db = getDb();
-  const g = listPriceCountryGroups(db);
+  const g = await listPriceCountryGroups(db);
   assert.ok(Array.isArray(g.supported.income_level) && g.supported.income_level.length >= 4);
   assert.ok(Array.isArray(g.supported.region) && g.supported.region.length >= 5);
   assert.equal(g.unsupportedRequestedLabels.status, 'NOT_SUPPORTED');
@@ -176,14 +176,14 @@ test('Country-group discovery exposes income/region/lending, NOT Developed label
 
 test('Group filter restricts before validity (High income excludes IND)', async () => {
   const db = getDb();
-  const all = buildPricesMovement(db, {
+  const all = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
     basis: 'cpi_inflation_annual',
     yearA: 2004,
     yearB: 2014,
     focusIso3: 'USA',
   });
-  const grp = buildPricesMovement(db, {
+  const grp = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
     basis: 'cpi_inflation_annual',
     yearA: 2004,
@@ -197,7 +197,7 @@ test('Group filter restricts before validity (High income excludes IND)', async 
 
 test('Unknown group value fails closed (400 path via service throw)', async () => {
   const db = getDb();
-  assert.throws(
+  await assert.rejects(
     () =>
       buildPricesMovement(db, {
         metricKey: 'inflation_cpi',

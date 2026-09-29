@@ -24,6 +24,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { EDGE_EXPECTATIONS } from './fixtures/edgeCases.js';
+import { queryGet } from '../src/db/driver.js';
 import { createMemoryTestDb, seedEdgeCaseDb } from './helpers/testDb.js';
 
 let baseUrl = null;
@@ -191,10 +192,10 @@ test('Phase 1: non-IND focus flows through ranking, verification and comparison'
 });
 
 test('Phase 1: focus-country requests trigger no ingestion side effects', async () => {
-  const countRuns = () => db.prepare('SELECT COUNT(*) AS n FROM fetch_runs').get().n;
-  const countObs = () => db.prepare('SELECT COUNT(*) AS n FROM observations').get().n;
-  const runsBefore = countRuns();
-  const obsBefore = countObs();
+  const countRuns = async () => (await queryGet(db, 'SELECT COUNT(*) AS n FROM fetch_runs')).n;
+  const countObs = async () => (await queryGet(db, 'SELECT COUNT(*) AS n FROM observations')).n;
+  const runsBefore = await countRuns();
+  const obsBefore = await countObs();
   for (const path of [
     '/api/focus/yearly?startYear=2002&endYear=2005&country=USA',
     '/api/focus/yearly?startYear=2002&endYear=2005&country=BRA',
@@ -205,8 +206,8 @@ test('Phase 1: focus-country requests trigger no ingestion side effects', async 
     const { status } = await get(path);
     assert.equal(status, 200);
   }
-  assert.equal(countRuns(), runsBefore, 'focus switches must not record fetch runs');
-  assert.equal(countObs(), obsBefore, 'focus switches must not write observations');
+  assert.equal(await countRuns(), runsBefore, 'focus switches must not record fetch runs');
+  assert.equal(await countObs(), obsBefore, 'focus switches must not write observations');
 });
 
 test('Phase 1: CHN/USA/IDN matrix on a dedicated four-country dataset', async () => {
@@ -219,15 +220,15 @@ test('Phase 1: CHN/USA/IDN matrix on a dedicated four-country dataset', async ()
     { id: 'USA', iso2Code: 'US', name: 'United States', region: { id: 'NAC', value: 'North America' } },
     { id: 'IDN', iso2Code: 'ID', name: 'Indonesia', region: { id: 'EAS', value: 'East Asia & Pacific' } },
   ]);
-  matrixRepo.upsertCountries(matrixDb, universe.countries);
-  matrixRepo.upsertIndicator(matrixDb, {
+  await matrixRepo.upsertCountries(matrixDb, universe.countries);
+  await matrixRepo.upsertIndicator(matrixDb, {
     ...METRICS.nominal_current,
     name: 'GDP per capita (current US$)',
     unit: 'current US$',
     source: 'World Development Indicators',
   });
-  const indicator = matrixRepo.getIndicatorByMetricKey(matrixDb, 'nominal_current');
-  matrixRepo.upsertObservations(matrixDb, [
+  const indicator = await matrixRepo.getIndicatorByMetricKey(matrixDb, 'nominal_current');
+  await matrixRepo.upsertObservations(matrixDb, [
     { countryId: 'IND', indicatorId: indicator.id, year: 2004, value: 700.75 },
     { countryId: 'IND', indicatorId: indicator.id, year: 2005, value: 800.125 },
     { countryId: 'CHN', indicatorId: indicator.id, year: 2004, value: 2000 },
@@ -246,7 +247,7 @@ test('Phase 1: CHN/USA/IDN matrix on a dedicated four-country dataset', async ()
     IND: { name: 'India', rank2005: 4, value2005: 800.125 },
   };
   for (const [iso3, expected] of Object.entries(expectations)) {
-    const result = buildIndiaYearlyRows(matrixDb, { startYear: 2005, endYear: 2005, focusIso3: iso3 });
+    const result = await buildIndiaYearlyRows(matrixDb, { startYear: 2005, endYear: 2005, focusIso3: iso3 });
     assert.equal(result.focus.iso3, iso3);
     assert.equal(result.focus.name, expected.name, `focus name for ${iso3} comes from the database`);
     assert.equal(result.focus.kind, 'country');

@@ -17,7 +17,8 @@
     "test": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
-    "express": "^5.1.0",
-    "cors": "^2.8.5"
+    "@libsql/client": "^0.18.0",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
   }
 }

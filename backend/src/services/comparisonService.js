@@ -141,7 +141,7 @@ function buildLimits({ mixedVintage, commonSize, focusAvailable, threeYear = fal
  * @param {object} db
  * @param {{metricKey:string, yearA:number, yearB:number, yearMid?:number, breaker?:number, pointBreaker?:number, focusIso3?:string, detail?:string}} options
  */
-export function buildLevelComparisonResponse(db, options = {}) {
+export async function buildLevelComparisonResponse(db, options = {}) {
   const { metricKey } = options;
   if (!metricKey || !METRICS[metricKey]) {
     throw comparisonError(
@@ -188,7 +188,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
         400,
       );
     }
-    return buildThreeYearComparisonResponse(db, {
+    return await buildThreeYearComparisonResponse(db, {
       metricKey,
       yearA,
       yearMid,
@@ -199,13 +199,13 @@ export function buildLevelComparisonResponse(db, options = {}) {
     });
   }
 
-  const indicator = getIndicatorByMetricKey(db, metricKey);
-  const eligibleUniverse = countEligibleCountries(db);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
+  const eligibleUniverse = await countEligibleCountries(db);
   if (!direction) {
     return {
       comparison: { available: false, reason: 'RANK_UNSUPPORTED', mode: 'level' },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, order },
       universe: {
         setA: 0,
@@ -227,7 +227,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
     return {
       comparison: { available: false, reason: 'metric_not_ingested', mode: 'level' },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, order },
       universe: {
         setA: 0,
@@ -246,7 +246,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
     };
   }
 
-  const yearsWithData = new Set(listYearsWithData(db, indicator.id));
+  const yearsWithData = new Set(await listYearsWithData(db, indicator.id));
   if (!yearsWithData.has(yearA) || !yearsWithData.has(yearB)) {
     return {
       comparison: {
@@ -255,7 +255,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
         mode: 'level',
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, b: yearB, order },
       universe: {
         setA: 0,
@@ -275,7 +275,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
   }
 
   // One atomic read for both years: a concurrent refresh cannot move one side.
-  const allRows = getEligibleObservationsForYears(db, indicator.id, [yearA, yearB]);
+  const allRows = await getEligibleObservationsForYears(db, indicator.id, [yearA, yearB]);
   const rowsA = allRows.filter((r) => r.year === yearA);
   const rowsB = allRows.filter((r) => r.year === yearB);
 
@@ -310,7 +310,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
 
   // 2. Every member resolves to stored non-aggregate metadata.
   const unionIso3 = [...new Set([...comparison.members.a, ...comparison.members.b])].sort();
-  const metaRows = getCountriesByIso3List(db, unionIso3);
+  const metaRows = await getCountriesByIso3List(db, unionIso3);
   const metaById = new Map(metaRows.map((m) => [m.id, m]));
   let membershipOk = metaRows.length === unionIso3.length;
   if (membershipOk) {
@@ -337,15 +337,15 @@ export function buildLevelComparisonResponse(db, options = {}) {
     );
   }
 
-  const vintage = buildComparisonVintage(db, { metricKey, indicatorId: indicator.id, yearA, yearB });
+  const vintage = await buildComparisonVintage(db, { metricKey, indicatorId: indicator.id, yearA, yearB });
   const statA = vintage.perYear.a;
   const statB = vintage.perYear.b;
-  const metadataUniverseComparison = buildMetadataChange(
+  const metadataUniverseComparison = await buildMetadataChange(
     db,
     statA?.fetchRunId ?? null,
     statB?.fetchRunId ?? null,
   );
-  const denominatorExplanation = explainTotalChange(db, {
+  const denominatorExplanation = await explainTotalChange(db, {
     metricKey,
     fromYear: yearA,
     toYear: yearB,
@@ -354,7 +354,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
 
   // Completeness from the latest successful run (declared totals are not
   // stored per year; never fabricate them).
-  const latestRun = getLatestFetchRun(db, { status: 'success' });
+  const latestRun = await getLatestFetchRun(db, { status: 'success' });
   const completeness = {
     a: statA ? { fetchRunId: statA.fetchRunId, status: latestRun?.status ?? null } : null,
     b: statB ? { fetchRunId: statB.fetchRunId, status: latestRun?.status ?? null } : null,
@@ -482,7 +482,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
       mode: 'level',
     },
     metric: describeMetric(metric),
-    focus: { iso3: focusIso3, name: f.name ?? focusDisplayName(db, focusIso3) },
+    focus: { iso3: focusIso3, name: f.name ?? (await focusDisplayName(db, focusIso3)) },
     years: { a: yearA, b: yearB, order },
     universe: {
       setA: comparison.totals.a,
@@ -542,7 +542,7 @@ export function buildLevelComparisonResponse(db, options = {}) {
  * @param {object} db
  * @param {{metricKey:string, yearA:number, yearMid:number, yearB:number, order?:string, focusIso3?:string, detail?:string}} options
  */
-export function buildThreeYearComparisonResponse(db, options = {}) {
+export async function buildThreeYearComparisonResponse(db, options = {}) {
   const { metricKey, yearA, yearMid, yearB } = options;
   const metric = METRICS[metricKey];
   if (!metric) {
@@ -559,7 +559,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   // Same direction rule as the two-year path (NEUTRAL refused).
   const direction = directionFor(metric);
 
-  const indicator = getIndicatorByMetricKey(db, metricKey);
+  const indicator = await getIndicatorByMetricKey(db, metricKey);
   const emptyUniverse = {
     setA: 0,
     setMid: 0,
@@ -575,7 +575,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     return {
       comparison: { available: false, reason: 'metric_not_ingested', mode: 'level', pointBreaker: { active: true, yearMid } },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, mid: yearMid, b: yearB, order },
       universe: emptyUniverse,
       focusMovement: null,
@@ -590,7 +590,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     return {
       comparison: { available: false, reason: 'RANK_UNSUPPORTED', mode: 'level', pointBreaker: { active: true, yearMid } },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, mid: yearMid, b: yearB, order },
       universe: emptyUniverse,
       focusMovement: null,
@@ -602,7 +602,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     };
   }
 
-  const yearsWithData = new Set(listYearsWithData(db, indicator.id));
+  const yearsWithData = new Set(await listYearsWithData(db, indicator.id));
   if (!yearsWithData.has(yearA) || !yearsWithData.has(yearMid) || !yearsWithData.has(yearB)) {
     return {
       comparison: {
@@ -612,7 +612,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
         pointBreaker: { active: true, yearMid },
       },
       metric: describeMetric(metric),
-      focus: { iso3: focusIso3, name: focusDisplayName(db, focusIso3) },
+      focus: { iso3: focusIso3, name: await focusDisplayName(db, focusIso3) },
       years: { a: yearA, mid: yearMid, b: yearB, order },
       universe: emptyUniverse,
       focusMovement: null,
@@ -625,7 +625,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   }
 
   // One atomic read for all three years.
-  const allRows = getEligibleObservationsForYears(db, indicator.id, [yearA, yearMid, yearB]);
+  const allRows = await getEligibleObservationsForYears(db, indicator.id, [yearA, yearMid, yearB]);
   const rowsA = allRows.filter((r) => r.year === yearA);
   const rowsMid = allRows.filter((r) => r.year === yearMid);
   const rowsB = allRows.filter((r) => r.year === yearB);
@@ -670,7 +670,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   );
 
   const unionIso3 = [...new Set([...comparison.members.a, ...comparison.members.mid, ...comparison.members.b])].sort();
-  const metaRows = getCountriesByIso3List(db, unionIso3);
+  const metaRows = await getCountriesByIso3List(db, unionIso3);
   const metaById = new Map(metaRows.map((m) => [m.id, m]));
   let membershipOk = metaRows.length === unionIso3.length;
   if (membershipOk) {
@@ -697,16 +697,17 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
     );
   }
 
-  const vintage = buildComparisonVintage(db, { metricKey, indicatorId: indicator.id, yearA, yearB, yearMid });
+  const vintage = await buildComparisonVintage(db, { metricKey, indicatorId: indicator.id, yearA, yearB, yearMid
+  });
   const statA = vintage.perYear.a;
   const statMid = vintage.perYear.mid;
   const statB = vintage.perYear.b;
   const metadataUniverseComparison = {
-    aToMid: buildMetadataChange(db, statA?.fetchRunId ?? null, statMid?.fetchRunId ?? null),
-    midToB: buildMetadataChange(db, statMid?.fetchRunId ?? null, statB?.fetchRunId ?? null),
-    aToB: buildMetadataChange(db, statA?.fetchRunId ?? null, statB?.fetchRunId ?? null),
+    aToMid: await buildMetadataChange(db, statA?.fetchRunId ?? null, statMid?.fetchRunId ?? null),
+    midToB: await buildMetadataChange(db, statMid?.fetchRunId ?? null, statB?.fetchRunId ?? null),
+    aToB: await buildMetadataChange(db, statA?.fetchRunId ?? null, statB?.fetchRunId ?? null),
   };
-  const denominatorExplanationOverall = explainTotalChange(db, {
+  const denominatorExplanationOverall = await explainTotalChange(db, {
     metricKey,
     fromYear: yearA,
     toYear: yearB,
@@ -718,14 +719,14 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
   try {
     denominatorExplanations = {
       overall: denominatorExplanationOverall,
-      aToMid: explainTotalChange(db, { metricKey, fromYear: yearA, toYear: yearMid, focusIso3 }),
-      midToB: explainTotalChange(db, { metricKey, fromYear: yearMid, toYear: yearB, focusIso3 }),
+      aToMid: await explainTotalChange(db, { metricKey, fromYear: yearA, toYear: yearMid, focusIso3 }),
+      midToB: await explainTotalChange(db, { metricKey, fromYear: yearMid, toYear: yearB, focusIso3 }),
     };
   } catch {
     denominatorExplanations = { overall: denominatorExplanationOverall, aToMid: null, midToB: null };
   }
 
-  const latestRun = getLatestFetchRun(db, { status: 'success' });
+  const latestRun = await getLatestFetchRun(db, { status: 'success' });
   const completeness = {
     a: statA ? { fetchRunId: statA.fetchRunId, status: latestRun?.status ?? null } : null,
     mid: statMid ? { fetchRunId: statMid.fetchRunId, status: latestRun?.status ?? null } : null,
@@ -889,7 +890,7 @@ export function buildThreeYearComparisonResponse(db, options = {}) {
       pointBreaker: { active: true, yearMid },
     },
     metric: describeMetric(metric),
-    focus: { iso3: focusIso3, name: f.name ?? focusDisplayName(db, focusIso3) },
+    focus: { iso3: focusIso3, name: f.name ?? (await focusDisplayName(db, focusIso3)) },
     years: { a: yearA, mid: yearMid, b: yearB, order },
     universe: {
       setA: comparison.totals.a,

@@ -58,14 +58,14 @@ test('per-capita: every year of the committed vintage reproduces independent ran
   const years = snapshot.yearRange;
   let checked = 0;
   for (const metricKey of METRIC_KEYS) {
-    const indicator = repository.getIndicatorByMetricKey(db, metricKey);
+    const indicator = await repository.getIndicatorByMetricKey(db, metricKey);
     assert.ok(indicator, `${metricKey} must be ingested from the fixture`);
     for (let year = years.startYear; year <= years.endYear; year += 1) {
-      const rows = repository.getEligibleObservations(db, indicator.id, year);
+      const rows = await repository.getEligibleObservations(db, indicator.id, year);
       if (rows.length === 0) continue;
       const expected = independentRank(rows);
 
-      const ranking = buildFullRanking(db, { metricKey, year });
+      const ranking = await buildFullRanking(db, { metricKey, year });
       assert.equal(ranking.total, expected.total, `${metricKey} ${year} denominator`);
       assert.equal(ranking.eligibleUniverse, 217, `${metricKey} ${year} eligible universe`);
       assert.equal(ranking.metric.subject, 'gdp_per_capita');
@@ -77,7 +77,7 @@ test('per-capita: every year of the committed vintage reproduces independent ran
       assert.equal(focus.rawValue, expected.value, `${metricKey} ${year} India raw value`);
       assert.equal(focus.rawValue, fixtureValue(metricKey, FOCUS, year), `${metricKey} ${year} fixture value`);
 
-      const verification = buildRankVerification(db, { metricKey, year, neighbors: 5 });
+      const verification = await buildRankVerification(db, { metricKey, year, neighbors: 5 });
       assert.equal(verification.total, expected.total, `${metricKey} ${year} verify denominator`);
       assert.equal(verification.focus.rank, expected.rank, `${metricKey} ${year} verify rank`);
       checked += 1;
@@ -93,7 +93,7 @@ test('per-capita: YoY percentages reproduce the independent formula', async () =
   const { METRIC_KEYS } = await import('../src/config.js');
   const { buildIndiaYearlyRows } = await import('../src/services/indiaYearly.js');
 
-  const result = buildIndiaYearlyRows(db, {
+  const result = await buildIndiaYearlyRows(db, {
     startYear: snapshot.yearRange.startYear,
     endYear: snapshot.yearRange.endYear,
   });

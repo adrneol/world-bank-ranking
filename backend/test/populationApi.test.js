@@ -12,6 +12,7 @@ import test from 'node:test';
 import { getDb } from '../src/db/index.js';
 import { createApp } from '../src/server.js';
 import { buildPopulationMovement, listPopulationCountryGroups } from '../src/services/populationMovementService.js';
+import { queryGet } from '../src/db/driver.js';
 
 function app() {
   return createApp({ db: getDb(), autoRefresh: false });
@@ -46,12 +47,12 @@ test('Population rejects invalid basis, CAGR-as-basis, cumulative, non-Populatio
 
 test('Annual (India): raw stock, DESC rank, mean people gap', async () => {
   const db = getDb();
-  const r = buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_annual_value', yearA: 2004, yearB: 2024, focusIso3: 'IND' });
+  const r = await buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_annual_value', yearA: 2004, yearB: 2024, focusIso3: 'IND' });
   assert.equal(r.available, true);
   assert.equal(r.kind, 'annual');
-  const ind = db.prepare("SELECT id FROM indicators WHERE metric_key='population_total'").get();
+  const ind = await queryGet(db, "SELECT id FROM indicators WHERE metric_key='population_total'", []);
   for (const o of r.observed) {
-    const raw = db.prepare('SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?').get(ind.id, 'IND', o.year).value;
+    const raw = (await queryGet(db, 'SELECT value FROM observations WHERE indicator_id=? AND country_id=? AND year=?', [ind.id, 'IND', o.year])).value;
     assert.ok(Math.abs(o.focus.value - raw) < 1, 'raw passthrough');
     const others = o.ranking.filter((x) => x.iso3 !== 'IND').map((x) => x.value);
     const mean = others.reduce((s, v) => s + v, 0) / others.length;
@@ -63,7 +64,7 @@ test('Annual (India): raw stock, DESC rank, mean people gap', async () => {
 
 test('Change uses endpoints only: 1312277191 − 1135991513 = 176285678', async () => {
   const db = getDb();
-  const r = buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2004, 2014]);
   assert.ok(Math.abs(o.focus.value - 176285678) < 1, `got ${o.focus.value}`);
@@ -72,7 +73,7 @@ test('Change uses endpoints only: 1312277191 − 1135991513 = 176285678', async 
 
 test('Growth uses endpoints only with CAGR secondary (same rank, no separate basis)', async () => {
   const db = getDb();
-  const r = buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_growth', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
+  const r = await buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_growth', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   const expected = (1312277191 / 1135991513 - 1) * 100;
   assert.ok(Math.abs(o.focus.value - expected) < 1e-9, `got ${o.focus.value}`);
@@ -83,7 +84,7 @@ test('Growth uses endpoints only with CAGR secondary (same rank, no separate bas
 
 test('Population LFL: endpoint intersection (never sequences)', async () => {
   const db = getDb();
-  const r = buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_growth', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
+  const r = await buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_growth', yearA: 2004, yearB: 2024, yearMid: 2014, focusIso3: 'IND' });
   assert.deepEqual(r.likeForLike.map((o) => o.eligibleCount), [r.likeForLike[0].eligibleCount, r.likeForLike[0].eligibleCount, r.likeForLike[0].eligibleCount]);
   for (const o of r.likeForLike) {
     assert.deepEqual(o.requiredYears.length <= 2, true);
@@ -92,11 +93,11 @@ test('Population LFL: endpoint intersection (never sequences)', async () => {
 
 test('Country groups: dynamic, no Developed labels; unknown fails closed', async () => {
   const db = getDb();
-  const g = listPopulationCountryGroups(db);
+  const g = await listPopulationCountryGroups(db);
   assert.ok(g.supported.income_level.length >= 4);
   assert.equal(g.unsupportedRequestedLabels.status, 'NOT_SUPPORTED');
   assert.ok(g.estimateNote.includes('estimates'));
-  assert.throws(
+  await assert.rejects(
     () => buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_annual_value', yearA: 2004, yearB: 2014, focusIso3: 'USA', group: { type: 'income_level', value: 'Developed' } }),
     /Unknown income_level/,
   );
