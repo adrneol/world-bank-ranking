@@ -717,14 +717,33 @@ export default function App() {
       const prev = knownGeneration.current;
       if (!prev) {
         knownGeneration.current = next;
-        return;
-      }
-      if (isNewerGeneration(prev, next)) {
+      } else if (isNewerGeneration(prev, next)) {
         knownGeneration.current = next;
         setRefreshNotice(
           `Background refresh published a newer dataset${next.runId != null ? ` (run #${next.runId})` : ''} — all views were updated automatically.`,
         );
         setDataVersion((v) => v + 1);
+        return;
+      }
+      // Phase 8E narrow TTL engagement: /api/data-status is deliberately
+      // side-effect free, so a tab sitting only on the Status page would
+      // otherwise never trigger the server's TTL middleware. When the backend
+      // reports refreshDue and nothing is running, issue one lightweight
+      // GET /api/years (an AUTO_REFRESH_PATHS member) so the server's existing
+      // fire-and-forget maybeAutoRefresh engages. No new endpoint, no status
+      // write, same 60 s watcher cadence — never a storm.
+      if (status?.refreshDue && !status?.inProgress) {
+        try {
+          const yController = new AbortController();
+          const yTimeout = setTimeout(() => yController.abort(), 15000);
+          try {
+            await api.years({ signal: yController.signal, timeoutMs: 15000 });
+          } finally {
+            clearTimeout(yTimeout);
+          }
+        } catch {
+          // Watcher never surfaces errors.
+        }
       }
     };
     // Stagger the first check so it never races initial page-load fetches.

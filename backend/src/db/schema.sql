@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   pages_fetched           INTEGER DEFAULT 0, -- World Bank pages fetched
   requests                INTEGER DEFAULT 0, -- HTTP requests issued
   universe_snapshot       TEXT,              -- JSON: eligible/aggregate entity ids
-  error_message           TEXT
+  error_message           TEXT,
+  progress_summary        TEXT               -- Phase 8E: ONE terminal per-refresh indicator summary JSON (metricKeys/labels/steps/counts); metadata only, never observation data
 );
 
 CREATE INDEX IF NOT EXISTS idx_fetch_runs_started ON fetch_runs (started_at DESC);

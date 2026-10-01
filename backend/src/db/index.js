@@ -49,6 +49,7 @@ const ADDED_COLUMNS = Object.freeze({
     universe_snapshot: 'TEXT',
     rows_aggregate_stored: 'INTEGER DEFAULT 0',
     rows_skipped_unchanged: 'INTEGER DEFAULT 0',
+    progress_summary: 'TEXT',
   }),
   ingest_year_stats: Object.freeze({
     rows_aggregate_stored: 'INTEGER NOT NULL DEFAULT 0',

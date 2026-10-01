@@ -12,6 +12,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "ingest": "node src/scripts/ingest.js",
+    "refresh:http": "node src/scripts/refreshViaHttp.js",
     "audit:live": "node src/scripts/liveAudit.js",
     "snapshot:create": "node src/scripts/createSnapshot.js",
     "test": "node --test \"test/**/*.test.js\""

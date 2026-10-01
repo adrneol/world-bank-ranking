@@ -13,6 +13,15 @@
  * Safety: when the resolved backend is Turso Cloud, the ingest refuses to
  * run unless --force is passed, so local testing cannot accidentally rewrite
  * production data. Use DB_MODE=local for ordinary development.
+ *
+ * Phase 8E concurrency rule: STOP the local backend server before running
+ * this direct CLI against the same local SQLite file. While a server is
+ * running, prefer the HTTP mode instead (same refreshData semantics, owned
+ * by the running server, progress visible on the Status page):
+ *   npm run refresh:http
+ * A concurrent direct CLI is safely serialized-or-rejected via the database
+ * refresh lock (never silent corruption), but the HTTP mode is the supported
+ * second-terminal workflow.
  */
 
 import config, { METRICS, PRODUCTION_METRIC_KEYS } from '../config.js';
@@ -118,6 +127,10 @@ if (invokedDirectly) {
     console.error('Ingestion failed:');
     console.error(`  ${error.message}`);
     if (error.details) console.error(`  details: ${JSON.stringify(error.details)}`);
+    if (error?.code === 'REFRESH_IN_PROGRESS') {
+      console.error('  Another refresh holds the lock (likely the running server).');
+      console.error('  While the server runs, use the HTTP mode instead: npm run refresh:http');
+    }
     closeDb();
     process.exitCode = 1;
   });

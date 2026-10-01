@@ -912,9 +912,41 @@ export async function startFetchRun(db, meta) {
 }
 
 export async function finishFetchRun(db, id, patch) {
-  await queryRun(
-    db,
-    `
+  // Phase 8E: ONE terminal metadata JSON per refresh (persisted indicator
+  // summary). Merged into this existing final UPDATE — no extra statement,
+  // no per-indicator writes, never observation data. Best-effort on legacy
+  // databases missing the column (falls back to the pre-8E UPDATE).
+  const progressSummaryJson =
+    patch.progressSummary !== undefined && patch.progressSummary !== null
+      ? typeof patch.progressSummary === 'string'
+        ? patch.progressSummary
+        : JSON.stringify(patch.progressSummary)
+      : null;
+  const withSummary = `
+    UPDATE fetch_runs SET
+      completed_at            = ?,
+      status                  = ?,
+      wb_last_updated         = ?,
+      countries_rows          = ?,
+      rows_retrieved          = ?,
+      rows_upserted           = ?,
+      rows_null_skipped       = ?,
+      rows_skipped_unchanged  = ?,
+      rows_aggregate_excluded = ?,
+      rows_aggregate_stored   = ?,
+      rows_blank_iso3_skipped = ?,
+      rows_unknown_country    = ?,
+      rows_with_value         = ?,
+      rows_non_finite_skipped = ?,
+      rows_invalid_year       = ?,
+      pages_fetched           = ?,
+      requests                = ?,
+      universe_snapshot       = ?,
+      error_message           = ?,
+      progress_summary        = ?
+    WHERE id = ?
+  `;
+  const withoutSummary = `
     UPDATE fetch_runs SET
       completed_at            = ?,
       status                  = ?,
@@ -936,30 +968,56 @@ export async function finishFetchRun(db, id, patch) {
       universe_snapshot       = ?,
       error_message           = ?
     WHERE id = ?
-  `,
-    [
-      nowIso(),
-      patch.status ?? 'success',
-      nz(patch.wbLastUpdated),
-      patch.countriesRows ?? 0,
-      patch.rowsRetrieved ?? 0,
-      patch.rowsUpserted ?? 0,
-      patch.rowsNullSkipped ?? 0,
-      patch.rowsSkippedUnchanged ?? 0,
-      patch.rowsAggregateExcluded ?? 0,
-      patch.rowsAggregateStored ?? 0,
-      patch.rowsBlankIso3Skipped ?? 0,
-      patch.rowsUnknownCountry ?? 0,
-      patch.rowsWithValue ?? 0,
-      patch.rowsNonFiniteSkipped ?? 0,
-      patch.rowsInvalidYear ?? 0,
-      patch.pagesFetched ?? 0,
-      patch.requests ?? 0,
-      patch.universeSnapshot ? JSON.stringify(patch.universeSnapshot) : null,
-      nz(patch.errorMessage),
-      id,
-    ],
-  );
+  `;
+  const baseArgs = [
+    nowIso(),
+    patch.status ?? 'success',
+    nz(patch.wbLastUpdated),
+    patch.countriesRows ?? 0,
+    patch.rowsRetrieved ?? 0,
+    patch.rowsUpserted ?? 0,
+    patch.rowsNullSkipped ?? 0,
+    patch.rowsSkippedUnchanged ?? 0,
+    patch.rowsAggregateExcluded ?? 0,
+    patch.rowsAggregateStored ?? 0,
+    patch.rowsBlankIso3Skipped ?? 0,
+    patch.rowsUnknownCountry ?? 0,
+    patch.rowsWithValue ?? 0,
+    patch.rowsNonFiniteSkipped ?? 0,
+    patch.rowsInvalidYear ?? 0,
+    patch.pagesFetched ?? 0,
+    patch.requests ?? 0,
+    patch.universeSnapshot ? JSON.stringify(patch.universeSnapshot) : null,
+    nz(patch.errorMessage),
+  ];
+  try {
+    await queryRun(db, withSummary, [...baseArgs, progressSummaryJson, id]);
+  } catch (error) {
+    if (/no such column/i.test(error?.message ?? '')) {
+      await queryRun(db, withoutSummary, [...baseArgs, id]);
+      return;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Phase 8E: parse a persisted progress_summary JSON value.
+ * Returns null for anything missing/unparseable — callers fall back to live
+ * progress or to a pending list. Never throws.
+ */
+export function parseProgressSummary(value) {
+  if (value === null || value === undefined) return null;
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!Array.isArray(parsed.metricKeys) || typeof parsed.labels !== 'object' || parsed.labels === null)
+      return null;
+    if (!Array.isArray(parsed.steps)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1177,6 +1235,28 @@ export async function getLatestFetchRun(db, { status = 'success' } = {}) {
 
 export async function listFetchRuns(db, limit = 20) {
   return queryAll(db, 'SELECT * FROM fetch_runs ORDER BY id DESC LIMIT ?', [limit]);
+}
+
+/**
+ * Phase 8E: latest terminal refresh carrying a persisted progress_summary.
+ * Metadata-only fetch_runs probe (tiny table, no observation scan). Returns
+ * the raw row or null. Callers parse progress_summary with
+ * parseProgressSummary() and derive duration from started/completed_at.
+ */
+export async function getLatestPersistedProgress(db) {
+  try {
+    return (
+      (await queryGet(
+        db,
+        'SELECT * FROM fetch_runs WHERE progress_summary IS NOT NULL ORDER BY id DESC LIMIT 1',
+      )) ?? null
+    );
+  } catch (error) {
+    // Legacy database without the column (migration not yet applied):
+    // behave as "no persisted summary" rather than breaking status.
+    if (/no such column/i.test(error?.message ?? '')) return null;
+    throw error;
+  }
 }
 
 export async function getLastSuccessfulFetchTime(db) {

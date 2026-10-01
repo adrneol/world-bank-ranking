@@ -107,3 +107,41 @@ export function formatElapsed(sec) {
   const n = Math.max(0, Math.floor(sec ?? 0));
   return `${n} second${n === 1 ? '' : 's'}`;
 }
+
+/**
+ * Phase 8E: UTC date-time with seconds ('1 October 2026, 13:17:02 UTC').
+ * Refresh timestamps must never use browser-local toLocaleString(); UTC
+ * getters keep the text identical in every timezone. Null when unparseable.
+ */
+export function formatUtcDateTimeSeconds(value) {
+  const time = new Date(String(value ?? '').trim()).getTime();
+  if (!Number.isFinite(time)) return null;
+  const date = new Date(time);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getUTCDate()} ${VINTAGE_MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}, ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} UTC`;
+}
+
+/**
+ * Phase 8E: duration between two backend ISO timestamps.
+ * Completed runs: completed_at - started_at. Running: now - started_at
+ * (caller passes Date.now() as `nowMs`). Returns '—' when unavailable.
+ * Presentation only; never an input to math elsewhere.
+ */
+export function formatDurationMs(startValue, endValue) {
+  const start = new Date(String(startValue ?? '').trim()).getTime();
+  const end = new Date(String(endValue ?? '').trim()).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—';
+  return formatDurationMsValue(end - start);
+}
+
+export function formatDurationMsValue(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)} s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  if (minutes < 60) return `${minutes} min ${seconds.toFixed(0)} s`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes - hours * 60;
+  return `${hours} h ${restMinutes} min`;
+}

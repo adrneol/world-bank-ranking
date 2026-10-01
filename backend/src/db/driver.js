@@ -12,14 +12,89 @@
  * and result handling elsewhere are unchanged. Only sync→async changes.
  */
 
+/**
+ * TRANSPORT-ERROR CLASSIFIER (Phase 8D).
+ *
+ * Narrow by design: only errors that prove themselves to be
+ * infrastructure-class (Turso/Hrana HTTP-layer failures, network failures)
+ * qualify for bounded retries. Everything else — validation, auth, SQL and
+ * constraint errors, World Bank semantic errors and timeouts (the WB client
+ * has its own retry policy), application bugs — fails fast exactly as
+ * before. In particular a 404 here means ONLY the Hrana transport shape
+ * observed in production (`SERVER_ERROR: Server returned HTTP status ...`),
+ * never an application-level 404 (those carry httpStatus and are excluded).
+ */
+const NEVER_TRANSPORT_CODES = new Set([
+  'INVALID_INDICATOR',
+  'INVALID_RANGE',
+  'INVALID_YEAR',
+  'INVALID_COUNTRY',
+  'INVALID_SUBJECT',
+  'INVALID_PAGINATION',
+  'INVALID_ENTITY',
+  'INVALID_BASIS',
+  'MISSING_YEAR',
+  'REFRESH_IN_PROGRESS',
+  'REFRESH_PARTIAL_ROLLBACK',
+  'REFRESH_UNAUTHORIZED',
+  'REFRESH_RATE_LIMITED',
+  'NOT_FOUND',
+  'REQUEST_ERROR',
+  'INTERNAL_ERROR',
+  'BAD_RESPONSE',
+]);
+
+const TRANSPORT_MESSAGE_PATTERN =
+  /SERVER_ERROR|HTTP status (5\d\d|429)|timeout|timed out|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|terminated|socket hang up|network|fetch failed|stream/i;
+
+export function isTransportError(error) {
+  if (!error || typeof error !== 'object') return false;
+  if (error.httpStatus) return false;
+  if (typeof error.code === 'string' && NEVER_TRANSPORT_CODES.has(error.code)) return false;
+  if (error.name === 'WorldBankApiError' || error.name === 'WorldBankPayloadError') return false;
+  if (error.timeout === true) return false;
+  if (error.status !== undefined && error.status !== null) return false;
+  if (error.name === 'LibsqlError') {
+    if (error.code === 'SERVER_ERROR') return true;
+    return TRANSPORT_MESSAGE_PATTERN.test(error.message ?? '');
+  }
+  return error.name === 'TypeError' || TRANSPORT_MESSAGE_PATTERN.test(error.message ?? '');
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Delay before a read retry (tests override with WB_READ_RETRY_DELAY_MS). */
+export function readRetryDelayMs() {
+  const raw = process.env.WB_READ_RETRY_DELAY_MS;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 1000;
+  const n = Number(String(raw).trim());
+  return Number.isFinite(n) && n >= 0 ? n : 1000;
+}
+
+/**
+ * Run one idempotent read with a single bounded retry on transport-class
+ * failures. The retry re-issues the identical statement; any second failure
+ * (whatever its class) propagates. Non-transport errors never retry.
+ */
+async function withReadRetry(fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    if (!isTransportError(error)) throw error;
+    await sleep(readRetryDelayMs());
+    return await fn();
+  }
+}
+
 export async function queryAll(handle, sql, args = []) {
-  const result = await handle.execute({ sql, args });
-  return result.rows;
+  return withReadRetry(async () => (await handle.execute({ sql, args })).rows);
 }
 
 export async function queryGet(handle, sql, args = []) {
-  const result = await handle.execute({ sql, args });
-  return result.rows.length > 0 ? result.rows[0] : null;
+  return withReadRetry(async () => {
+    const result = await handle.execute({ sql, args });
+    return result.rows.length > 0 ? result.rows[0] : null;
+  });
 }
 
 export async function queryRun(handle, sql, args = []) {

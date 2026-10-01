@@ -1,0 +1,322 @@
+/**
+ * REFRESH PROGRESS CHECKLIST TESTS (Phase 8B ledger, Phase 8E persistence).
+ *
+ * The persistent Refresh section always exists once data exists: live
+ * per-indicator execution progress from the backend's in-memory ledger (no
+ * extra requests) during a run, the persisted fetch_runs summary across
+ * remount/reload after completion — running/waiting ticks,
+ * unchanged-vs-published distinction, failure states with rollback note,
+ * progress count/bar, UTC timestamps + duration, database target, and the
+ * enriched Recent runs history. Polling must never blank mounted content.
+ */
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { flushReact, stubFetch } from '../test-utils.js';
+import DataStatus from './DataStatus.jsx';
+
+const BASE = {
+  empty: false,
+  observations: 228776,
+  fresh: false,
+  lastSuccessAt: '2026-09-28T00:25:14.000Z',
+  wbLastUpdated: '2026-07-13',
+  ageHours: 30,
+  ttlHours: 24,
+  refreshDue: true,
+  lock: { locked: true },
+  integrity: { passed: true, checks: [] },
+  autoRefresh: { enabled: true },
+  refreshRequiresAuth: true,
+  lastRun: { status: 'running' },
+  latestRuns: [],
+  years: { years: [2024, 2025], minYear: 2024, maxYear: 2025, perMetric: {} },
+};
+
+const KEYS = ['nominal_current', 'nominal_constant', 'fdi_inflows'];
+const step = (metricKey, status, extra = {}) => ({
+  metricKey,
+  label: `Label ${metricKey}`,
+  status,
+  at: '2026-09-30T12:00:00.000Z',
+  ...extra,
+});
+const LABELS = { nominal_current: 'Label nominal_current', nominal_constant: 'Label nominal_constant', fdi_inflows: 'Label fdi_inflows' };
+
+function renderSection(element) {
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => {
+    root.render(element);
+  });
+  return { container, cleanup: () => act(() => root.unmount()) || container.remove() };
+}
+
+describe('refresh progress checklist', () => {
+  let stub = null;
+  afterEach(() => {
+    stub?.restore();
+    stub = null;
+    document.body.innerHTML = '';
+  });
+
+  it('shows running/waiting rows, count and bar while refreshing', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: true,
+          progress: {
+            stage: 'indicator:nominal_constant',
+            startedAt: '2026-10-01T13:17:02.000Z',
+            metricKeys: KEYS,
+            labels: LABELS,
+            steps: [step('nominal_current', 'unchanged')],
+          },
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('Refresh in progress');
+    expect(container.textContent).toContain('Started: 1 October 2026, 13:17:02 UTC');
+    expect(container.textContent).toContain('Progress: 1 / 3 indicators');
+    expect(container.textContent).toContain('✓ Label nominal_current — up to date');
+    expect(container.textContent).toContain('→ Label nominal_constant — refreshing');
+    expect(container.textContent).toContain('□ Label fdi_inflows — waiting');
+    expect(container.querySelector('progress').getAttribute('value')).toBe('1');
+    expect(container.querySelector('progress').getAttribute('max')).toBe('3');
+    cleanup();
+  });
+
+  it('distinguishes published rows from unchanged rows', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: true,
+          progress: {
+            stage: 'indicator:fdi_inflows',
+            metricKeys: KEYS,
+            labels: LABELS,
+            steps: [step('nominal_current', 'published', { rows: 10 }), step('nominal_constant', 'unchanged')],
+          },
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('✓ Label nominal_current — updated');
+    expect(container.textContent).toContain('✓ Label nominal_constant — up to date');
+    cleanup();
+  });
+
+  it('shows failed rows with the rollback note and keeps run history', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          progress: {
+            stage: 'partial',
+            metricKeys: KEYS,
+            labels: LABELS,
+            steps: [
+              step('nominal_current', 'unchanged'),
+              step('nominal_constant', 'failed', { error: 'boom' }),
+            ],
+          },
+          latestRuns: [{ id: 9, status: 'partial', trigger: 'ttl', rows_upserted: 0, completed_at: '2026-09-30T12:00:00.000Z' }],
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('✗ Label nominal_constant — failed: boom');
+    expect(container.textContent).toContain('□ Label fdi_inflows — waiting');
+    expect(container.textContent).toContain('rolled back — the previous valid dataset remains available');
+    expect(container.textContent).toContain('Recent refresh runs (1)');
+    cleanup();
+  });
+
+  it('shows completion with UTC timestamps and duration', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          progress: { stage: 'complete', metricKeys: KEYS, steps: KEYS.map((k) => step(k, 'unchanged')), summary: { status: 'success' } },
+        },
+      ],
+    ]);
+    const done = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(done.container.textContent).toContain('Last refresh completed successfully');
+    expect(done.container.textContent).toContain('Progress: 3 / 3 indicators');
+    done.cleanup();
+    document.body.innerHTML = '';
+
+    stub.restore();
+    // Phase 8E persistence: without live progress the persisted fetch_runs
+    // summary keeps the same section mounted (never blank).
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          progress: null,
+          lastRefresh: {
+            runId: 12,
+            status: 'success',
+            trigger: 'ttl',
+            startedAt: '2026-10-01T13:17:02.000Z',
+            completedAt: '2026-10-01T13:17:16.000Z',
+            durationMs: 14000,
+            summary: {
+              status: 'success',
+              metricKeys: KEYS,
+              labels: LABELS,
+              steps: KEYS.map((k) => step(k, 'unchanged')),
+              counts: { total: 3, updated: 0, unchanged: 3, failed: 0, notAttempted: 0 },
+            },
+          },
+        },
+      ],
+    ]);
+    const plain = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(plain.container.textContent).toContain('Refresh');
+    expect(plain.container.textContent).toContain('Last refresh completed successfully');
+    expect(plain.container.textContent).toContain('Started UTC');
+    expect(plain.container.textContent).toContain('1 October 2026, 13:17:02 UTC');
+    expect(plain.container.textContent).toContain('1 October 2026, 13:17:16 UTC');
+    expect(plain.container.textContent).toContain('✓ Label nominal_current — up to date');
+    plain.cleanup();
+  });
+
+  it('keeps mounted content visible while a poll is in flight (no flicker)', async () => {
+    const idlePayload = {
+      ...BASE,
+      refreshRequiresAuth: false,
+      inProgress: false,
+      progress: null,
+      lastRefresh: {
+        runId: 12,
+        status: 'success',
+        trigger: 'ttl',
+        startedAt: '2026-10-01T13:17:02.000Z',
+        completedAt: '2026-10-01T13:17:16.000Z',
+        durationMs: 14000,
+        summary: {
+          status: 'success',
+          metricKeys: KEYS,
+          labels: LABELS,
+          steps: KEYS.map((k) => step(k, 'unchanged')),
+          counts: { total: 3, updated: 0, unchanged: 3, failed: 0, notAttempted: 0 },
+        },
+      },
+    };
+    const pendingStatusResolvers = [];
+    let statusCalls = 0;
+    let releaseRefreshPost = null;
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        () => {
+          statusCalls += 1;
+          if (statusCalls === 1) {
+            return { ok: true, status: 200, headers: new Headers(), json: async () => idlePayload };
+          }
+          // Polls stay in flight so the test observes loading+data; every
+          // pending poll is released before cleanup so nothing leaks.
+          return new Promise((resolve) => {
+            pendingStatusResolvers.push(() =>
+              resolve({ ok: true, status: 200, headers: new Headers(), json: async () => idlePayload }),
+            );
+          });
+        },
+      ],
+      [
+        '/api/data/refresh',
+        () =>
+          new Promise((resolve) => {
+            releaseRefreshPost = () =>
+              resolve({
+                ok: true,
+                status: 200,
+                headers: new Headers(),
+                json: async () => ({ status: 'success', runId: 13, rowsUpserted: 0 }),
+              });
+          }),
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('Last refresh completed successfully');
+    const button = container.querySelector('button.btn-primary');
+    expect(button).not.toBeNull();
+    await act(async () => {
+      button.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    });
+    await flushReact(act, 2);
+    // Poll in flight + POST in flight: previous content stays mounted (the
+    // same section transitions to in-progress instead of blanking).
+    expect(container.textContent).toContain('Refresh in progress');
+    expect(container.textContent).toContain('✓ Label nominal_current — up to date');
+    expect(container.textContent).toContain('Updating…');
+    expect(container.textContent).not.toContain('Loading data status');
+    releaseRefreshPost?.();
+    await flushReact(act, 2);
+    for (const release of pendingStatusResolvers.splice(0)) release();
+    await flushReact(act);
+    expect(container.textContent).toContain('Last refresh completed successfully');
+    cleanup();
+  });
+
+  it('renders the enriched history with UTC timestamps and the database target', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          progress: null,
+          database: { mode: 'local', file: 'backend/data/worldbank.db' },
+          lastRefresh: null,
+          latestRuns: [
+            {
+              id: 12,
+              status: 'success',
+              trigger: 'ttl',
+              started_at: '2026-10-01T13:17:02.000Z',
+              completed_at: '2026-10-01T13:17:16.000Z',
+              duration_ms: 14000,
+              rows_retrieved: 100,
+              rows_upserted: 0,
+              rows_skipped_unchanged: 100,
+              summary_counts: { total: 20, updated: 0, unchanged: 20, failed: 0, notAttempted: 0 },
+              error_message: null,
+            },
+          ],
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('● Local SQLite');
+    expect(container.textContent).toContain('Started UTC');
+    expect(container.textContent).toContain('1 October 2026, 13:17:02 UTC');
+    expect(container.textContent).toContain('1 October 2026, 13:17:16 UTC');
+    expect(container.textContent).toContain('Recent refresh runs (1)');
+    // No browser-local timestamp rendering anywhere in the section.
+    expect(container.innerHTML).not.toContain('toLocaleString');
+    cleanup();
+  });
+});

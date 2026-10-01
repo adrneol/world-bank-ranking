@@ -10,12 +10,26 @@
  * inline retry after 10 s; status polling starts the moment a manual refresh
  * is kicked off — not only after the minutes-long POST resolves — so
  * backend progress.stage streams while the refresh runs.
+ *
+ * Phase 8E persistent refresh: the Refresh section ALWAYS EXISTS once data
+ * exists. Distinct state concepts (initialLoading vs polling vs
+ * refreshRunning) keep content visible: polling updates the existing UI in
+ * place and never swaps the card to "Loading...". The completed indicator
+ * checklist is resolved live (in-memory ledger during a run) or persisted
+ * (fetch_runs progress_summary across remount/reload), so TTL re-entry,
+ * navigation, and page reload all recover the same section.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
-import { formatUtcDateTime, formatVintageDate } from '../utils/format.js';
+import {
+  formatDurationMs,
+  formatDurationMsValue,
+  formatUtcDateTime,
+  formatUtcDateTimeSeconds,
+  formatVintageDate,
+} from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 /** Full refreshes stream dozens of indicator payloads; bound the POST at 10 min. */
@@ -47,6 +61,18 @@ function ageText(ageHours) {
   if (ageHours < 1) return `${Math.round(ageHours * 60)} min ago`;
   if (ageHours < 48) return `${Math.round(ageHours)} h ago`;
   return `${(ageHours / 24).toFixed(1)} days ago`;
+}
+
+/** Human-readable database target from the safe backend diagnostic (never secrets). */
+function databaseLabel(database) {
+  if (!database || typeof database !== 'object') return '—';
+  if (database.mode === 'turso') {
+    return database.host ? `● Turso (${database.host})` : '● Turso';
+  }
+  if (database.mode === 'local') {
+    return database.file ? `● Local SQLite (${database.file})` : '● Local SQLite';
+  }
+  return '—';
 }
 
 export default function DataStatus({ onRefreshed }) {
@@ -97,6 +123,96 @@ export default function DataStatus({ onRefreshed }) {
   // flight (R-07): the POST resolves only when the whole refresh completes,
   // so gating on `inProgress` alone would show no progress until the end.
   const polling = inProgress || refreshState.running;
+
+  // Phase 8E flicker fix: distinct loading concepts. `initialLoading` covers
+  // only the very first fetch (no data yet). Once usable data exists it stays
+  // mounted: polls update it in place, and poll failures keep the last
+  // known-good payload with a non-destructive warning.
+  const hasData = data !== null && data !== undefined;
+  const initialLoading = Boolean(loading && !hasData);
+  const pollWarning = Boolean(hasData && error && !showStarting);
+
+  // Live progress ledger (in-memory, during a run) vs persisted terminal
+  // summary (fetch_runs progress_summary, survives remount/reload).
+  const liveSteps = Array.isArray(data?.progress?.steps) ? data.progress.steps : [];
+  const liveKeys = Array.isArray(data?.progress?.metricKeys) ? data.progress.metricKeys : [];
+  const liveLabels =
+    data?.progress?.labels && typeof data.progress.labels === 'object' ? data.progress.labels : {};
+  const liveStage = typeof data?.progress?.stage === 'string' ? data.progress.stage : null;
+  const liveTerminal = ['complete', 'partial', 'failed'].includes(liveStage);
+  const persistedSummary =
+    data?.lastRefresh?.summary && typeof data.lastRefresh.summary === 'object'
+      ? data.lastRefresh.summary
+      : null;
+  const persistedKeys = Array.isArray(persistedSummary?.metricKeys) ? persistedSummary.metricKeys : [];
+  // Prefer live while a run is active or when it holds the only terminal
+  // record; otherwise the persisted snapshot (identical content, durable).
+  const useLive =
+    liveKeys.length > 0 && (polling || liveTerminal || persistedKeys.length === 0);
+  const activeKeys = useLive ? liveKeys : persistedKeys;
+  const activeLabels = useLive
+    ? liveLabels
+    : persistedSummary?.labels && typeof persistedSummary.labels === 'object'
+      ? persistedSummary.labels
+      : {};
+  const activeStepByKey = new Map(
+    (useLive ? liveSteps : Array.isArray(persistedSummary?.steps) ? persistedSummary.steps : []).map((s) => [
+      s.metricKey,
+      s,
+    ]),
+  );
+  const labelOf = (metricKey) =>
+    activeStepByKey.get(metricKey)?.label ?? activeLabels[metricKey] ?? metricKey;
+  const runningKey = (() => {
+    if (!polling || !useLive) return null;
+    return typeof liveStage === 'string' && liveStage.startsWith('indicator:')
+      ? liveStage.slice('indicator:'.length)
+      : null;
+  })();
+  const doneCount = activeKeys.filter((k) =>
+    ['published', 'unchanged', 'failed'].includes(activeStepByKey.get(k)?.status),
+  ).length;
+  // The Refresh section always exists once data exists (even with zero known
+  // indicators it renders the header + empty note instead of unmounting).
+  const showRefreshPanel = hasData;
+  const refreshTerminalLive = useLive && liveTerminal;
+  const refreshTerminalPersisted = !useLive && persistedSummary !== null;
+  const refreshCompletedOk =
+    (useLive && liveStage === 'complete' && data?.progress?.summary?.status === 'success') ||
+    (!useLive && persistedSummary?.status === 'success');
+  const refreshRolledBack =
+    (useLive && (liveStage === 'partial' || liveStage === 'failed')) ||
+    (!useLive && (persistedSummary?.status === 'partial' || persistedSummary?.status === 'failed'));
+
+  // Resolved refresh timestamps (UTC ISO from the backend; never fabricated).
+  const refreshStartedAt =
+    (useLive ? data?.progress?.startedAt : null) ?? data?.lastRefresh?.startedAt ?? null;
+  const refreshCompletedAt = !useLive
+    ? data?.lastRefresh?.completedAt ?? null
+    : (() => {
+        if (liveTerminal) {
+          const atTimes = liveSteps.map((s) => s?.at).filter(Boolean);
+          return atTimes.length > 0 ? atTimes.sort()[atTimes.length - 1] : null;
+        }
+        return null;
+      })();
+  const refreshDurationText = (() => {
+    if (!useLive && data?.lastRefresh?.durationMs !== null && data?.lastRefresh?.durationMs !== undefined) {
+      return formatDurationMsValue(data.lastRefresh.durationMs);
+    }
+    if (refreshStartedAt && refreshCompletedAt) return formatDurationMs(refreshStartedAt, refreshCompletedAt);
+    return '—';
+  })();
+
+  // Live elapsed ticker (running refresh only; 1 s cadence, display only).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!polling || !refreshStartedAt) return undefined;
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [polling, refreshStartedAt]);
+  const refreshElapsedText =
+    polling && refreshStartedAt ? formatDurationMsValue(Math.max(0, nowMs - new Date(refreshStartedAt).getTime())) : null;
 
   useEffect(() => {
     if (!loading) return undefined;
@@ -188,7 +304,26 @@ export default function DataStatus({ onRefreshed }) {
         ) : null
       }
     >
-      <StatusBlock loading={loading && !slowLoad && !showStarting} error={showStarting ? null : error} empty={false} onRetry={retry} sectionName="data status" />
+      <StatusBlock
+        loading={initialLoading && !slowLoad && !showStarting}
+        error={showStarting ? null : hasData ? null : error}
+        empty={false}
+        onRetry={retry}
+        sectionName="data status"
+      />
+      {pollWarning ? (
+        <p className="status status-warning" role="status">
+          Status update failed ({error?.message ?? 'unknown error'}) — showing the last known data.
+          <button type="button" className="btn btn-secondary" onClick={retry}>
+            Retry now
+          </button>
+        </p>
+      ) : null}
+      {loading && hasData && !showStarting ? (
+        <p className="status-polling" role="status" aria-live="off">
+          Updating…
+        </p>
+      ) : null}
       {showStarting ? (
         <div className="status status-loading" role="status">
           <p>
@@ -199,7 +334,8 @@ export default function DataStatus({ onRefreshed }) {
             Retry now
           </button>
         </div>
-      ) : null}      {loading && slowLoad && !error ? (
+      ) : null}
+      {initialLoading && slowLoad && !error ? (
         <div className="status status-loading" role="status">
           <p>
             Still loading data status — the API is taking longer than expected
@@ -211,8 +347,9 @@ export default function DataStatus({ onRefreshed }) {
           </button>
         </div>
       ) : null}
-      {!loading && !error && data ? (
+      {hasData ? (
         <>
+          <h3>Data status</h3>
           <dl className="facts facts-grid">
             <div>
               <dt>Dataset</dt>
@@ -226,7 +363,7 @@ export default function DataStatus({ onRefreshed }) {
               <dd>{data.wbLastUpdated ? (formatVintageDate(data.wbLastUpdated) ?? data.wbLastUpdated) : '—'}</dd>
             </div>
             <div>
-              <dt>Data retrieved</dt>
+              <dt>Data retrieved UTC</dt>
               <dd>{data.lastSuccessAt ? (formatUtcDateTime(data.lastSuccessAt) ?? data.lastSuccessAt) : '—'}</dd>
             </div>
             <div>
@@ -263,6 +400,10 @@ export default function DataStatus({ onRefreshed }) {
                   : 'Open in this environment.'}
               </dd>
             </div>
+            <div>
+              <dt>Database</dt>
+              <dd>{databaseLabel(data.database)}</dd>
+            </div>
           </dl>
 
           {refreshState.running || inProgress ? (
@@ -270,6 +411,103 @@ export default function DataStatus({ onRefreshed }) {
               Refresh in progress{data.progress?.stage ? ` — ${data.progress.stage}` : ''}. Current data remain
               available below; duplicate refreshes are blocked.
             </p>
+          ) : null}
+          {showRefreshPanel ? (
+            <div className="refresh-progress" aria-live="polite">
+              <h3>Refresh</h3>
+              {polling ? (
+                <p>
+                  Refresh in progress
+                  {refreshStartedAt ? (
+                    <>
+                      <br />
+                      Started: {formatUtcDateTimeSeconds(refreshStartedAt) ?? refreshStartedAt}
+                    </>
+                  ) : null}
+                  {refreshElapsedText ? (
+                    <>
+                      <br />
+                      Elapsed: {refreshElapsedText}
+                    </>
+                  ) : null}
+                </p>
+              ) : refreshCompletedOk ? (
+                <p className="status status-ok" role="status">
+                  Last refresh completed successfully
+                </p>
+              ) : refreshRolledBack ? (
+                <p className="status status-error" role="alert">
+                  Refresh did not publish: rolled back — the previous valid dataset remains available.
+                </p>
+              ) : (
+                <p>No refresh recorded yet.</p>
+              )}
+              <p>
+                Progress: {doneCount} / {activeKeys.length} indicators
+              </p>
+              <progress value={doneCount} max={Math.max(activeKeys.length, 1)}>
+                {doneCount} / {activeKeys.length}
+              </progress>
+              {activeKeys.length > 0 ? (
+                <ul className="checklist">
+                  {activeKeys.map((metricKey) => {
+                    const step = activeStepByKey.get(metricKey);
+                    const label = labelOf(metricKey);
+                    if (step?.status === 'published') {
+                      return (
+                        <li key={metricKey}>
+                          ✓ {label} — updated
+                        </li>
+                      );
+                    }
+                    if (step?.status === 'unchanged') {
+                      return (
+                        <li key={metricKey}>
+                          ✓ {label} — up to date
+                        </li>
+                      );
+                    }
+                    if (step?.status === 'failed') {
+                      return (
+                        <li key={metricKey}>
+                          ✗ {label} — failed{step.error ? `: ${step.error}` : ''}
+                        </li>
+                      );
+                    }
+                    if (polling && runningKey === metricKey) {
+                      return (
+                        <li key={metricKey}>
+                          → {label} — refreshing
+                        </li>
+                      );
+                    }
+                    return (
+                      <li key={metricKey}>
+                        □ {label} — waiting
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {!polling && (refreshTerminalLive || refreshTerminalPersisted) ? (
+                <dl className="facts facts-grid">
+                  <div>
+                    <dt>Started UTC</dt>
+                    <dd>{refreshStartedAt ? (formatUtcDateTimeSeconds(refreshStartedAt) ?? refreshStartedAt) : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Completed UTC</dt>
+                    <dd>
+                      {refreshCompletedAt ? (formatUtcDateTimeSeconds(refreshCompletedAt) ?? refreshCompletedAt) : '—'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Duration</dt>
+                    <dd>{refreshDurationText}</dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
           ) : null}
           {refreshState.error ? (
             <p className="status status-error" role="alert">
@@ -292,10 +530,25 @@ export default function DataStatus({ onRefreshed }) {
                       <th scope="col">Run</th>
                       <th scope="col">Status</th>
                       <th scope="col">Trigger</th>
+                      <th scope="col">Started UTC</th>
+                      <th scope="col">Completed UTC</th>
+                      <th scope="col">Duration</th>
+                      <th scope="col" className="num">
+                        Retrieved
+                      </th>
                       <th scope="col" className="num">
                         Upserted
                       </th>
-                      <th scope="col">Completed</th>
+                      <th scope="col" className="num">
+                        Skipped
+                      </th>
+                      <th scope="col" className="num">
+                        Updated
+                      </th>
+                      <th scope="col" className="num">
+                        Unchanged
+                      </th>
+                      <th scope="col">Error</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -306,8 +559,21 @@ export default function DataStatus({ onRefreshed }) {
                         </th>
                         <td>{run.status}</td>
                         <td>{run.trigger ?? '—'}</td>
+                        <td>{run.started_at ? (formatUtcDateTimeSeconds(run.started_at) ?? run.started_at) : '—'}</td>
+                        <td>
+                          {run.completed_at ? (formatUtcDateTimeSeconds(run.completed_at) ?? run.completed_at) : '—'}
+                        </td>
+                        <td>
+                          {run.duration_ms !== null && run.duration_ms !== undefined
+                            ? formatDurationMsValue(run.duration_ms)
+                            : formatDurationMs(run.started_at, run.completed_at)}
+                        </td>
+                        <td className="num">{run.rows_retrieved ?? '—'}</td>
                         <td className="num">{run.rows_upserted ?? '—'}</td>
-                        <td>{run.completed_at ? new Date(run.completed_at).toLocaleString() : '—'}</td>
+                        <td className="num">{run.rows_skipped_unchanged ?? '—'}</td>
+                        <td className="num">{run.summary_counts?.updated ?? '—'}</td>
+                        <td className="num">{run.summary_counts?.unchanged ?? '—'}</td>
+                        <td>{run.error_message ?? '—'}</td>
                       </tr>
                     ))}
                   </tbody>

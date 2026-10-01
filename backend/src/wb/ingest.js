@@ -45,7 +45,56 @@
 
 import { METRICS, PRODUCTION_METRIC_KEYS, config, isProductionMetric } from '../config.js';
 import { getDb } from '../db/index.js';
-import { batchGet } from '../db/driver.js';
+import { batchGet, isTransportError } from '../db/driver.js';
+
+/** Local sleep (driver keeps its own private copy for read retries). */
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Inline transport-retry delays between refresh attempts (Phase 8D, bounded
+ * by Phase 8E audit below).
+ * Override in tests with WB_REFRESH_TRANSPORT_RETRY_DELAYS_MS="10,20";
+ * "off"/"none"/"disabled" disables inline retries (explicit ladder only).
+ *
+ * BOUNDED RETRY HIERARCHY (Phase 8E, exact maximums):
+ *   1. World Bank HTTP per request: WB_MAX_RETRIES (default 5) inside
+ *      wb/client.js getWithRetry — per-request only, never a full refresh.
+ *   2. Turso/libSQL idempotent SELECT: exactly 1 retry in driver.js
+ *      withReadRetry (queryAll/queryGet only; writes/transactions never).
+ *   3. Refresh-level transport retry (this file): at most
+ *      refreshTransportRetryDelays().length inline retries, i.e. at most
+ *      delays.length + 1 complete refresh attempts per refreshData() call
+ *      (default 2 delays → max 3 attempts). Each attempt is a full fresh
+ *      refresh from the beginning (O10 re-evaluated, new O7 transaction);
+ *      a broken transaction object is NEVER resumed or continued.
+ *   4. Background TTL retry ladder: REFRESH_RETRY_DELAYS_MS rungs
+ *      (default 4: 5m/15m/30m/60m), single-flight, in-process, automatic
+ *      triggers only — fires once per failed refreshData() call, so there is
+ *      NO multiplication: worst case per TTL trigger = (delays8D + 1) ×
+ *      (ladder rungs until success, capped by process lifetime/boot check).
+ *      Manual/script callers never schedule the ladder.
+ *
+ * CLIENT REUSE (Phase 8E): @libsql/client Turso handles are stateless
+ * HTTPS clients; a transport failure fails the in-flight statement/transaction
+ * (which is rolled back and discarded by driver.js transaction()), never the
+ * shared handle. The shared handle from getDb() is therefore reused across
+ * inline attempts WITHOUT close/reconnect — closeDb() is never called here
+ * so active Express status/analysis reads are unaffected. A fresh transaction
+ * object is created per attempt by transaction().
+ */
+export const REFRESH_TRANSPORT_RETRY_DELAYS_MS = Object.freeze([5000, 15000]);
+export function refreshTransportRetryDelays() {
+  const raw = process.env.WB_REFRESH_TRANSPORT_RETRY_DELAYS_MS;
+  if (raw === undefined || raw === null) return [...REFRESH_TRANSPORT_RETRY_DELAYS_MS];
+  const text = String(raw).trim().toLowerCase();
+  if (text === '' ) return [...REFRESH_TRANSPORT_RETRY_DELAYS_MS];
+  if (text === 'off' || text === 'none' || text === 'disabled') return [];
+  const parsed = String(raw)
+    .split(',')
+    .map((s) => Number(String(s).trim()))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  return parsed.length > 0 ? parsed : [...REFRESH_TRANSPORT_RETRY_DELAYS_MS];
+}
 import {
   acquireRefreshLock,
   canonicalDecimalString,
@@ -563,12 +612,100 @@ function partialRollbackError(failureSummary) {
   return error;
 }
 
+/**
+ * Phase 8B: append one per-indicator execution record to the in-memory
+ * progress ledger (no database writes, bounded to one entry per requested
+ * metric key). Statuses: 'published' (rows rewritten), 'unchanged' (O10
+ * proved identical, zero writes), 'failed' (fetch error, with message).
+ * Execution progress, NOT publication state: entries recorded before a
+ * rollback describe work that was rolled back.
+ */
+function recordStep(metricKey, status, extra = {}) {
+  if (!Array.isArray(lastProgress.steps)) lastProgress.steps = [];
+  const entry = {
+    metricKey,
+    label: METRICS[metricKey]?.label ?? metricKey,
+    status,
+    at: new Date().toISOString(),
+    ...extra,
+  };
+  const index = lastProgress.steps.findIndex((s) => s.metricKey === metricKey);
+  if (index >= 0) lastProgress.steps[index] = entry;
+  else lastProgress.steps.push(entry);
+}
+
+/**
+ * Phase 8E: build the ONE terminal persisted indicator summary for a refresh.
+ * Snapshot of the in-memory ledger at completion: every requested metric key,
+ * display labels, per-indicator terminal status (published = updated,
+ * unchanged = up to date, failed + error), rows where known, plus counts and
+ * the completion timestamp. Metadata only — never observation rows — and
+ * written ONCE as part of the existing finishFetchRun UPDATE (no extra
+ * statement, no per-indicator writes). O10/O7/O8 unaffected: this never
+ * influences publish decisions, transaction boundaries, or verification.
+ */
+export function buildFinalProgressSummary({ stage, status, trigger } = {}) {
+  const metricKeys = Array.isArray(lastProgress?.metricKeys)
+    ? [...lastProgress.metricKeys]
+    : [...PRODUCTION_METRIC_KEYS];
+  const labels =
+    lastProgress?.labels && typeof lastProgress.labels === 'object'
+      ? { ...lastProgress.labels }
+      : Object.fromEntries(metricKeys.map((k) => [k, METRICS[k]?.label ?? k]));
+  const steps = metricKeys.map((metricKey) => {
+    const found = Array.isArray(lastProgress?.steps)
+      ? lastProgress.steps.find((s) => s?.metricKey === metricKey)
+      : null;
+    if (found) {
+      return {
+        metricKey,
+        label: found.label ?? labels[metricKey] ?? metricKey,
+        status: found.status,
+        ...(Number.isFinite(found.rows) ? { rows: found.rows } : {}),
+        ...(found.error ? { error: String(found.error).slice(0, 500) } : {}),
+        ...(found.at ? { at: found.at } : {}),
+      };
+    }
+    return { metricKey, label: labels[metricKey] ?? metricKey, status: 'not_attempted' };
+  });
+  const count = (s) => steps.filter((x) => x.status === s).length;
+  return {
+    version: 1,
+    stage: stage ?? lastProgress?.stage ?? null,
+    status: status ?? lastProgress?.summary?.status ?? null,
+    trigger: trigger ?? lastProgress?.trigger ?? null,
+    startedAt: lastProgress?.startedAt ?? null,
+    completedAt: new Date().toISOString(),
+    metricKeys,
+    labels,
+    steps,
+    counts: {
+      total: steps.length,
+      updated: count('published'),
+      unchanged: count('unchanged'),
+      failed: count('failed'),
+      notAttempted: count('not_attempted'),
+    },
+  };
+}
+
 export async function refreshData(options = {}) {
   if (isRefreshInProgress()) {
     const error = new Error('A World Bank data refresh is already in progress.');
     error.code = 'REFRESH_IN_PROGRESS';
     throw error;
   }
+  // Phase 8D: bounded inline retries for transient TRANSPORT failures only
+  // (e.g. Turso/Hrana HTTP-layer blips mid-refresh). Each attempt is a full,
+  // independent refresh: the previous attempt always failed definitively and
+  // released everything in `finally` (O7 rolled back, locks cleared), so a
+  // retry starts from a clean slate — never from the middle of a broken
+  // transaction. Validation, auth, World Bank semantic and integrity errors
+  // never retry (see isTransportError). The existing retry ladder still
+  // applies afterwards if all inline attempts fail: no multiplication,
+  // because the ladder fires once per failed refreshData() call.
+  const transportDelays = refreshTransportRetryDelays();
+  for (let attempt = 0; ; attempt += 1) {
   // Same-tick visibility: mark the attempt synchronously so a concurrent
   // caller in this process observes it immediately (the atomic SQLite lock
   // below remains the cross-process authority). Reaching past this point
@@ -589,31 +726,37 @@ export async function refreshData(options = {}) {
       options.startYear ?? config.ingestStartYear,
       options.endYear ?? config.ingestEndYear,
     ),
+    // Phase 8B: per-indicator execution ledger for the progress UI.
+    // In-memory only (never a database write): each entry records what the
+    // refresh loop actually did — published (rows rewritten), unchanged
+    // (O10 proved identical, zero writes), or failed (error message).
+    // Execution progress, NOT publication state: on rollback nothing here
+    // was published. Reset on every attempt; survives completion so the UI
+    // can render the final checklist without extra polling.
+    metricKeys: [...(Array.isArray(options.indicators) ? options.indicators : PRODUCTION_METRIC_KEYS)],
+    // Display labels for every requested key (including not-yet-attempted
+    // ones, which never get a step entry). Registry display metadata only.
+    labels: Object.fromEntries(
+      (Array.isArray(options.indicators) ? options.indicators : PRODUCTION_METRIC_KEYS).map((k) => [
+        k,
+        METRICS[k]?.label ?? k,
+      ]),
+    ),
+    steps: [],
   };
 
   const db = options.db ?? getDb();
   const holder = `${options.trigger ?? 'manual'}:pid-${process.pid}`;
 
   // Cross-process authority: exactly one acquirer wins the atomic UPDATE.
+  // Phase 8E: lock acquisition lives INSIDE the attempt try below so a
+  // transport failure here flows through the same bounded inline-retry +
+  // finally-release path as any other transport error (previously the throw
+  // escaped before the try, leaking the in-process flag and skipping the
+  // retry). Genuine contention still surfaces as REFRESH_IN_PROGRESS, which
+  // never retries. The finally releases only when dbLockHeld is true, so a
+  // contention rejection can never release another holder's lock.
   let dbLockHeld = false;
-  try {
-    dbLockHeld = await acquireRefreshLock(db, { holder });
-  } catch {
-    dbLockHeld = false;
-  }
-  if (!dbLockHeld) {
-    refreshInProgress = false;
-    let lockedBy = null;
-    try {
-      lockedBy = await refreshLockStatus(db);
-    } catch {
-      lockedBy = null;
-    }
-    const error = new Error('A World Bank data refresh is already in progress.');
-    error.code = 'REFRESH_IN_PROGRESS';
-    error.lockedBy = lockedBy;
-    throw error;
-  }
   const requestedStartYear = options.startYear ?? config.ingestStartYear;
   const requestedEndYear = options.endYear ?? config.ingestEndYear;
   const { fetchedStartYear, fetchedEndYear } = deriveFetchRange(
@@ -659,9 +802,29 @@ export async function refreshData(options = {}) {
   // (written outside the transaction) and must survive failures. A failed or
   // partial refresh therefore cannot publish a mixed dataset: the outer
   // transaction rolls back and the previous dataset stays exactly as it was.
+  // Set when the catch below schedules another attempt (cleared per attempt).
+  let pendingRetryDelay = null;
   try {
     // (Attempt flag and initial 'starting' progress were published
     // synchronously on entry, above.)
+    try {
+      dbLockHeld = await acquireRefreshLock(db, { holder });
+    } catch (lockError) {
+      if (isTransportError(lockError)) throw lockError;
+      dbLockHeld = false;
+    }
+    if (!dbLockHeld) {
+      let lockedBy = null;
+      try {
+        lockedBy = await refreshLockStatus(db);
+      } catch {
+        lockedBy = null;
+      }
+      const contention = new Error('A World Bank data refresh is already in progress.');
+      contention.code = 'REFRESH_IN_PROGRESS';
+      contention.lockedBy = lockedBy;
+      throw contention;
+    }
     const metricKeys = options.indicators ?? PRODUCTION_METRIC_KEYS;
 
     // Lifecycle enforcement (inside the try so the finally below always
@@ -781,6 +944,7 @@ export async function refreshData(options = {}) {
             indicatorCode: METRICS[metricKey].indicatorCode,
             error: indicatorError.message,
           });
+          recordStep(metricKey, 'failed', { error: indicatorError.message });
           options.onWarn?.({
             message: `Indicator ${metricKey} failed: ${indicatorError.message}`,
           });
@@ -830,6 +994,7 @@ export async function refreshData(options = {}) {
           result.skippedUnchanged = true;
           totals.rowsSkippedUnchanged += result.rowsUpserted;
           result.stagedRows = EMPTY_RELEASED_ROWS;
+          recordStep(metricKey, 'unchanged', { rows: result.rowsUpserted });
           succeededCount += 1;
           continue;
         }
@@ -851,6 +1016,7 @@ export async function refreshData(options = {}) {
         await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
         await upsertObservationsInner(tx, result.stagedRows, (row) => ({ ...row, indicatorId: indicator.id }));
         result.stagedRows = EMPTY_RELEASED_ROWS;
+        recordStep(metricKey, 'published', { rows: result.rowsUpserted });
         succeededCount += 1;
       }
 
@@ -901,6 +1067,8 @@ export async function refreshData(options = {}) {
         wbLastUpdated,
         universeSnapshot,
         ...totals,
+        // Phase 8E: persisted terminal summary rides the existing UPDATE.
+        progressSummary: buildFinalProgressSummary({ stage: 'complete', status: 'success', trigger }),
       });
     });
 
@@ -944,6 +1112,8 @@ export async function refreshData(options = {}) {
         universeSnapshot,
         errorMessage: error.failureSummary,
         ...totals,
+        // Phase 8E: persisted terminal summary rides the existing UPDATE.
+        progressSummary: buildFinalProgressSummary({ stage: 'partial', status: 'partial', trigger }),
       });
       const summary = {
         status: 'partial',
@@ -997,13 +1167,37 @@ export async function refreshData(options = {}) {
           universeSnapshot,
           errorMessage: error.message,
           ...totals,
+          // Phase 8E: persisted terminal summary rides the existing UPDATE.
+          progressSummary: buildFinalProgressSummary({ stage: 'failed', status: 'failed', trigger }),
         });
       } catch (recordError) {
         options.onWarn?.({ message: `Could not record the failed run: ${recordError.message}` });
       }
     }
 
-    throw error;
+    // Phase 8D diagnostic (no semantic change): name the progress stage the
+    // attempt died in, so background-failure logs identify it without
+    // guessing. The recorded fetch_runs message above keeps the original
+    // error text verbatim.
+    if (error && typeof error === 'object' && error.refreshStage == null) {
+      error.refreshStage = lastProgress?.stage ?? null;
+    }
+
+    // Phase 8D inline retry: transport-class failures get bounded fresh
+    // attempts (the failed attempt is fully recorded above and its locks
+    // release in `finally` before the sleep). Anything else rethrows.
+    if (isTransportError(error) && attempt < transportDelays.length) {
+      const delay = transportDelays[attempt];
+      options.onWarn?.({
+        message:
+          `Refresh attempt ${attempt + 1} failed with a transient transport error` +
+          ` during ${error.refreshStage ?? 'unknown stage'} (${error.message}); ` +
+          `retrying in ${delay} ms.`,
+      });
+      pendingRetryDelay = delay;
+    } else {
+      throw error;
+    }
   } finally {
     // ALWAYS released - including when startFetchRun() or the run bookkeeping
     // throws, and including when the caller aborts. Both the in-memory flag
@@ -1018,6 +1212,11 @@ export async function refreshData(options = {}) {
         // Best effort; the stale row is recoverable via recoverRefreshLock().
       }
     }
+  }
+  // Reached only when retrying (success and partial returned above, other
+  // failures rethrew). The next iteration re-initializes progress state,
+  // re-acquires locks and starts a completely fresh attempt.
+  await sleepMs(pendingRetryDelay);
   }
 }
 

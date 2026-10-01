@@ -899,6 +899,43 @@ hr.ddivider {
   color: var(--ok);
 }
 
+/* Phase 8E: non-destructive poll warning (keeps last known data visible). */
+.status-warning {
+  background: #fff8e6;
+  border: 1px solid #f0d48a;
+  color: #5f4a15;
+}
+
+/* Phase 8E: tiny inline polling indicator (display only, never blanks content). */
+.status-polling {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+
+/* ---------- refresh progress checklist (Phase 8B, display only) ---------- */
+
+.refresh-progress {
+  margin: 0 0 1rem;
+}
+
+.refresh-progress progress {
+  width: 100%;
+  margin: 0 0 0.6rem;
+}
+
+.checklist {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  columns: 2;
+}
+
+.checklist li {
+  padding: 0.15rem 0;
+  break-inside: avoid;
+}
+
 /* ---------- bootstrap cold-start states ---------- */
 
 .warmup {

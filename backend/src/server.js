@@ -52,7 +52,9 @@ import {
   listCountries,
   listFetchRuns,
   listIndicators,
+  getLatestPersistedProgress,
   markIntegrityVerified,
+  parseProgressSummary,
   parseStoredIntegrityChecks,
 } from './db/repository.js';
 import { describeUniverseRule } from './domain/universe.js';
@@ -1348,6 +1350,53 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
     } catch (error) {
       integrity = { passed: false, error: error.message };
     }
+    // Phase 8E: persisted terminal refresh summary + enriched history.
+    // Metadata-only (fetch_runs tiny-table reads + pure-JS derivation; no
+    // observation scan, no extra write, memoization untouched).
+    let persistedRefresh = null;
+    try {
+      persistedRefresh = await getLatestPersistedProgress(h);
+    } catch {
+      persistedRefresh = null;
+    }
+    const durationMsOf = (run) => {
+      if (!run?.started_at) return null;
+      const end = run.completed_at ?? null;
+      if (!end) return null;
+      const ms = new Date(end).getTime() - new Date(run.started_at).getTime();
+      return Number.isFinite(ms) && ms >= 0 ? ms : null;
+    };
+    let latestRuns = [];
+    try {
+      const rows = await listFetchRuns(h, 10);
+      latestRuns = rows.map((run) => {
+        const summary = parseProgressSummary(run?.progress_summary);
+        return {
+          ...run,
+          duration_ms: durationMsOf(run),
+          summary_counts: summary?.counts ?? null,
+        };
+      });
+    } catch {
+      latestRuns = [];
+    }
+    let lastRefresh = null;
+    if (persistedRefresh) {
+      const summary = parseProgressSummary(persistedRefresh.progress_summary);
+      lastRefresh = {
+        runId: persistedRefresh.id,
+        status: persistedRefresh.status,
+        trigger: persistedRefresh.trigger ?? null,
+        startedAt: persistedRefresh.started_at ?? null,
+        completedAt: persistedRefresh.completed_at ?? null,
+        durationMs: durationMsOf(persistedRefresh),
+        error: persistedRefresh.error_message ?? null,
+        rowsRetrieved: persistedRefresh.rows_retrieved ?? null,
+        rowsUpserted: persistedRefresh.rows_upserted ?? null,
+        rowsSkippedUnchanged: persistedRefresh.rows_skipped_unchanged ?? null,
+        summary: summary ?? null,
+      };
+    }
     res.json({
       ...cache,
       // Authoritative upstream World Bank vintage: MAX(wb_last_updated)
@@ -1358,6 +1407,9 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       wbLastUpdated: await getMaxWbLastUpdated(h),
       inProgress: isRefreshInProgress(),
       progress: getIngestProgress(),
+      // Phase 8E: persisted last completed refresh (survives remount/reload;
+      // live `progress` above remains the in-memory ledger during a run).
+      lastRefresh,
       retry: getRefreshRetryState(),
       lock,
       integrity,
@@ -1366,11 +1418,15 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         enabled: autoRefreshEnabled,
         ttlHours: cache.ttlHours,
       },
+      // Phase 8E: safe database-target diagnostic (provider + host/file only;
+      // never tokens, secrets, or credentials) so a local refresh can never
+      // be confused with a production Turso refresh.
+      database: describeDbTarget(),
       // Additive presentation signal (Phase 6): lets the public UI hide the
       // manual-refresh action when the backend requires an admin token.
       // Non-analytical; exposes only whether auth is required, never the token.
       refreshRequiresAuth: config.refreshAdminToken !== '',
-      latestRuns: await listFetchRuns(h, 5),
+      latestRuns,
       years: await getCachedAvailableYears(h),
       methodology: methodologyBlock(),
     });

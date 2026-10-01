@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatUtcDateTime, formatVintageDate, formatVintageMonth } from './format.js';
+import {
+  formatDurationMs,
+  formatDurationMsValue,
+  formatUtcDateTime,
+  formatUtcDateTimeSeconds,
+  formatVintageDate,
+  formatVintageMonth,
+} from './format.js';
 
 describe('vintage and retrieval formatters', () => {
   it('reduces an upstream vintage to month precision for the reference field', () => {
@@ -22,5 +29,20 @@ describe('vintage and retrieval formatters', () => {
     expect(formatUtcDateTime('2026-09-27T18:54:55.007Z')).toBe('27 September 2026, 18:54 UTC');
     expect(formatUtcDateTime('nope')).toBeNull();
     expect(formatUtcDateTime(null)).toBeNull();
+  });
+
+  it('renders refresh timestamps with UTC seconds, never browser-local', () => {
+    expect(formatUtcDateTimeSeconds('2026-10-01T13:17:02.000Z')).toBe('1 October 2026, 13:17:02 UTC');
+    expect(formatUtcDateTimeSeconds('2026-10-01T13:17:16.000Z')).toBe('1 October 2026, 13:17:16 UTC');
+    expect(formatUtcDateTimeSeconds('garbage')).toBeNull();
+    expect(formatUtcDateTimeSeconds(null)).toBeNull();
+  });
+
+  it('derives refresh duration from backend timestamps without fabricating time', () => {
+    expect(formatDurationMs('2026-10-01T13:17:02.000Z', '2026-10-01T13:17:16.000Z')).toBe('14.0 s');
+    expect(formatDurationMsValue(14000)).toBe('14.0 s');
+    expect(formatDurationMs('2026-10-01T13:17:02.000Z', null)).toBe('—');
+    expect(formatDurationMs(null, '2026-10-01T13:17:16.000Z')).toBe('—');
+    expect(formatDurationMsValue(-1)).toBe('—');
   });
 });
