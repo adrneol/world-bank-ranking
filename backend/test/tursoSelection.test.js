@@ -17,6 +17,13 @@ import test from 'node:test';
 
 // Missing-file probe target: must not exist.
 process.env.DATABASE_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wdi-probe-')), 'wb.db');
+// Hermetic DB-selection fixture: this file must observe "no Turso
+// configured" even when the developer's ambient backend/.env points at
+// production Turso. config.js loads .env at first import without overriding
+// preset variables and treats '' as unset, so clearing here — before any
+// dynamic import below — restores the intended precondition deterministically.
+process.env.TURSO_DATABASE_URL = '';
+process.env.DB_MODE = '';
 
 test('driver batchRun preserves statement order across chunks', async () => {
   const { createMemoryDb } = await import('../src/db/index.js');

@@ -63,15 +63,20 @@ function ageText(ageHours) {
   return `${(ageHours / 24).toFixed(1)} days ago`;
 }
 
-/** Human-readable database target from the safe backend diagnostic (never secrets). */
+/**
+ * Phase 8F: database target comes from the backend's safe logical label
+ * ("Turso (production)" / "Local SQLite" / "Local SQLite (production
+ * fallback)") — the public page never sees hostnames, URLs, or secrets.
+ * The legacy mode/file derivation stays as a fallback for mixed-version
+ * payloads during rolling deploys.
+ */
 function databaseLabel(database) {
   if (!database || typeof database !== 'object') return '—';
-  if (database.mode === 'turso') {
-    return database.host ? `● Turso (${database.host})` : '● Turso';
+  if (typeof database.label === 'string' && database.label.trim() !== '') {
+    return `● ${database.label}`;
   }
-  if (database.mode === 'local') {
-    return database.file ? `● Local SQLite (${database.file})` : '● Local SQLite';
-  }
+  if (database.mode === 'turso') return '● Turso (production)';
+  if (database.mode === 'local') return '● Local SQLite';
   return '—';
 }
 
@@ -81,6 +86,11 @@ export default function DataStatus({ onRefreshed }) {
   // Slow-first-load hint (R-02): independent of the fetch itself, so a hung
   // request still explains itself instead of spinning silently forever.
   const [slowLoad, setSlowLoad] = useState(false);
+  // Phase 8F: refresh-details disclosure is presentation only (never stored
+  // in the database). It opens automatically when a run starts so live
+  // progress is visible, and stays user-controlled otherwise.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const wasPollingRef = useRef(false);
   const { data, loading, error, retry } = useApi(
     (signal) => api.dataStatus({ signal, timeoutMs: STATUS_TIMEOUT_MS }),
     `datastatus:${pollToken}`,
@@ -123,6 +133,12 @@ export default function DataStatus({ onRefreshed }) {
   // flight (R-07): the POST resolves only when the whole refresh completes,
   // so gating on `inProgress` alone would show no progress until the end.
   const polling = inProgress || refreshState.running;
+  // Auto-open the details disclosure when a run starts (stays user-controlled
+  // afterwards; presentation only, never stored in the database).
+  useEffect(() => {
+    if (polling && !wasPollingRef.current) setDetailsOpen(true);
+    wasPollingRef.current = polling;
+  }, [polling]);
 
   // Phase 8E flicker fix: distinct loading concepts. `initialLoading` covers
   // only the very first fetch (no data yet). Once usable data exists it stays
@@ -442,71 +458,99 @@ export default function DataStatus({ onRefreshed }) {
               ) : (
                 <p>No refresh recorded yet.</p>
               )}
-              <p>
+              <p className="refresh-count">
                 Progress: {doneCount} / {activeKeys.length} indicators
               </p>
               <progress value={doneCount} max={Math.max(activeKeys.length, 1)}>
                 {doneCount} / {activeKeys.length}
               </progress>
-              {activeKeys.length > 0 ? (
-                <ul className="checklist">
-                  {activeKeys.map((metricKey) => {
-                    const step = activeStepByKey.get(metricKey);
-                    const label = labelOf(metricKey);
-                    if (step?.status === 'published') {
+              {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey)}</p> : null}
+              <details
+                className="refresh-details"
+                open={detailsOpen}
+                onToggle={(event) => setDetailsOpen(event.target.open)}
+              >
+                <summary>{detailsOpen ? 'Hide refresh details ▲' : 'Show refresh details ▼'}</summary>
+                {activeKeys.length > 0 ? (
+                  <ul className="checklist">
+                    {activeKeys.map((metricKey) => {
+                      const step = activeStepByKey.get(metricKey);
+                      const label = labelOf(metricKey);
+                      if (step?.status === 'published') {
+                        return (
+                          <li key={metricKey} className="step step-done">
+                            <span className="step-icon" aria-hidden="true">
+                              ✓
+                            </span>
+                            <span className="step-label">{label}</span>
+                            <span className="step-state">updated</span>
+                          </li>
+                        );
+                      }
+                      if (step?.status === 'unchanged') {
+                        return (
+                          <li key={metricKey} className="step step-done">
+                            <span className="step-icon" aria-hidden="true">
+                              ✓
+                            </span>
+                            <span className="step-label">{label}</span>
+                            <span className="step-state">up to date</span>
+                          </li>
+                        );
+                      }
+                      if (step?.status === 'failed') {
+                        return (
+                          <li key={metricKey} className="step step-failed">
+                            <span className="step-icon" aria-hidden="true">
+                              ✗
+                            </span>
+                            <span className="step-label">{label}</span>
+                            <span className="step-state">failed{step.error ? `: ${step.error}` : ''}</span>
+                          </li>
+                        );
+                      }
+                      if (polling && runningKey === metricKey) {
+                        return (
+                          <li key={metricKey} className="step step-active">
+                            <span className="step-icon" aria-hidden="true">
+                              →
+                            </span>
+                            <span className="step-label">{label}</span>
+                            <span className="step-state">refreshing</span>
+                          </li>
+                        );
+                      }
                       return (
-                        <li key={metricKey}>
-                          ✓ {label} — updated
+                        <li key={metricKey} className="step step-waiting">
+                          <span className="step-icon" aria-hidden="true">
+                            □
+                          </span>
+                          <span className="step-label">{label}</span>
+                          <span className="step-state">waiting</span>
                         </li>
                       );
-                    }
-                    if (step?.status === 'unchanged') {
-                      return (
-                        <li key={metricKey}>
-                          ✓ {label} — up to date
-                        </li>
-                      );
-                    }
-                    if (step?.status === 'failed') {
-                      return (
-                        <li key={metricKey}>
-                          ✗ {label} — failed{step.error ? `: ${step.error}` : ''}
-                        </li>
-                      );
-                    }
-                    if (polling && runningKey === metricKey) {
-                      return (
-                        <li key={metricKey}>
-                          → {label} — refreshing
-                        </li>
-                      );
-                    }
-                    return (
-                      <li key={metricKey}>
-                        □ {label} — waiting
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-              {!polling && (refreshTerminalLive || refreshTerminalPersisted) ? (
-                <dl className="facts facts-grid">
-                  <div>
-                    <dt>Started UTC</dt>
-                    <dd>{refreshStartedAt ? (formatUtcDateTimeSeconds(refreshStartedAt) ?? refreshStartedAt) : '—'}</dd>
-                  </div>
-                  <div>
-                    <dt>Completed UTC</dt>
-                    <dd>
-                      {refreshCompletedAt ? (formatUtcDateTimeSeconds(refreshCompletedAt) ?? refreshCompletedAt) : '—'}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Duration</dt>
-                    <dd>{refreshDurationText}</dd>
-                  </div>
-                </dl>
-              ) : null}
+                    })}
+                  </ul>
+                ) : null}
+                {!polling && (refreshTerminalLive || refreshTerminalPersisted) ? (
+                  <dl className="facts facts-grid refresh-times">
+                    <div>
+                      <dt>Started UTC</dt>
+                      <dd>{refreshStartedAt ? (formatUtcDateTimeSeconds(refreshStartedAt) ?? refreshStartedAt) : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>Completed UTC</dt>
+                      <dd>
+                        {refreshCompletedAt ? (formatUtcDateTimeSeconds(refreshCompletedAt) ?? refreshCompletedAt) : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Duration</dt>
+                      <dd>{refreshDurationText}</dd>
+                    </div>
+                  </dl>
+                ) : null}
+              </details>
             </div>
           ) : null}
           {refreshState.error ? (

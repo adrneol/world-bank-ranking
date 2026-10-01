@@ -84,9 +84,16 @@ describe('refresh progress checklist', () => {
     expect(container.textContent).toContain('Refresh in progress');
     expect(container.textContent).toContain('Started: 1 October 2026, 13:17:02 UTC');
     expect(container.textContent).toContain('Progress: 1 / 3 indicators');
-    expect(container.textContent).toContain('✓ Label nominal_current — up to date');
-    expect(container.textContent).toContain('→ Label nominal_constant — refreshing');
-    expect(container.textContent).toContain('□ Label fdi_inflows — waiting');
+    expect(container.textContent).toContain('Current: Label nominal_constant');
+    expect(container.textContent).toContain('Label nominal_current');
+    expect(container.textContent).toContain('up to date');
+    expect(container.textContent).toContain('refreshing');
+    expect(container.textContent).toContain('waiting');
+    expect(container.querySelectorAll('.step-done')).toHaveLength(1);
+    expect(container.querySelectorAll('.step-active')).toHaveLength(1);
+    expect(container.querySelectorAll('.step-waiting')).toHaveLength(1);
+    // Live runs auto-open the details disclosure.
+    expect(container.querySelector('details.refresh-details').open).toBe(true);
     expect(container.querySelector('progress').getAttribute('value')).toBe('1');
     expect(container.querySelector('progress').getAttribute('max')).toBe('3');
     cleanup();
@@ -110,8 +117,11 @@ describe('refresh progress checklist', () => {
     ]);
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
-    expect(container.textContent).toContain('✓ Label nominal_current — updated');
-    expect(container.textContent).toContain('✓ Label nominal_constant — up to date');
+    expect(container.textContent).toContain('Label nominal_current');
+    expect(container.textContent).toContain('updated');
+    expect(container.textContent).toContain('Label nominal_constant');
+    expect(container.textContent).toContain('up to date');
+    expect(container.querySelectorAll('.step-done')).toHaveLength(2);
     cleanup();
   });
 
@@ -137,10 +147,39 @@ describe('refresh progress checklist', () => {
     ]);
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
-    expect(container.textContent).toContain('✗ Label nominal_constant — failed: boom');
-    expect(container.textContent).toContain('□ Label fdi_inflows — waiting');
+    expect(container.textContent).toContain('Label nominal_constant');
+    expect(container.textContent).toContain('failed: boom');
+    expect(container.textContent).toContain('waiting');
+    expect(container.querySelectorAll('.step-failed')).toHaveLength(1);
     expect(container.textContent).toContain('rolled back — the previous valid dataset remains available');
     expect(container.textContent).toContain('Recent refresh runs (1)');
+    cleanup();
+  });
+
+  it('collapses terminal details by default and expands on demand', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          progress: { stage: 'complete', metricKeys: KEYS, steps: KEYS.map((k) => step(k, 'unchanged')), summary: { status: 'success' } },
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    const details = container.querySelector('details.refresh-details');
+    expect(details.open).toBe(false);
+    expect(container.textContent).toContain('Show refresh details');
+    expect(container.textContent).toContain('Last refresh completed successfully');
+    expect(container.textContent).toContain('Progress: 3 / 3 indicators');
+    // Disclosure is presentation only: expanding reveals all indicators.
+    await act(async () => {
+      details.querySelector('summary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    });
+    await flushReact(act);
+    expect(container.querySelectorAll('.step-done')).toHaveLength(3);
     cleanup();
   });
 
@@ -197,7 +236,9 @@ describe('refresh progress checklist', () => {
     expect(plain.container.textContent).toContain('Started UTC');
     expect(plain.container.textContent).toContain('1 October 2026, 13:17:02 UTC');
     expect(plain.container.textContent).toContain('1 October 2026, 13:17:16 UTC');
-    expect(plain.container.textContent).toContain('✓ Label nominal_current — up to date');
+    expect(plain.container.textContent).toContain('Label nominal_current');
+    expect(plain.container.textContent).toContain('up to date');
+    expect(plain.container.querySelectorAll('.step-done')).toHaveLength(3);
     plain.cleanup();
   });
 
@@ -269,7 +310,8 @@ describe('refresh progress checklist', () => {
     // Poll in flight + POST in flight: previous content stays mounted (the
     // same section transitions to in-progress instead of blanking).
     expect(container.textContent).toContain('Refresh in progress');
-    expect(container.textContent).toContain('✓ Label nominal_current — up to date');
+    expect(container.textContent).toContain('Label nominal_current');
+    expect(container.textContent).toContain('up to date');
     expect(container.textContent).toContain('Updating…');
     expect(container.textContent).not.toContain('Loading data status');
     releaseRefreshPost?.();
@@ -288,7 +330,7 @@ describe('refresh progress checklist', () => {
           ...BASE,
           inProgress: false,
           progress: null,
-          database: { mode: 'local', file: 'backend/data/worldbank.db' },
+          database: { provider: 'sqlite', context: 'local', label: 'Local SQLite', fallback: false },
           lastRefresh: null,
           latestRuns: [
             {
@@ -318,5 +360,27 @@ describe('refresh progress checklist', () => {
     // No browser-local timestamp rendering anywhere in the section.
     expect(container.innerHTML).not.toContain('toLocaleString');
     cleanup();
+  });
+
+  it('shows safe production labels without hostnames for every target state', async () => {
+    const cases = [
+      [{ provider: 'turso', context: 'production', label: 'Turso (production)', fallback: false }, '● Turso (production)'],
+      [{ provider: 'sqlite', context: 'local', label: 'Local SQLite', fallback: false }, '● Local SQLite'],
+      [
+        { provider: 'sqlite', context: 'production-fallback', label: 'Local SQLite (production fallback)', fallback: true },
+        '● Local SQLite (production fallback)',
+      ],
+    ];
+    for (const [database, expected] of cases) {
+      stub = stubFetch([['/api/data-status', { ...BASE, database }]]);
+      const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+      await flushReact(act);
+      expect(container.textContent).toContain(expected);
+      expect(container.innerHTML).not.toContain('turso.io');
+      cleanup();
+      document.body.innerHTML = '';
+      stub.restore();
+      stub = null;
+    }
   });
 });

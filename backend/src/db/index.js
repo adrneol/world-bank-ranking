@@ -171,6 +171,23 @@ export function getDbDescriptor() {
   return dbDescriptor;
 }
 
+/**
+ * Phase 8F: create a FRESH primary (Turso) handle for recovery probing.
+ * Unlike getDb() it never returns a cached handle: each probe gets its own
+ * client so a poisoned/unreachable previous client cannot mask recovery.
+ * Throws when the configured backend is not Turso. The caller owns the
+ * handle (close it when the probe fails; keep it when the probe promotes).
+ */
+export function createPrimaryHandle() {
+  if (resolveDbMode() !== 'turso') {
+    throw new Error('Recovery probe requires a Turso-configured primary (DB_MODE=turso).');
+  }
+  if (config.tursoDatabaseUrl === '') {
+    throw new Error('Recovery probe requires TURSO_DATABASE_URL to be set.');
+  }
+  return createClient({ url: config.tursoDatabaseUrl, authToken: config.tursoAuthToken || undefined });
+}
+
 /** Lightweight reachability check (used at boot for fallback decisions). */
 export async function pingDatabase(handle) {
   await handle.execute('SELECT 1;');

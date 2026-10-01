@@ -116,7 +116,12 @@ test('parseProgressSummary rejects missing/corrupt values without throwing', asy
 
 test('data-status exposes database target, lastRefresh and enriched history', async () => {
   const db = await seedDb();
-  const { createApp } = await import('../src/server.js');
+  const { createApp, setActiveDbInfo, getActiveDbInfo } = await import('../src/server.js');
+  // Deterministic target regardless of ambient backend/.env (which may point
+  // at production Turso): the seam mirrors what boot() records for a local
+  // development handle.
+  const previousTarget = getActiveDbInfo();
+  setActiveDbInfo({ provider: 'sqlite', isFallback: false, isDegraded: false, isProduction: false });
   const app = createApp({ db, autoRefresh: false });
   let server = null;
   try {
@@ -127,9 +132,12 @@ test('data-status exposes database target, lastRefresh and enriched history', as
     const res = await fetch(`${base}/api/data-status`);
     assert.equal(res.status, 200);
     const body = await res.json();
-    // Safe database target: provider + host/file only, never secrets.
-    assert.ok(body.database && (body.database.mode === 'local' || body.database.mode === 'turso'));
-    const serialized = JSON.stringify(body.database);
+    // Safe PUBLIC database target: logical label only, never host/secrets.
+    assert.equal(body.database?.provider, 'sqlite');
+    assert.equal(body.database?.label, 'Local SQLite');
+    assert.equal(body.database?.fallback, false);
+    const serialized = JSON.stringify(body);
+    assert.ok(!/turso\.io/i.test(serialized), 'no Turso hostname on the public payload');
     assert.ok(!/token/i.test(serialized), 'no token in database descriptor');
     assert.ok(!/secret|credential|password/i.test(serialized), 'no secrets in database descriptor');
     // Persisted last refresh with UTC ISO timestamps + duration.
@@ -147,6 +155,7 @@ test('data-status exposes database target, lastRefresh and enriched history', as
     assert.ok('rows_retrieved' in run && 'rows_upserted' in run && 'rows_skipped_unchanged' in run);
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
+    setActiveDbInfo(previousTarget);
     db.close();
   }
 });

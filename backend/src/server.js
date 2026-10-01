@@ -32,7 +32,7 @@ import config, {
   getMetric,
   getSubject,
 } from './config.js';
-import { closeDb, describeDbTarget, getDb, initDatabase, openExistingLocalDb, pingDatabase } from './db/index.js';
+import { closeDb, createPrimaryHandle, describeDbTarget, getDb, initDatabase, openExistingLocalDb, pingDatabase, resolveDbMode } from './db/index.js';
 import {
   computeDatasetState,
   countAggregateCountries,
@@ -146,6 +146,192 @@ const AUTO_REFRESH_PATHS = Object.freeze([
   '/api/movement/population',
   '/api/population/country-groups',
 ]);
+
+/**
+ * Phase 8F — ACTIVE database target (not merely configured).
+ *
+ * The process serves exactly one handle chosen at boot (primary, guarded
+ * fallback, or degraded). `activeDbInfo` records WHICH ONE so the Status UI
+ * can never display "Turso (production)" while actually serving fallback
+ * SQLite. Boot sets it; primary recovery updates it on promotion. Tests may
+ * set it via setActiveDbInfo() (documented seam; production paths own it).
+ */
+function defaultActiveDbInfo() {
+  return {
+    provider: resolveDbMode() === 'turso' ? 'turso' : 'sqlite',
+    isFallback: false,
+    isDegraded: false,
+    isProduction: process.env.NODE_ENV === 'production',
+  };
+}
+let activeDbInfo = defaultActiveDbInfo();
+export function getActiveDbInfo() {
+  return { ...activeDbInfo };
+}
+/** Test/ops seam: replace the active-target record (never a database write). */
+export function setActiveDbInfo(info) {
+  activeDbInfo = { ...defaultActiveDbInfo(), ...(info ?? {}) };
+}
+
+/**
+ * Phase 8F — PUBLIC database descriptor for GET /api/data-status.
+ * Safe logical target ONLY: provider + context + display label. Never the
+ * Turso hostname/URL, never tokens or credentials (those stay in server logs
+ * via describeDbTarget(), never in API responses).
+ */
+export function publicDatabaseTarget(info = activeDbInfo) {
+  const production = info?.isProduction ?? process.env.NODE_ENV === 'production';
+  if (info?.provider === 'turso') {
+    return {
+      provider: 'turso',
+      context: production ? 'production' : 'development',
+      label: production ? 'Turso (production)' : 'Turso',
+      fallback: false,
+    };
+  }
+  if (info?.isFallback) {
+    return {
+      provider: 'sqlite',
+      context: 'production-fallback',
+      label: 'Local SQLite (production fallback)',
+      fallback: true,
+    };
+  }
+  return {
+    provider: 'sqlite',
+    context: production ? 'production' : 'local',
+    label: 'Local SQLite',
+    fallback: false,
+  };
+}
+
+/**
+ * Phase 8F — guarded primary (Turso) recovery / switch-back.
+ *
+ * Current architecture (see boot()): the active handle is chosen once at boot
+ * and stays until restart — there is NO live re-probe. This helper adds the
+ * smallest safe promotion path WITHOUT hot-swapping under load:
+ *
+ *   - only when a guarded fallback is actually active (primary configured as
+ *     Turso, currently serving fallback SQLite, not degraded);
+ *   - at most one probe per RECOVERY_REPROBE_MS (default 15 min; tests via
+ *     WB_RECOVERY_REPROBE_MS) so hot request paths never storm the primary;
+ *   - never while a refresh is in progress and never while the fallback lock
+ *     is held (an in-flight refresh keeps its captured handle to completion);
+ *   - the candidate primary is revalidated (ping + non-empty dataset) before
+ *     promotion; an empty or unreachable primary keeps fallback serving;
+ *   - promotion swaps ONLY the future-handle cell (single-threaded assignment:
+ *     in-flight requests keep their captured reference); the previous fallback
+ *     handle is deliberately left open (never closed under live readers).
+ *
+ * Degraded mode (no usable fallback) intentionally has no automatic recovery
+ * here: with no valid dataset to serve, recovery follows a restart. Callers:
+ * the TTL middleware (fire-and-forget) and POST /api/data/refresh (awaited,
+ * bounded by the probe timeout) so a recovered primary is picked up without
+ * a new endpoint and without per-poll work (data-status itself never probes).
+ */
+export function recoveryReprobeMs() {
+  const raw = process.env.WB_RECOVERY_REPROBE_MS;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    const n = Number(String(raw).trim());
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 15 * 60 * 1000;
+}
+export function recoveryProbeTimeoutMs() {
+  const raw = process.env.WB_RECOVERY_PROBE_TIMEOUT_MS;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    const n = Number(String(raw).trim());
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 10 * 1000;
+}
+let lastRecoveryProbeAt = 0;
+const withProbeTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`Recovery probe timed out: ${label}`)), ms);
+    }),
+  ]);
+async function defaultProbePrimary(timeoutMs) {
+  const handle = createPrimaryHandle();
+  try {
+    await withProbeTimeout(pingDatabase(handle), timeoutMs, 'ping');
+    const state = await withProbeTimeout(getDatasetState(handle), timeoutMs, 'dataset_state');
+    const count = state
+      ? state.observationCount
+      : await withProbeTimeout(countObservations(handle), timeoutMs, 'count');
+    if (!Number.isFinite(count) || count <= 0) {
+      try {
+        await handle.close?.();
+      } catch {
+        // Best effort.
+      }
+      return null;
+    }
+    return handle;
+  } catch {
+    try {
+      await handle.close?.();
+    } catch {
+      // Best effort.
+    }
+    return null;
+  }
+}
+export async function maybeRecoverPrimary(shared, { onWarn = null, createProbe = null, configuredMode = null } = {}) {
+  if (!shared?.isFallback || shared?.isDegraded) {
+    return { recovered: false, reason: 'not-fallback' };
+  }
+  // Test seam: production always resolves the real configured mode.
+  const mode = configuredMode ?? resolveDbMode();
+  if (mode !== 'turso') {
+    return { recovered: false, reason: 'primary-not-turso' };
+  }
+  if (Date.now() - lastRecoveryProbeAt < recoveryReprobeMs()) {
+    return { recovered: false, reason: 'cooldown' };
+  }
+  lastRecoveryProbeAt = Date.now();
+  if (isRefreshInProgress()) {
+    onWarn?.({ message: 'Primary recovery deferred: a refresh is in progress.' });
+    return { recovered: false, reason: 'refresh-in-progress' };
+  }
+  try {
+    const lock = await withProbeTimeout(
+      getRefreshLockState(shared.current),
+      recoveryProbeTimeoutMs(),
+      'fallback-lock',
+    );
+    if (lock?.locked) {
+      onWarn?.({ message: 'Primary recovery deferred: fallback refresh lock is held.' });
+      return { recovered: false, reason: 'lock-held' };
+    }
+  } catch {
+    onWarn?.({ message: 'Primary recovery deferred: fallback lock unreadable.' });
+    return { recovered: false, reason: 'lock-unreadable' };
+  }
+  const probe = createProbe ?? defaultProbePrimary;
+  let candidate = null;
+  try {
+    candidate = await probe(recoveryProbeTimeoutMs());
+  } catch {
+    candidate = null;
+  }
+  if (!candidate) {
+    onWarn?.({ message: 'Primary still unavailable; staying on fallback.' });
+    return { recovered: false, reason: 'primary-unavailable' };
+  }
+  // Promote: future handle() calls serve the revalidated primary. In-flight
+  // work keeps its captured fallback reference to completion. Memos are
+  // content-keyed (run/content-version) so the new generation simply misses
+  // once and re-derives — no invalidation storm, no extra scan scheduled here.
+  shared.current = candidate;
+  shared.isFallback = false;
+  setActiveDbInfo({ provider: 'turso', isFallback: false, isDegraded: false });
+  console.log('Primary database recovered; promoted back to Turso (production).');
+  return { recovered: true, reason: 'promoted' };
+}
 
 /** Shared methodology block for auditability (§20). */
 export function methodologyBlock() {
@@ -358,9 +544,12 @@ function corsOptions() {
   };
 }
 
-export function createApp({ db = null, autoRefresh = null } = {}) {
+export function createApp({ db = null, autoRefresh = null, shared = null } = {}) {
   const app = express();
-  const handle = () => db ?? getDb();
+  // Phase 8F: when boot passes a shared handle cell, all requests resolve
+  // through it so a guarded primary recovery can promote future traffic
+  // without restarting. Plain { db } keeps working exactly as before.
+  const handle = shared ? () => shared.current ?? getDb() : () => db ?? getDb();
   // Test seam: server.test.js and ttlRefresh.test.js control this explicitly.
   // Production default follows WB_AUTO_REFRESH_ON_STALE (default true).
   const autoRefreshEnabled = autoRefresh ?? config.autoRefreshOnStale;
@@ -379,6 +568,14 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       (async () => {
         try {
           if (req.method === 'GET' && AUTO_REFRESH_PATHS.includes(req.path)) {
+            // Phase 8F: while serving fallback, opportunistically re-probe the
+            // primary (cooldown-gated inside maybeRecoverPrimary: no storm, no
+            // per-request work beyond a timestamp check when cooling down).
+            if (shared?.isFallback) {
+              maybeRecoverPrimary(shared, {
+                onWarn: (w) => console.warn(`Primary recovery: ${w.message}`),
+              }).catch(() => {});
+            }
             const decision = await maybeAutoRefresh(handle(), {
               onWarn: (w) => console.warn(`Auto-refresh: ${w.message}`),
             });
@@ -1366,9 +1563,12 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       const ms = new Date(end).getTime() - new Date(run.started_at).getTime();
       return Number.isFinite(ms) && ms >= 0 ? ms : null;
     };
+    // Phase 8F: the visible history payload is EXACTLY the latest 5 runs.
+    // Historical fetch_runs rows stay in the database; only this payload is
+    // limited. lastRefresh above is the persisted terminal summary (separate).
     let latestRuns = [];
     try {
-      const rows = await listFetchRuns(h, 10);
+      const rows = await listFetchRuns(h, 5);
       latestRuns = rows.map((run) => {
         const summary = parseProgressSummary(run?.progress_summary);
         return {
@@ -1418,10 +1618,10 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
         enabled: autoRefreshEnabled,
         ttlHours: cache.ttlHours,
       },
-      // Phase 8E: safe database-target diagnostic (provider + host/file only;
-      // never tokens, secrets, or credentials) so a local refresh can never
-      // be confused with a production Turso refresh.
-      database: describeDbTarget(),
+      // Phase 8F: safe PUBLIC database target (logical label only — never the
+      // Turso hostname/URL, tokens, or credentials) reflecting the ACTUAL
+      // active handle, so fallback SQLite is never misreported as Turso.
+      database: publicDatabaseTarget(),
       // Additive presentation signal (Phase 6): lets the public UI hide the
       // manual-refresh action when the backend requires an admin token.
       // Non-analytical; exposes only whether auth is required, never the token.
@@ -1475,6 +1675,19 @@ export function createApp({ db = null, autoRefresh = null } = {}) {
       indicators = body.indicators.map((k) => parseMetric(k));
     }
     try {
+      // Phase 8F: a manual refresh while serving fallback first gives the
+      // recovered primary a bounded chance to take over (revalidated before
+      // promotion), so production writes land on Turso again — never silently
+      // on fallback SQLite. Failure to recover simply refreshes fallback.
+      if (shared?.isFallback) {
+        try {
+          await maybeRecoverPrimary(shared, {
+            onWarn: (w) => console.warn(`Primary recovery: ${w.message}`),
+          });
+        } catch {
+          // Recovery is best-effort; the refresh below proceeds regardless.
+        }
+      }
       const summary = await refreshData({
         ...(startYear !== undefined ? { startYear } : {}),
         ...(endYear !== undefined ? { endYear } : {}),
@@ -1543,6 +1756,8 @@ async function boot() {
 
   let db = null;
   let degraded = false;
+  let isFallback = false;
+  const isProduction = process.env.NODE_ENV === 'production';
   // Phase 7B: derived dataset metadata (1 row) once the handle exists, so
   // boot decisions below never scan the observations table on a warm
   // database. Null = unknown (legacy database): legacy scans apply once,
@@ -1561,6 +1776,13 @@ async function boot() {
           : 'Turso database reachable but empty; startup ingestion will seed it.',
       );
     }
+    // Phase 8F: record the ACTUAL active handle for the public Status UI.
+    setActiveDbInfo({
+      provider: target.mode === 'turso' ? 'turso' : 'sqlite',
+      isFallback: false,
+      isDegraded: false,
+      isProduction,
+    });
   } catch (error) {
     const fallback = config.allowLocalDbFallback ? await openExistingLocalDb() : null;
     if (fallback) {
@@ -1568,6 +1790,8 @@ async function boot() {
         `Primary database (${target.mode}) unreachable (${error.message}); serving from the existing local database instead. This fallback hides a persistent-database outage — investigate promptly.`,
       );
       db = fallback.handle;
+      isFallback = true;
+      setActiveDbInfo({ provider: 'sqlite', isFallback: true, isDegraded: false, isProduction });
     } else if (process.env.NODE_ENV === 'production') {
       console.error(
         `Primary database (${target.mode}) unreachable and no usable local database exists (${error.message}). Serving DEGRADED with an empty dataset and no automatic seeding; POST /api/data/refresh once the database recovers.`,
@@ -1579,6 +1803,12 @@ async function boot() {
       } catch {
         // Degraded means best-effort; request paths already tolerate an empty store.
       }
+      setActiveDbInfo({
+        provider: target.mode === 'turso' ? 'turso' : 'sqlite',
+        isFallback: false,
+        isDegraded: true,
+        isProduction,
+      });
     } else {
       throw error;
     }
@@ -1609,7 +1839,10 @@ async function boot() {
   // first dataset is still being prepared, never block listen() on a
   // multi-minute ingest. /api/years reports DATA_LOADING (503) while the
   // seed runs; every other endpoint keeps its existing behavior.
-  const app = createApp({ db });
+  // Phase 8F: the shared handle cell lets a guarded primary recovery promote
+  // future traffic without restarting (in-flight work keeps its reference).
+  const shared = { current: db, isFallback, isDegraded: degraded };
+  const app = createApp({ shared });
   const server = app.listen(config.port, () => {
     console.log(`World Bank India GDP ranking backend listening on port ${config.port}`);
     console.log(`  Health: http://localhost:${config.port}/api/health`);
