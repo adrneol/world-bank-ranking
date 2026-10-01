@@ -95,6 +95,40 @@ describe('data-status cold start', () => {
     cleanup();
   });
 
+  it('503 DATA_SERVICE_STARTING shows "starting" and recovers when ready', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        () => {
+          calls += 1;
+          if (calls === 1) {
+            return {
+              ok: false,
+              status: 503,
+              headers: new Headers(),
+              json: async () => ({ error: { message: 'Data service is starting.', code: 'DATA_SERVICE_STARTING' } }),
+            };
+          }
+          return okResponse();
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    // Listen-first readiness is a normal delay, never a red failure.
+    expect(container.textContent).toContain('Starting the data service');
+    expect(container.textContent).not.toContain('Could not load data status');
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await flushReact(act);
+    expect(container.textContent).toContain('228776 observations stored');
+    expect(calls).toBe(2);
+    cleanup();
+  });
+
   it('genuine HTTP errors render red immediately (backend answered)', async () => {
     vi.useFakeTimers();
     stub = stubFetch([

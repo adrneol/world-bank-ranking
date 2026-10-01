@@ -333,6 +333,48 @@ export async function maybeRecoverPrimary(shared, { onWarn = null, createProbe =
   return { recovered: true, reason: 'promoted' };
 }
 
+/**
+ * Phase 8G — service readiness (liveness vs readiness).
+ *
+ * LIVENESS ("the process is alive") is answered by /api/health from the
+ * moment listen() succeeds. READINESS ("ready to serve normal application
+ * requests") is granted only after database/data initialization completes.
+ * boot() listens FIRST, then initializes, then marks ready — so a cold
+ * start serves an explicit machine-readable 503 DATA_SERVICE_STARTING
+ * instead of connection-refused. The check is a process-state flag: zero
+ * database work, zero scans, never a write.
+ */
+// Default is READY: test-constructed apps via createApp() (no boot()) serve
+// normally. The real boot() explicitly marks starting before listen() so the
+// gate is active exactly while initialization runs.
+let serviceReadiness = {
+  ready: true,
+  state: 'ready',
+  message: 'Data service is ready.',
+};
+export function getServiceReadiness() {
+  return { ...serviceReadiness };
+}
+/** Test seam: drive the readiness gate without booting (never a DB write). */
+export function setServiceReadiness(info) {
+  serviceReadiness = {
+    ready: false,
+    state: 'starting',
+    message: 'Data service is starting. It will be ready shortly.',
+    ...(info ?? {}),
+  };
+}
+export function markServiceReady(state = 'ready') {
+  serviceReadiness = {
+    ready: true,
+    state,
+    message:
+      state === 'degraded'
+        ? 'Data service is serving in degraded mode (empty dataset, no automatic seeding).'
+        : 'Data service is ready.',
+  };
+}
+
 /** Shared methodology block for auditability (§20). */
 export function methodologyBlock() {
   return {
@@ -558,6 +600,26 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   app.use(cors(corsOptions()));
   app.use(express.json({ limit: '64kb' }));
 
+  // ---------- readiness gate (Phase 8G) ----------
+  // Before initialization completes, every /api route EXCEPT /api/health
+  // answers 503 DATA_SERVICE_STARTING (liveness stays 200 so orchestrators
+  // and the frontend can distinguish "starting" from "dead"). Pure
+  // process-state check: no database work, no scans, no writes. Placed
+  // before the TTL middleware so nothing auto-triggers pre-ready.
+  app.use((req, res, next) => {
+    if (getServiceReadiness().ready) return next();
+    if (req.path === '/api/health') return next();
+    if (!req.path.startsWith('/api/')) return next();
+    res.status(503).json({
+      error: {
+        message: 'Data service is starting. It will be ready shortly.',
+        code: 'DATA_SERVICE_STARTING',
+      },
+      ready: false,
+      state: getServiceReadiness().state,
+    });
+  });
+
   // ---------- automatic TTL refresh ----------
   // Fire-and-forget: when the cache is empty or stale, a background refresh
   // starts WITHOUT awaiting it, so the current request keeps serving the
@@ -590,12 +652,19 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }
 
   // ---------- health ----------
-  // Never exposes the server filesystem path, environment values, or secrets.
+  // Liveness probe: always answers once listen() succeeds, even while
+  // initialization continues. The additive ready/state fields distinguish
+  // "alive but starting" from "ready" without changing the historical
+  // status/time/database/methodology contract. Never exposes the server
+  // filesystem path, environment values, or secrets.
   app.get('/api/health', (req, res) => {
+    const readiness = getServiceReadiness();
     res.json({
       status: 'ok',
       time: new Date().toISOString(),
       database: 'ok',
+      ready: readiness.ready,
+      state: readiness.state,
       methodology: methodologyBlock(),
     });
   });
@@ -1754,6 +1823,21 @@ async function boot() {
       (target.mode === 'turso' ? ` (${target.host ?? 'unknown host'})` : ` (${target.file})`),
   );
 
+  // Phase 8G: HTTP-reachable BEFORE initialization. listen() succeeds while
+  // the database/data work below still runs; /api/health answers liveness
+  // immediately and every other /api route serves the explicit 503
+  // DATA_SERVICE_STARTING until markServiceReady() below. Readiness is a
+  // process flag, so this reordering adds zero database work.
+  // Phase 8F: the shared handle cell lets a guarded primary recovery promote
+  // future traffic without restarting (in-flight work keeps its reference).
+  setServiceReadiness({ ready: false, state: 'starting', message: 'Data service is starting. It will be ready shortly.' });
+  const shared = { current: null, isFallback: false, isDegraded: false };
+  const app = createApp({ shared });
+  const server = app.listen(config.port, () => {
+    console.log(`World Bank India GDP ranking backend listening on port ${config.port}`);
+    console.log(`  Health: http://localhost:${config.port}/api/health`);
+  });
+
   let db = null;
   let degraded = false;
   let isFallback = false;
@@ -1810,9 +1894,24 @@ async function boot() {
         isProduction,
       });
     } else {
+      // Phase 8G: the HTTP server above already listens. Record the failed
+      // state (in case anything observes before exit), close the listener,
+      // then fail exactly as before (development fast-fail on init errors).
+      setServiceReadiness({ ready: false, state: 'failed', message: `Data service failed to start: ${error.message}` });
+      try {
+        await new Promise((resolve) => server.close(resolve));
+      } catch {
+        // Best effort; the process exits below regardless.
+      }
       throw error;
     }
   }
+  // Publish the initialized handle (and fallback/degraded flags) to future
+  // requests now that boot selection completed. Requests served before this
+  // line received 503 DATA_SERVICE_STARTING; in-flight ones keep going.
+  shared.current = db;
+  shared.isFallback = isFallback;
+  shared.isDegraded = degraded;
   // A fallback handle may carry its own derived row; re-read so the boot
   // decisions below use it instead of scanning.
   if (!datasetState && db && !degraded) {
@@ -1834,19 +1933,10 @@ async function boot() {
     console.warn(`Refresh-lock recovery skipped: ${error.message}`);
   }
 
-  // Accept traffic (especially /api/health) BEFORE any potentially slow
-  // data work: on a cold host the service must answer readiness while the
-  // first dataset is still being prepared, never block listen() on a
-  // multi-minute ingest. /api/years reports DATA_LOADING (503) while the
-  // seed runs; every other endpoint keeps its existing behavior.
-  // Phase 8F: the shared handle cell lets a guarded primary recovery promote
-  // future traffic without restarting (in-flight work keeps its reference).
-  const shared = { current: db, isFallback, isDegraded: degraded };
-  const app = createApp({ shared });
-  const server = app.listen(config.port, () => {
-    console.log(`World Bank India GDP ranking backend listening on port ${config.port}`);
-    console.log(`  Health: http://localhost:${config.port}/api/health`);
-  });
+  // Initialization complete: further /api traffic serves normally. Seeding of
+  // an empty database and stale-cache refresh below stay background work —
+  // /api/years reports DATA_LOADING (503) while the first seed runs.
+  markServiceReady(degraded ? 'degraded' : 'ready');
 
   // First-run behavior: ingest on empty when enabled — now in the
   // background, after listen(), so startup never blocks availability.

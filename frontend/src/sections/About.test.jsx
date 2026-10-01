@@ -95,4 +95,42 @@ describe('About page', () => {
     expect(container.textContent).toContain('Contact details have not been published');
     cleanup();
   });
+
+  it('offers a closed-by-default resilience disclosure without technical details', async () => {
+    stub = stubFetch([['/api/data-status', VINTAGE_STATUS]]);
+    const { container, cleanup } = renderAbout(siteMetadata({}));
+    await flushReact(act);
+    expect(container.textContent).toContain('How the site stays available');
+    const details = container.querySelector('#about-resilience');
+    expect(details?.tagName).toBe('DETAILS');
+    expect(details.open).toBe(false);
+    expect(container.textContent).toContain('locally kept backup copy');
+    // Disclosure content stays non-technical: no hosts, secrets, or code.
+    const sectionHtml = details.innerHTML;
+    expect(sectionHtml).not.toMatch(/turso\.io|libsql|sqlite|SELECT|fetch_runs|token|database file|\.db|O10|O7|transaction|render/i);
+    expect(sectionHtml).not.toMatch(/never crash|100%|zero downtime|guarantee/i);
+    // Expanding reveals the full reassurance copy.
+    await act(async () => {
+      details.querySelector('summary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    });
+    await flushReact(act);
+    expect(container.textContent).toContain('does not mean the site is stuck with old data');
+    expect(container.textContent).toContain('Status page');
+    expect(container.textContent).toContain('Keeping the data current');
+    expect(container.textContent).toContain('both when serving analysis');
+    expect(container.textContent).toContain('has not changed is left alone');
+    expect(container.textContent).toContain('only what needs updating is processed');
+    expect(container.textContent).toContain('handling refreshes efficiently');
+    expect(container.textContent).toContain('Returning to the primary service');
+    // Placement: resilience is the last section, below Contact, visually separate.
+    const contact = container.querySelector('#about-contact');
+    expect(contact).not.toBeNull();
+    expect(contact.textContent).toContain('Contact details have not been published');
+    expect(
+      contact.compareDocumentPosition(details) & window.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Single clean disclosure: no nested dropdown inside.
+    expect(details.querySelectorAll('details')).toHaveLength(0);
+    cleanup();
+  });
 });

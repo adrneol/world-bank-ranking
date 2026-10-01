@@ -56,6 +56,16 @@ function isConnectivityError(error) {
   return Boolean(error) && !error.status && (error.code === 'NETWORK_ERROR' || error.code === 'TIMEOUT');
 }
 
+/**
+ * Phase 8G: the backend answers liveness but is still initializing
+ * (HTTP 503 DATA_SERVICE_STARTING). Like a refused connection this is a
+ * normal readiness delay — never a red failure — so it shares the neutral
+ * "starting" presentation and the controlled auto-retry window.
+ */
+function isBackendStarting(error) {
+  return Boolean(error) && error.status === 503 && error.code === 'DATA_SERVICE_STARTING';
+}
+
 function ageText(ageHours) {
   if (ageHours === null || ageHours === undefined) return 'unknown';
   if (ageHours < 1) return `${Math.round(ageHours * 60)} min ago`;
@@ -103,7 +113,9 @@ export default function DataStatus({ onRefreshed }) {
   const connectAttemptsRef = useRef(0);
   const [connectExpired, setConnectExpired] = useState(false);
   const connectivityFailure = isConnectivityError(error);
-  const showStarting = Boolean(connectivityFailure && !connectExpired);
+  const backendStarting = isBackendStarting(error);
+  const startingFailure = Boolean(connectivityFailure || backendStarting);
+  const showStarting = Boolean(startingFailure && !connectExpired);
 
   const resetConnectRetry = () => {
     connectStartRef.current = null;
@@ -245,13 +257,14 @@ export default function DataStatus({ onRefreshed }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [polling, pollToken]);
 
-  // Cold-start auto-retry: while the backend never answers (Render waking),
-  // retry on a controlled backoff inside CONNECT_RETRY_WINDOW_MS. The timer
-  // belongs to this effect only (single outstanding retry); success, polling
-  // bumps and unmount clear it via cleanup. Past the window, mark expired so
-  // the explicit red error renders instead of retrying forever.
+  // Cold-start auto-retry: while the backend never answers (Render waking)
+  // or answers "still starting" (listen-first readiness), retry on a
+  // controlled backoff inside CONNECT_RETRY_WINDOW_MS. The timer belongs to
+  // this effect only (single outstanding retry); success, polling bumps and
+  // unmount clear it via cleanup. Past the window, mark expired so the
+  // explicit red error renders instead of retrying forever.
   useEffect(() => {
-    if (!connectivityFailure || data) {
+    if (!startingFailure || data) {
       if (data) resetConnectRetry();
       return undefined;
     }
@@ -270,7 +283,7 @@ export default function DataStatus({ onRefreshed }) {
     return () => clearTimeout(timer);
     // retry is stable (useCallback []); error identity changes per attempt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectivityFailure, error, data, pollToken]);
+  }, [startingFailure, error, data, pollToken]);
 
   async function startRefresh() {
     if (refreshState.running) return;
@@ -343,8 +356,8 @@ export default function DataStatus({ onRefreshed }) {
       {showStarting ? (
         <div className="status status-loading" role="status">
           <p>
-            Starting the data service — the first connection may take up to about a minute. No data
-            has been changed; this view retries automatically.
+            Starting the data service — connecting now. This may take a little longer after a period
+            of inactivity. No data has been changed; this view continues automatically.
           </p>
           <button type="button" className="btn btn-secondary" onClick={retryConnectivity}>
             Retry now

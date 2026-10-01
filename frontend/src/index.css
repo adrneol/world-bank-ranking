@@ -1181,6 +1181,55 @@ hr.ddivider {
   margin-top: 1rem;
 }
 
+/* Resilience disclosure: a single compact closed-by-default row at the bottom
+   of the About page, visually separated from the main content. The expanded
+   content breathes: comfortable measure, generous paragraph rhythm, and quiet
+   subheadings that separate the ideas without dashboard styling. */
+.resilience-disclosure {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-subtle, #e3e1da);
+}
+
+.resilience-body {
+  width: 100%;
+  max-width: 800px;
+  margin-top: 0.75rem;
+  padding: 0.25rem 0.25rem 0.5rem;
+  line-height: 1.7;
+}
+
+.resilience-body .resilience-lead {
+  font-size: 1.02rem;
+  margin: 0 0 1rem;
+}
+
+.resilience-body h4 {
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+  margin: 1.25rem 0 0.45rem;
+}
+
+.resilience-body h4:first-child {
+  margin-top: 0.25rem;
+}
+
+.resilience-body p {
+  margin: 0 0 0.9rem;
+}
+
+.resilience-body p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 40rem) {
+  .resilience-body {
+    max-width: 100%;
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
 .details summary {
   cursor: pointer;
   font-weight: 600;

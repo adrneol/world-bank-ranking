@@ -271,6 +271,33 @@ describe('bootstrap cold-start UX', () => {
     cleanup();
   });
 
+  it('DATA_SERVICE_STARTING stays in warm-up like DATA_LOADING (readiness, not failure)', async () => {
+    let calls = 0;
+    stub = stubFetch([
+      [
+        '/api/years',
+        () => {
+          calls += 1;
+          return calls === 1 ? errorResponse(503, 'DATA_SERVICE_STARTING', 'starting') : YEARS;
+        },
+      ],
+      ['/api/countries', COUNTRIES],
+      ['/api/indicators', INDICATORS],
+    ]);
+    const { container, cleanup } = renderApp();
+    await flushReact(act);
+    expect(container.textContent).toContain('Starting the data service');
+    expect(container.textContent).not.toContain('Could not load available years');
+
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    await flushReact(act);
+    expect(calls).toBe(2);
+    expect(container.textContent).toContain('Quality analysis of World Bank raw data');
+    cleanup();
+  });
+
   it('unmount during a pending bootstrap leaves no stale update and no extra request', async () => {
     let resolveYears = null;
     const gate = new Promise((resolve) => {

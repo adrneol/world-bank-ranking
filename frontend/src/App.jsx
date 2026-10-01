@@ -296,9 +296,10 @@ export default function App() {
           if (!stillCurrent()) return;
           if (error?.name === 'AbortError') return;
           // Backend is seeding its first dataset (empty database, ingest
-          // running): not a failure. Stay in warm-up on the original clock
-          // and schedule a single follow-up attempt.
-          if (error?.code === 'DATA_LOADING') {
+          // running) or still initializing behind listen-first readiness:
+          // not a failure. Stay in warm-up on the original clock and
+          // schedule a single follow-up attempt.
+          if (error?.code === 'DATA_LOADING' || error?.code === 'DATA_SERVICE_STARTING') {
             followup = setTimeout(() => {
               if (!stillCurrent()) return;
               runAttempt();

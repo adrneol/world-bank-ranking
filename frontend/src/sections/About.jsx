@@ -121,6 +121,43 @@ export default function About({ site, onOpenView }) {
           tokens, or other secrets by email.
         </p>
       </Section>
+      <details id="about-resilience" className="details resilience-disclosure">
+        <summary>How the site stays available</summary>
+        <div className="resilience-body">
+          <p className="resilience-lead">
+            The site normally runs on its primary data service, which holds the dataset behind
+            every analysis.
+          </p>
+          <h4>During a temporary interruption</h4>
+          <p>
+            If that service is temporarily unavailable, the application can use a locally kept
+            backup copy when one is available. This helps keep the site available and previously
+            published data accessible, rather than leaving the site with nothing to show during
+            the interruption.
+          </p>
+          <h4>Keeping the data current</h4>
+          <p>
+            The backup is not simply a frozen copy. While it is active, the site keeps working
+            the same way, and when the stored data becomes due for an update, the site can
+            refresh it through its normal refresh cycle — being on the backup does not mean the
+            site is stuck with old data until the primary service returns.
+          </p>
+          <p>
+            The site is also designed to avoid unnecessary data work, both when serving analysis
+            and when refreshing data. Information that has not changed is left alone, while only
+            what needs updating is processed. This helps the backup continue serving analysis
+            and handling refreshes efficiently while the primary service is unavailable.
+          </p>
+          <h4>Returning to the primary service</h4>
+          <p>
+            Starting up or returning to normal may take a little longer while the backup is
+            prepared or the primary service is checked again. Once the primary service is
+            available, the application can return to it through its normal guarded recovery. You
+            can always see which data source is currently active on the Status page,
+            next to “Database”.
+          </p>
+        </div>
+      </details>
     </div>
   );
 }
