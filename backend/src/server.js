@@ -33,6 +33,7 @@ import config, {
   getSubject,
 } from './config.js';
 import { closeDb, createPrimaryHandle, describeDbTarget, getDb, initDatabase, openExistingLocalDb, pingDatabase, resolveDbMode } from './db/index.js';
+import { isTransportError } from './db/driver.js';
 import {
   computeDatasetState,
   countAggregateCountries,
@@ -280,7 +281,52 @@ async function defaultProbePrimary(timeoutMs) {
     return null;
   }
 }
-export async function maybeRecoverPrimary(shared, { onWarn = null, createProbe = null, configuredMode = null } = {}) {
+/**
+ * Phase 8I: compare dataset generations across two handles WITHOUT new
+ * infrastructure, using existing metadata only (fingerprint + vintage).
+ * content_version sequences are per-database and NOT cross-comparable, so
+ * the comparison uses wall-clock retrieval evidence: maxFetchedAt (row-level
+ * fetch times), lastSuccessAt (successful-check times), and the World Bank
+ * vintage string (lexicographically comparable ISO dates). Null = unknown
+ * and never blocks on its own; any positive "fallback is newer" signal
+ * blocks promotion until reconciliation.
+ */
+async function describeGeneration(handle, timeoutMs) {
+  const fp = await withProbeTimeout(getDatasetFingerprint(handle), timeoutMs, 'fingerprint');
+  let vintage = null;
+  try {
+    vintage = await withProbeTimeout(getMaxWbLastUpdated(handle), timeoutMs, 'vintage');
+  } catch {
+    vintage = null;
+  }
+  return {
+    lastSuccessAt: fp?.lastSuccessAt ?? null,
+    maxFetchedAt: fp?.maxFetchedAt ?? null,
+    count: Number(fp?.observationCount ?? 0) || 0,
+    vintage: vintage ?? null,
+  };
+}
+const isNewerStamp = (a, b) => a != null && (b == null || a > b);
+function fallbackIsNewerThanPrimary(fb, p) {
+  if (!fb) return false;
+  if (!p) return true;
+  return (
+    isNewerStamp(fb.maxFetchedAt, p.maxFetchedAt) ||
+    isNewerStamp(fb.lastSuccessAt, p.lastSuccessAt) ||
+    isNewerStamp(fb.vintage, p.vintage)
+  );
+}
+async function closeQuietly(handle) {
+  try {
+    await handle?.close?.();
+  } catch {
+    // Best effort; a failed probe client must never break recovery.
+  }
+}
+export async function maybeRecoverPrimary(
+  shared,
+  { onWarn = null, createProbe = null, configuredMode = null, reconcile = true } = {},
+) {
   if (!shared?.isFallback || shared?.isDegraded) {
     return { recovered: false, reason: 'not-fallback' };
   }
@@ -322,15 +368,149 @@ export async function maybeRecoverPrimary(shared, { onWarn = null, createProbe =
     onWarn?.({ message: 'Primary still unavailable; staying on fallback.' });
     return { recovered: false, reason: 'primary-unavailable' };
   }
-  // Promote: future handle() calls serve the revalidated primary. In-flight
-  // work keeps its captured fallback reference to completion. Memos are
-  // content-keyed (run/content-version) so the new generation simply misses
-  // once and re-derives — no invalidation storm, no extra scan scheduled here.
-  shared.current = candidate;
-  shared.isFallback = false;
-  setActiveDbInfo({ provider: 'turso', isFallback: false, isDegraded: false });
-  console.log('Primary database recovered; promoted back to Turso (production).');
-  return { recovered: true, reason: 'promoted' };
+  const promote = () => {
+    // Promote: future handle() calls serve the revalidated primary. In-flight
+    // work keeps its captured fallback reference to completion. Memos are
+    // content-keyed (run/content-version) so the new generation simply misses
+    // once and re-derives — no invalidation storm, no extra scan scheduled here.
+    shared.current = candidate;
+    shared.isFallback = false;
+    setActiveDbInfo({ provider: 'turso', isFallback: false, isDegraded: false });
+    console.log('Primary database recovered; promoted back to Turso (production).');
+    return { recovered: true, reason: 'promoted' };
+  };
+  // Phase 8I freshness guard: never regress from fresher fallback data to an
+  // older primary. Promotion requires NO positive "fallback is newer" signal
+  // across retrieval timestamps and vintage. Unknowns (nulls) never block.
+  let primaryGen = null;
+  let fallbackGen = null;
+  try {
+    primaryGen = await describeGeneration(candidate, recoveryProbeTimeoutMs());
+    fallbackGen = await describeGeneration(shared.current, recoveryProbeTimeoutMs());
+  } catch {
+    await closeQuietly(candidate);
+    onWarn?.({ message: 'Primary generation unreadable; staying on fallback.' });
+    return { recovered: false, reason: 'generation-unknown' };
+  }
+  if (!fallbackIsNewerThanPrimary(fallbackGen, primaryGen)) {
+    return promote();
+  }
+  // CASE 2 (Part 6): fallback holds newer data. Keep serving it; reconcile
+  // Turso through the NORMAL refreshData() pipeline (O10/O7/O8 intact —
+  // unchanged Turso rows are skipped, only required changes publish), then
+  // promote only on a successful publication. The manual-refresh path passes
+  // reconcile:false to stay fast: it simply keeps refreshing fallback.
+  if (reconcile === false) {
+    onWarn?.({ message: 'Primary is behind fallback data; staying on fallback.' });
+    return { recovered: false, reason: 'primary-behind' };
+  }
+  try {
+    const summary = await refreshData({ db: candidate, trigger: 'recovery', onWarn });
+    if (summary?.status !== 'success') {
+      await closeQuietly(candidate);
+      onWarn?.({ message: 'Primary catch-up refresh did not publish; staying on fallback.' });
+      return { recovered: false, reason: 'reconcile-failed' };
+    }
+  } catch {
+    await closeQuietly(candidate);
+    onWarn?.({ message: 'Primary catch-up refresh failed; staying on fallback.' });
+    return { recovered: false, reason: 'reconcile-failed' };
+  }
+  try {
+    primaryGen = await describeGeneration(candidate, recoveryProbeTimeoutMs());
+    fallbackGen = await describeGeneration(shared.current, recoveryProbeTimeoutMs());
+  } catch {
+    onWarn?.({ message: 'Primary generation unreadable after catch-up; staying on fallback.' });
+    return { recovered: false, reason: 'generation-unknown' };
+  }
+  if (fallbackIsNewerThanPrimary(fallbackGen, primaryGen)) {
+    onWarn?.({ message: 'Primary still behind fallback data after catch-up; staying on fallback.' });
+    return { recovered: false, reason: 'primary-behind' };
+  }
+  return promote();
+}
+
+/**
+ * Phase 8I — RUNTIME Turso→SQLite failover (genuine transport failure only).
+ *
+ * Boot fallback covers "Turso down at startup". This covers "Turso dies
+ * mid-serving": when an operation against the primary Turso handle escapes
+ * with a transport-class error — i.e. AFTER the existing bounded retries
+ * (driver single read-retry, refresh inline attempts) are exhausted — the
+ * process may promote the validated local fallback instead of erroring
+ * every subsequent request until restart.
+ *
+ * Safety properties (mirroring boot fallback + recovery):
+ *   - classification first: ONLY isTransportError() qualifies. SQL,
+ *     constraint, validation, auth, World Bank, and application errors
+ *     never fail over (they also fail the classifier by construction);
+ *   - policy from the environment: DB_MODE=turso AND ALLOW_LOCAL_DB_FALLBACK
+ *     (test seams: mode/allowFallback/openFallback params; production always
+ *     resolves the real configuration);
+ *   - validation reuses openExistingLocalDb(): file exists, readable,
+ *     observations > 0, schema valid. Nothing is created, seeded, or
+ *     fabricated — a missing/empty local DB means "no failover", and the
+ *     original error propagates unchanged;
+ *   - the failed transaction is already rolled back by driver transaction()
+ *     before the error can reach here: failover NEVER resumes a broken tx;
+ *   - promotion swaps ONLY the future-handle cell (single-threaded
+ *     assignment); in-flight requests keep captured references; the old
+ *     Turso handle is never closed under readers;
+ *   - cooldown-gated (WB_FAILOVER_COOLDOWN_MS, default 5 min) plus
+ *     single-flight: concurrent failures share one validation, and a
+ *     missing fallback costs one cheap file check per cooldown window —
+ *     never per-request ping storms, never oscillation (post-promotion the
+ *     active handle is fallback, so this path goes quiet).
+ */
+export function failoverCooldownMs() {
+  const raw = process.env.WB_FAILOVER_COOLDOWN_MS;
+  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+    const n = Number(String(raw).trim());
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 5 * 60 * 1000;
+}
+let lastFailoverAttemptAt = 0;
+let failoverFlight = null;
+export async function maybeFailoverToFallback(
+  shared,
+  { onWarn = null, mode = null, allowFallback = null, openFallback = null } = {},
+) {
+  const effectiveMode = mode ?? resolveDbMode();
+  if (effectiveMode !== 'turso') return { failedOver: false, reason: 'primary-not-turso' };
+  const fallbackAllowed = allowFallback ?? config.allowLocalDbFallback;
+  if (!fallbackAllowed) return { failedOver: false, reason: 'fallback-disabled' };
+  if (!shared || shared.isFallback || shared.isDegraded) return { failedOver: false, reason: 'not-primary' };
+  if (failoverFlight) return failoverFlight;
+  if (Date.now() - lastFailoverAttemptAt < failoverCooldownMs()) {
+    return { failedOver: false, reason: 'cooldown' };
+  }
+  lastFailoverAttemptAt = Date.now();
+  const task = (async () => {
+    let opened = null;
+    try {
+      opened = await (openFallback ?? openExistingLocalDb)();
+    } catch {
+      opened = null;
+    }
+    if (!opened?.handle) {
+      onWarn?.({ message: 'Turso unavailable and no usable local fallback exists; staying on primary.' });
+      return { failedOver: false, reason: 'no-valid-fallback' };
+    }
+    shared.current = opened.handle;
+    shared.isFallback = true;
+    setActiveDbInfo({ provider: 'sqlite', isFallback: true, isDegraded: false });
+    console.warn(
+      'Primary database unreachable at runtime; serving from the existing local database instead. This fallback hides a persistent-database outage — investigate promptly.',
+    );
+    return { failedOver: true, reason: 'promoted-fallback' };
+  })();
+  failoverFlight = task;
+  try {
+    return await task;
+  } finally {
+    failoverFlight = null;
+  }
 }
 
 /**
@@ -636,6 +816,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
             if (shared?.isFallback) {
               maybeRecoverPrimary(shared, {
                 onWarn: (w) => console.warn(`Primary recovery: ${w.message}`),
+                ...(shared.recoveryPolicy ?? {}),
               }).catch(() => {});
             }
             const decision = await maybeAutoRefresh(handle(), {
@@ -1750,8 +1931,13 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       // on fallback SQLite. Failure to recover simply refreshes fallback.
       if (shared?.isFallback) {
         try {
+          // Fast path only: promote an equivalent-or-newer primary, but never
+          // block a manual refresh on a minutes-long catch-up — the refresh
+          // below simply proceeds on fallback when the primary is behind.
           await maybeRecoverPrimary(shared, {
             onWarn: (w) => console.warn(`Primary recovery: ${w.message}`),
+            reconcile: false,
+            ...(shared.recoveryPolicy ?? {}),
           });
         } catch {
           // Recovery is best-effort; the refresh below proceeds regardless.
@@ -1772,6 +1958,47 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       throw error;
     }
   }));
+
+  // ---------- runtime failover (Phase 8I) ----------
+  // A transport-class error escaping a handler means the primary already
+  // exhausted its bounded retries. With a Turso primary and enabled
+  // fallback, validate-and-promote local SQLite so FUTURE requests serve
+  // instead of erroring until restart. Idempotent GETs retry once on the new
+  // handle (guard flag: never loops, never after headers sent). Writes and
+  // refreshes are NOT retried here — their transactions already rolled back
+  // and recorded failure, so the original error propagates and the NEXT
+  // attempt transparently uses fallback.
+  // eslint-disable-next-line no-unused-vars
+  app.use(async (error, req, res, next) => {
+    try {
+      // Only genuine transport failures qualify; everything else (validation,
+      // auth, SQL, World Bank, application bugs) fails the classifier above.
+      if (res.headersSent || req._failoverRetried || !isTransportError(error)) return next(error);
+      // Still on primary: validate-and-promote fallback (no-op unless a
+      // Turso primary + enabled fallback + usable local DB all hold).
+      // Test seam: shared.failoverPolicy injects mode/allowFallback/openFallback;
+      // production resolves the real environment configuration.
+      if (shared && !shared.isFallback && !shared.isDegraded) {
+        const outcome = await maybeFailoverToFallback(shared, {
+          onWarn: (w) => console.warn(`Runtime failover: ${w.message}`),
+          ...(shared.failoverPolicy ?? {}),
+        });
+        if (!outcome.failedOver) return next(error);
+      } else if (!shared?.isFallback) {
+        return next(error);
+      }
+      // Idempotent GETs retry once against the active fallback handle —
+      // whether this request triggered the promotion or arrives mid-outage.
+      // Writes/refreshes are never retried here: their transactions already
+      // rolled back, so the original error propagates and the NEXT attempt
+      // transparently uses fallback.
+      if (req.method !== 'GET') return next(error);
+      req._failoverRetried = true;
+      return app.handle(req, res, next);
+    } catch {
+      return next(error);
+    }
+  });
 
   // ---------- errors ----------
   // eslint-disable-next-line no-unused-vars
