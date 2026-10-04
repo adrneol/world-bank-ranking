@@ -485,3 +485,136 @@ describe('refresh progress checklist', () => {
     }
   });
 });
+
+describe('recent refresh runs display numbering (Phase 8Q)', () => {
+  let stub = null;
+  afterEach(() => {
+    stub?.restore();
+    stub = null;
+    document.body.innerHTML = '';
+  });
+
+  // Internal persistent run ids (newest-first, as the backend serves them).
+  const historyRun = (id, extra = {}) => ({
+    id,
+    status: 'success',
+    trigger: 'manual',
+    started_at: '2026-10-04T13:15:39.000Z',
+    completed_at: '2026-10-04T13:15:55.000Z',
+    rows_retrieved: 15900,
+    rows_upserted: 0,
+    rows_skipped_unchanged: 12817,
+    ...extra,
+  });
+
+  // Visible Run-column labels, newest row first.
+  const runNumbers = (container) =>
+    [...container.querySelectorAll('tbody th[scope="row"]')].map((cell) => cell.textContent.trim());
+
+  async function renderRuns(latestRuns, extra = {}) {
+    stub = stubFetch([['/api/data-status', { ...BASE, inProgress: false, latestRuns, ...extra }]]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    return { container, cleanup };
+  }
+
+  it('numbers five visible runs 5 (newest) to 1 (oldest), never the internal ids', async () => {
+    const { container, cleanup } = await renderRuns([30, 29, 28, 27, 26].map((id) => historyRun(id)));
+    expect(container.textContent).toContain('Recent refresh runs (5)');
+    expect(runNumbers(container)).toEqual(['#5', '#4', '#3', '#2', '#1']);
+    expect(container.textContent).not.toContain('#30');
+    expect(container.textContent).not.toContain('#26');
+    cleanup();
+  });
+
+  it('numbers four visible runs 4 to 1', async () => {
+    const { container, cleanup } = await renderRuns([41, 40, 39, 38].map((id) => historyRun(id)));
+    expect(container.textContent).toContain('Recent refresh runs (4)');
+    expect(runNumbers(container)).toEqual(['#4', '#3', '#2', '#1']);
+    cleanup();
+  });
+
+  it('numbers three visible runs 3 to 1', async () => {
+    const { container, cleanup } = await renderRuns([12, 11, 10].map((id) => historyRun(id)));
+    expect(container.textContent).toContain('Recent refresh runs (3)');
+    expect(runNumbers(container)).toEqual(['#3', '#2', '#1']);
+    cleanup();
+  });
+
+  it('numbers a single visible run 1', async () => {
+    const { container, cleanup } = await renderRuns([historyRun(7)]);
+    expect(container.textContent).toContain('Recent refresh runs (1)');
+    expect(runNumbers(container)).toEqual(['#1']);
+    cleanup();
+  });
+
+  it('shifts positions when a new run enters and drops the oldest', async () => {
+    const before = [30, 29, 28, 27, 26].map((id) => historyRun(id));
+    const first = await renderRuns(before);
+    expect(runNumbers(first.container)).toEqual(['#5', '#4', '#3', '#2', '#1']);
+    first.cleanup();
+    document.body.innerHTML = '';
+    stub.restore();
+    stub = null;
+    const after = [31, 30, 29, 28, 27].map((id) => historyRun(id));
+    const second = await renderRuns(after);
+    expect(runNumbers(second.container)).toEqual(['#5', '#4', '#3', '#2', '#1']);
+    expect(second.container.textContent).not.toContain('#26');
+    second.cleanup();
+  });
+
+  it('leaves the internal run ids unchanged in the served data', async () => {
+    const latestRuns = [30, 29, 28, 27, 26].map((id) => historyRun(id));
+    const snapshot = JSON.stringify(latestRuns.map((run) => run.id));
+    const { cleanup } = await renderRuns(latestRuns);
+    expect(JSON.stringify(latestRuns.map((run) => run.id))).toBe(snapshot);
+    expect(snapshot).toBe('[30,29,28,27,26]');
+    cleanup();
+  });
+
+  it('uses the same numbering for Turso, local, and fallback targets', async () => {
+    const databases = [
+      { provider: 'turso', context: 'production', label: 'Turso (production)', fallback: false },
+      { provider: 'sqlite', context: 'local', label: 'Local SQLite', fallback: false },
+      {
+        provider: 'sqlite',
+        context: 'production-fallback',
+        label: 'Local SQLite (production fallback)',
+        fallback: true,
+      },
+    ];
+    for (const database of databases) {
+      const { container, cleanup } = await renderRuns([50, 49, 48].map((id) => historyRun(id)), { database });
+      expect(runNumbers(container)).toEqual(['#3', '#2', '#1']);
+      cleanup();
+      document.body.innerHTML = '';
+      stub.restore();
+      stub = null;
+    }
+  });
+
+  it('issues no mutating requests while rendering history', async () => {
+    const methods = [];
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        (href, options) => {
+          methods.push(options?.method ?? 'GET');
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => ({ ...BASE, inProgress: false, latestRuns: [30, 29].map((id) => historyRun(id)) }),
+          };
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(runNumbers(container)).toEqual(['#2', '#1']);
+    expect(stub.calls.length).toBeGreaterThan(0);
+    expect(stub.calls.every((href) => href.includes('/api/data-status'))).toBe(true);
+    expect(methods.every((method) => method === 'GET')).toBe(true);
+    cleanup();
+  });
+});

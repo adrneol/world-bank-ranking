@@ -644,10 +644,15 @@ export default function DataStatus({ onRefreshed }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.latestRuns.map((run) => (
+                    {/* User-facing run number: ordinal position within the
+                        currently visible newest-first list (newest visible =
+                        list length … oldest visible = 1). The persistent
+                        database run id (run.id, used as the React key and
+                        untouched everywhere else) is never renumbered. */}
+                    {data.latestRuns.map((run, index) => (
                       <tr key={run.id}>
                         <th scope="row" className="num">
-                          #{run.id}
+                          #{data.latestRuns.length - index}
                         </th>
                         <td>{run.status}</td>
                         <td>{run.trigger ?? '—'}</td>
