@@ -362,6 +362,107 @@ describe('refresh progress checklist', () => {
     cleanup();
   });
 
+  it('shows a calm line instead of the checklist while background recovery runs', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: true,
+          database: { provider: 'sqlite', context: 'production-fallback', label: 'Local SQLite (production fallback)', fallback: true },
+          progress: {
+            trigger: 'recovery',
+            stage: 'indicator:nominal_constant',
+            startedAt: '2026-10-01T13:17:02.000Z',
+            metricKeys: KEYS,
+            labels: LABELS,
+            steps: [step('nominal_current', 'unchanged')],
+          },
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('Using backup database while the primary recovers.');
+    expect(container.textContent).toContain('Current data remain available below.');
+    // No per-indicator recovery progress for ordinary users.
+    expect(container.querySelector('.checklist')).toBeNull();
+    expect(container.querySelector('progress')).toBeNull();
+    expect(container.textContent).not.toContain('Refresh did not publish');
+    // The dataset itself stays rendered.
+    expect(container.textContent).toContain('228776 observations stored');
+    expect(container.textContent).toContain('● Local SQLite (production fallback)');
+    cleanup();
+  });
+
+  it('hides the red banner for a failed background recovery run', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          database: { provider: 'sqlite', context: 'production-fallback', label: 'Local SQLite (production fallback)', fallback: true },
+          progress: {
+            trigger: 'recovery',
+            stage: 'failed',
+            startedAt: '2026-10-01T13:17:02.000Z',
+            metricKeys: KEYS,
+            labels: LABELS,
+            steps: [step('nominal_current', 'failed', { error: 'boom' })],
+          },
+          lastRun: { status: 'failed', trigger: 'recovery' },
+          latestRuns: [{ id: 13, status: 'failed', trigger: 'recovery', rows_upserted: 0, completed_at: '2026-10-01T13:17:16.000Z' }],
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('Using backup database while the primary recovers.');
+    expect(container.textContent).not.toContain('Refresh did not publish');
+    expect(container.textContent).not.toContain('The most recent refresh run failed');
+    expect(container.querySelector('.checklist')).toBeNull();
+    // History still records the failed recovery run for diagnostics.
+    expect(container.textContent).toContain('Recent refresh runs (1)');
+    cleanup();
+  });
+
+  it('renders the normal panel once recovery promoted back to the primary', async () => {
+    stub = stubFetch([
+      [
+        '/api/data-status',
+        {
+          ...BASE,
+          inProgress: false,
+          database: { provider: 'turso', context: 'production', label: 'Turso (production)', fallback: false },
+          progress: null,
+          lastRefresh: {
+            runId: 14,
+            status: 'success',
+            trigger: 'recovery',
+            startedAt: '2026-10-01T13:17:02.000Z',
+            completedAt: '2026-10-01T13:17:16.000Z',
+            durationMs: 14000,
+            summary: {
+              status: 'success',
+              trigger: 'recovery',
+              metricKeys: KEYS,
+              labels: LABELS,
+              steps: KEYS.map((k) => step(k, 'unchanged')),
+              counts: { total: 3, updated: 0, unchanged: 3, failed: 0, notAttempted: 0 },
+            },
+          },
+        },
+      ],
+    ]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).not.toContain('Using backup database while the primary recovers.');
+    expect(container.textContent).toContain('Last refresh completed successfully');
+    expect(container.textContent).toContain('● Turso (production)');
+    cleanup();
+  });
+
   it('shows safe production labels without hostnames for every target state', async () => {
     const cases = [
       [{ provider: 'turso', context: 'production', label: 'Turso (production)', fallback: false }, '● Turso (production)'],

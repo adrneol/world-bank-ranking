@@ -23,6 +23,8 @@
  * before. In particular a 404 here means ONLY the Hrana transport shape
  * observed in production (`SERVER_ERROR: Server returned HTTP status ...`),
  * never an application-level 404 (those carry httpStatus and are excluded).
+ * Conversely an Hrana 400/401/403 inside the same envelope is auth-shaped
+ * (verified live: a wrong token yields HTTP status 400) and is excluded.
  */
 const NEVER_TRANSPORT_CODES = new Set([
   'INVALID_INDICATOR',
@@ -55,7 +57,15 @@ export function isTransportError(error) {
   if (error.timeout === true) return false;
   if (error.status !== undefined && error.status !== null) return false;
   if (error.name === 'LibsqlError') {
-    if (error.code === 'SERVER_ERROR') return true;
+    if (error.code === 'SERVER_ERROR') {
+      // Phase 8M: Hrana wraps auth/client failures (HTTP 400/401/403, e.g. a
+      // wrong or revoked token — verified live against @libsql/client) in the
+      // same SERVER_ERROR envelope as genuine transport death (HTTP 404/5xx,
+      // the observed DNS-death shape). Auth-shaped failures must fail fast:
+      // they never retry and never trigger database failover.
+      if (/HTTP status 40[013]\b/.test(error.message ?? '')) return false;
+      return true;
+    }
     return TRANSPORT_MESSAGE_PATTERN.test(error.message ?? '');
   }
   return error.name === 'TypeError' || TRANSPORT_MESSAGE_PATTERN.test(error.message ?? '');

@@ -1,19 +1,33 @@
 /**
  * INGESTION PIPELINE — FETCH → VALIDATE → ATOMIC PUBLISH.
  *
- * Flow (Phase 6C O7):
- *   World Bank API  ->  STAGED country metadata (memory only)
+ * Flow (Phase 8O):
+ *   World Bank API  ->  STAGED country metadata (memory only, tiny)
  *                   ->  eligible universe, validated in memory
- *                   ->  PER INDICATOR, inside ONE outer transaction:
- *                        fetch series -> validate -> publish ->
- *                        release staged rows
- *                   ->  COMMIT once every requested indicator succeeded
+ *                   ->  PER INDICATOR, with NO transaction open:
+ *                        fetch series -> validate -> O10 compare ->
+ *                        unchanged: release rows immediately
+ *                        changed: spill staged rows to a temp staging file,
+ *                                 release rows immediately
+ *                   ->  SHORT publish transaction (DB writes only, no network):
+ *                        replay each spilled indicator -> COMMIT once
  *
- * Peak memory is one indicator, not all twenty. A failure anywhere rolls
- * the outer transaction back, so the live tables never show a half-written
- * mix; failed/partial attempts are recorded as audit history outside the
- * transaction, exactly as before. The previous dataset stays exactly as it
- * was, and only audit rows (fetch_runs, ingest_year_stats) record the attempt.
+ * Peak memory is one indicator, not all twenty (changed payloads rest on
+ * local disk, never in JS heaps together). A failure anywhere publishes
+ * nothing: acquisition writes nothing to live tables at all, and the short
+ * publish transaction rolls back as one unit. Failed/partial attempts are
+ * recorded as audit history outside the transaction, exactly as before. The
+ * previous dataset stays exactly as it was, and only audit rows
+ * (fetch_runs, ingest_year_stats) record the attempt.
+ *
+ * Why the split (Phase 8O root cause): the pre-8O pipeline held ONE
+ * Turso/Hrana interactive transaction open across all twenty World Bank
+ * fetches (tens of seconds of network idle between DB statements). Turso
+ * invalidates such long-idle server-side statement/transaction state
+ * (`stored sql reference is invalid`, `TRANSACTION_CLOSED`) while local
+ * SQLite tolerates it. The publish transaction below therefore performs
+ * zero network I/O: it opens, writes, and commits in one short DB-only
+ * sequence. See the Phase 8O report for the full proof.
  *
  * Key behaviours:
  *   - fetches `startYear - 1` through `endYear`, so the FIRST selected year can
@@ -46,6 +60,9 @@
 import { METRICS, PRODUCTION_METRIC_KEYS, config, isProductionMetric } from '../config.js';
 import { getDb } from '../db/index.js';
 import { batchGet, isTransportError } from '../db/driver.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 /** Local sleep (driver keeps its own private copy for read retries). */
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -598,18 +615,72 @@ export function isCountriesPayloadUnchanged(stored, staged) {
   return true;
 }
 /**
- * Partial-refresh signal (Phase 6C O7): thrown INSIDE the outer publish
- * transaction when some indicators failed, so everything published so far
- * in this attempt rolls back. The refreshData catch below records the
- * attempt exactly like the pre-O7 staged design did (per-indicator
- * failures, audit stats, 'partial' run) and returns the same summary shape
- * instead of throwing to the caller.
+ * Phase 8O — temp-file staging for changed indicator payloads.
+ *
+ * The acquisition loop (no transaction open) spills each CHANGED indicator's
+ * staged rows to one JSONL file and immediately releases the in-memory rows,
+ * so peak memory stays at one indicator even when many indicators changed.
+ * Unchanged indicators never touch disk (their rows are released outright).
+ * The short publish transaction replays the files one indicator at a time.
+ *
+ * Zero Turso cost: these files live on local ephemeral disk (os.tmpdir),
+ * never in the production database. JSON numbers round-trip finite doubles
+ * exactly, and value_raw strings pass through verbatim, so replayed rows
+ * are element-identical to the validated staged rows (the O10 proof itself
+ * always runs on the in-memory rows before any spill).
  */
-function partialRollbackError(failureSummary) {
-  const error = new Error(failureSummary);
-  error.code = 'REFRESH_PARTIAL_ROLLBACK';
-  error.failureSummary = failureSummary;
-  return error;
+function sanitizeStagingName(metricKey) {
+  return String(metricKey ?? 'indicator').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/** Create a unique per-attempt staging directory. Throws on failure. */
+async function createStagingDir(runId) {
+  const prefix = `wb-refresh-staging-p${process.pid}-r${runId ?? 'norun'}-`;
+  return await fs.promises.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+/** Spill one indicator's staged rows to `<dir>/<metricKey>.jsonl`. Returns the file path. */
+async function spillStagedRows(dir, metricKey, rows) {
+  const file = path.join(dir, `${sanitizeStagingName(metricKey)}.jsonl`);
+  const lines = rows.map((row) =>
+    JSON.stringify({
+      countryId: row.countryId,
+      year: row.year,
+      value: row.value,
+      valueRaw: row.valueRaw ?? null,
+      wbLastUpdated: row.wbLastUpdated ?? null,
+    }),
+  );
+  await fs.promises.writeFile(file, lines.length > 0 ? `${lines.join('\n')}\n` : '', 'utf8');
+  return file;
+}
+
+/** Replay one spilled file back into staged-row objects (one indicator at a time). */
+async function readSpilledRows(file) {
+  const text = await fs.promises.readFile(file, 'utf8');
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (line.trim() === '') continue;
+    const parsed = JSON.parse(line);
+    rows.push({
+      countryId: parsed.countryId,
+      year: parsed.year,
+      value: parsed.value,
+      valueRaw: parsed.valueRaw ?? null,
+      wbLastUpdated: parsed.wbLastUpdated ?? null,
+    });
+  }
+  return rows;
+}
+
+/** Best-effort staging cleanup (never throws; the OS reclaims tmp eventually). */
+async function cleanupStagingDir(dir) {
+  if (!dir) return;
+  try {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  } catch {
+    // Best effort only.
+  }
 }
 
 /**
@@ -804,6 +875,9 @@ export async function refreshData(options = {}) {
   // transaction rolls back and the previous dataset stays exactly as it was.
   // Set when the catch below schedules another attempt (cleared per attempt).
   let pendingRetryDelay = null;
+  // Phase 8O per-attempt temp staging directory (null until the first
+  // changed indicator spills; always cleaned in the finally below).
+  let stagingDir = null;
   try {
     // (Attempt flag and initial 'starting' progress were published
     // synchronously on entry, above.)
@@ -886,46 +960,60 @@ export async function refreshData(options = {}) {
       aggregateUniverse: meta.universe.aggregateCount,
     };
 
-    // Phase 6C O7: ONE outer atomic transaction spans per-indicator
-    // fetch → validate → publish → release. Peak memory is a single
-    // indicator instead of all twenty at once; a failure anywhere rolls
-    // back everything published so far, preserving the all-or-nothing
-    // contract exactly (partial runs still record nothing to live tables —
-    // see the REFRESH_PARTIAL_ROLLBACK branch in the catch below).
-    lastProgress = { ...lastProgress, stage: 'publishing' };
+    // Phase 8O — ACQUISITION (no transaction open): per-indicator
+    // fetch → validate → O10 compare → release-or-spill. Peak memory is a
+    // single indicator: unchanged payloads are released outright, changed
+    // payloads are spilled to temp staging files and released. No live
+    // table is touched here, so a failure cannot publish a partial mix by
+    // construction. All reads are autocommit; the single-writer refresh
+    // lock is held throughout, so the O10 evidence cannot change under us
+    // before publication.
+    //
+    // PUBLISH INVARIANT (O7): all dataset writes happen inside ONE short
+    // publish transaction below (DB writes only, zero network I/O), so it
+    // opens, writes, and commits before Turso can invalidate its
+    // server-side statement/transaction state. fetch_runs rows and
+    // ingest_year_stats for non-published attempts are audit history
+    // (written outside the transaction) and must survive failures. A failed
+    // or partial refresh therefore publishes nothing and the previous
+    // dataset stays exactly as it was.
+    lastProgress = { ...lastProgress, stage: 'indicators' };
     totals.countriesRows = countriesRows;
-    await transaction(db, async (tx) => {
-      // Phase 7D-2: country metadata is rewritten only when it actually
-      // differs. The staged payload is compared against stored rows with the
-      // exact publish normalization; a skip leaves every byte untouched
-      // (extra stored entities are left in place by both paths — the upsert
-      // never deletes). totals.countriesRows keeps counting staged rows.
-      // The outcome (written vs skipped) drives content_version below: a
-      // metadata-only change is still a content change for every
-      // version-keyed consumer (years universe, aggregate typing).
-      const storedCountries = await listCountries(tx);
-      const metadataChanged = !isCountriesPayloadUnchanged(storedCountries, meta.countries);
-      if (metadataChanged) {
-        await upsertCountriesInner(tx, meta.countries);
-      }
-      // Countries are published (or proven identical); the staged copy is
-      // now provably unneeded.
+    // Phase 7D-2: country metadata is rewritten only when it actually
+    // differs. The staged payload is compared against stored rows with the
+    // exact publish normalization; a skip leaves every byte untouched
+    // (extra stored entities are left in place by both paths — the upsert
+    // never deletes). totals.countriesRows keeps counting staged rows.
+    // The outcome (written vs skipped) drives content_version below: a
+    // metadata-only change is still a content change for every
+    // version-keyed consumer (years universe, aggregate typing).
+    const storedCountries = await listCountries(db);
+    const metadataChanged = !isCountriesPayloadUnchanged(storedCountries, meta.countries);
+    if (!metadataChanged) {
+      // Proven identical; the staged copy is now provably unneeded.
       meta.countries = EMPTY_RELEASED_ROWS;
-      let succeededCount = 0;
-      // Phase 7B/7D: true once this attempt rewrote observations
-      // (contentChanged) or country metadata (metadataChanged). Either one
-      // advances content_version exactly once: value mutations with a stable
-      // row count still advance it, while a fully-unchanged attempt provably
-      // leaves every byte untouched. Metadata counts as content because
-      // version-keyed consumers (years universe, aggregate typing) depend on
-      // flags and membership, not just observation rows.
-      let contentChanged = false;
-      for (const metricKey of metricKeys) {
+    }
+    let succeededCount = 0;
+    // Phase 7B/7D: true once this attempt staged observation rewrites
+    // (contentChanged) or country metadata changes (metadataChanged).
+    // Either one advances content_version exactly once: value mutations
+    // with a stable row count still advance it, while a fully-unchanged
+    // attempt provably leaves every byte untouched. Metadata counts as
+    // content because version-keyed consumers (years universe, aggregate
+    // typing) depend on flags and membership, not just observation rows.
+    let contentChanged = false;
+    // Changed-indicator publish plans, in request order. Each holds a temp
+    // staging file path (rows on disk) plus tiny indicator metadata —
+    // never the staged rows themselves, so memory stays bounded no matter
+    // how many indicators changed.
+    const changedPlans = [];
+    for (const metricKey of metricKeys) {
         lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
 
-        // A single indicator failing must not discard the others; the failure is
-        // recorded and publication is refused unless EVERY requested indicator
-        // succeeded (the throw below rolls the outer transaction back).
+        // A single indicator failing must not discard the others; the
+        // failure is recorded and publication is refused unless EVERY
+        // requested indicator succeeded (the partial branch below records
+        // the attempt without publishing anything).
         let result = null;
         try {
           result = await fetchIndicatorPayload(
@@ -978,12 +1066,11 @@ export async function refreshData(options = {}) {
         // the redundant observation writes are omitted. rowsUpserted counts
         // rows physically written; rowsSkippedUnchanged counts rows proven
         // identical and left untouched.
-        const metric = METRICS[metricKey];
-        const existingIndicator = await getIndicatorByMetricKey(tx, metricKey);
+        const existingIndicator = await getIndicatorByMetricKey(db, metricKey);
         let unchanged = false;
         if (existingIndicator) {
           const stored = await getObservationsForCompare(
-            tx,
+            db,
             existingIndicator.id,
             fetchedStartYear,
             fetchedEndYear,
@@ -999,24 +1086,29 @@ export async function refreshData(options = {}) {
           continue;
         }
 
-        // Publish THIS indicator now, inside the outer transaction, then
-        // release its staged rows immediately (O2): nothing later in the
-        // publish reads them (the refresh summary keeps metadata plus an
-        // empty row list, counters untouched).
+        // Changed: spill the staged rows to the per-attempt temp staging
+        // directory and release them immediately (O2) — the publish step
+        // below replays the file one indicator at a time, so memory never
+        // holds more than one indicator even when all twenty changed.
+        // rowsUpserted counts rows a successful publish WILL write
+        // (all-or-nothing: a failed publish records a failed run and writes
+        // nothing). The 'published' ledger step is recorded only after the
+        // publish transaction actually writes them.
         totals.rowsUpserted += result.rowsUpserted;
         contentChanged = true;
-        await upsertIndicatorInner(tx, {
-          ...metric,
-          name: result.indicatorName,
-          unit: result.indicatorUnit,
-          source: result.indicatorSource,
-          sourceNote: result.indicatorSourceNote,
+        if (!stagingDir) stagingDir = await createStagingDir(runId);
+        const stagedFile = await spillStagedRows(stagingDir, metricKey, result.stagedRows);
+        changedPlans.push({
+          metricKey,
+          indicatorCode: result.indicatorCode,
+          indicatorName: result.indicatorName,
+          indicatorUnit: result.indicatorUnit,
+          indicatorSource: result.indicatorSource,
+          indicatorSourceNote: result.indicatorSourceNote,
+          stagedFile,
+          rows: result.rowsUpserted,
         });
-        const indicator = await getIndicatorByMetricKey(tx, metricKey);
-        await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
-        await upsertObservationsInner(tx, result.stagedRows, (row) => ({ ...row, indicatorId: indicator.id }));
         result.stagedRows = EMPTY_RELEASED_ROWS;
-        recordStep(metricKey, 'published', { rows: result.rowsUpserted });
         succeededCount += 1;
       }
 
@@ -1030,47 +1122,105 @@ export async function refreshData(options = {}) {
       }
 
       if (failedMetrics.length > 0) {
-        // PARTIAL refresh: roll EVERYTHING back (including the indicators
-        // published above in this transaction) and let the catch below
-        // record the attempt without publishing anything — identical
-        // observable outcome to the pre-O7 staged design.
+        // PARTIAL refresh: some indicators failed during acquisition, so
+        // nothing is published at all (the publish transaction below never
+        // opens) — identical observable outcome to the pre-8O rollback.
+        // The attempt is recorded exactly as before: per-indicator
+        // failures, no live-table changes, previous dataset intact,
+        // last-success freshness unmoved.
         const failureSummary =
           `Partial refresh: ${succeededCount} of ${perIndicator.length} indicators staged; ` +
           `failures: ${failedMetrics.map((r) => `${r.metricKey}: ${r.error}`).join(' | ')}`;
-        throw partialRollbackError(failureSummary);
+        lastProgress = { ...lastProgress, stage: 'partial' };
+        await upsertIngestYearStats(db, runId, yearStats);
+        await finishFetchRun(db, runId, {
+          status: 'partial',
+          wbLastUpdated,
+          universeSnapshot,
+          errorMessage: failureSummary,
+          ...totals,
+          // Phase 8E: persisted terminal summary rides the existing UPDATE.
+          progressSummary: buildFinalProgressSummary({ stage: 'partial', status: 'partial', trigger }),
+        });
+        const partialSummary = {
+          status: 'partial',
+          runId,
+          trigger,
+          requestedStartYear,
+          requestedEndYear,
+          fetchedStartYear,
+          fetchedEndYear,
+          wbLastUpdated,
+          eligibleUniverse: eligibleUniverseSize,
+          aggregateUniverse: aggregateUniverseSize,
+          universeSnapshot,
+          yearStats,
+          errorMessage: failureSummary,
+          ...totals,
+          perIndicator,
+        };
+        lastProgress = { ...lastProgress, stage: 'complete', summary: partialSummary };
+        return partialSummary;
       }
 
-      await upsertIngestYearStatsInner(tx, runId, yearStats);
-      // Phase 7B dataset_state: maintained INSIDE the same atomic publish
-      // transaction, so observations and metadata commit or roll back
-      // together — a partial/failed attempt can never leave a half-updated
-      // row behind. A content change (observations rewritten OR country
-      // metadata rewritten) recomputes the exact scan-derived values (rare:
-      // only on real change) and advances content_version exactly once; an
-      // all-unchanged attempt leaves every field untouched (freshness still
-      // advances via the success run below). A missing row (legacy database)
-      // is bootstrapped once, starting at content_version 1.
-      {
-        const previous = await getDatasetState(tx);
-        if (contentChanged || metadataChanged || !previous) {
-          const computed = await computeDatasetState(tx);
-          await upsertDatasetStateInner(tx, {
-            ...computed,
-            contentVersion: (previous?.contentVersion ?? 0) + 1,
-            integrityVerifiedContentVersion: null,
-            updatedRunId: runId,
-          });
+      // Phase 8O — PUBLICATION: ONE short atomic transaction with DB writes
+      // only. No World Bank fetch, no network wait, no idle gap between
+      // statements: it opens, writes, and commits back-to-back, so Turso's
+      // server-side transaction/statement state stays valid. Spilled rows
+      // stream back one indicator at a time (bounded memory, O2 intact).
+      lastProgress = { ...lastProgress, stage: 'publishing' };
+      await transaction(db, async (tx) => {
+        if (metadataChanged) {
+          await upsertCountriesInner(tx, meta.countries);
         }
-      }
-      await finishFetchRun(tx, runId, {
-        status: 'success',
-        wbLastUpdated,
-        universeSnapshot,
-        ...totals,
-        // Phase 8E: persisted terminal summary rides the existing UPDATE.
-        progressSummary: buildFinalProgressSummary({ stage: 'complete', status: 'success', trigger }),
+        // Countries are published (or were proven identical above); the
+        // staged copy is now provably unneeded.
+        meta.countries = EMPTY_RELEASED_ROWS;
+        for (const plan of changedPlans) {
+          const stagedRows = await readSpilledRows(plan.stagedFile);
+          await upsertIndicatorInner(tx, {
+            ...METRICS[plan.metricKey],
+            name: plan.indicatorName,
+            unit: plan.indicatorUnit,
+            source: plan.indicatorSource,
+            sourceNote: plan.indicatorSourceNote,
+          });
+          const indicator = await getIndicatorByMetricKey(tx, plan.metricKey);
+          await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
+          await upsertObservationsInner(tx, stagedRows, (row) => ({ ...row, indicatorId: indicator.id }));
+          recordStep(plan.metricKey, 'published', { rows: plan.rows });
+        }
+        await upsertIngestYearStatsInner(tx, runId, yearStats);
+        // Phase 7B dataset_state: maintained INSIDE the same atomic publish
+        // transaction, so observations and metadata commit or roll back
+        // together — a partial/failed attempt can never leave a half-updated
+        // row behind. A content change (observations rewritten OR country
+        // metadata rewritten) recomputes the exact scan-derived values (rare:
+        // only on real change) and advances content_version exactly once; an
+        // all-unchanged attempt leaves every field untouched (freshness still
+        // advances via the success run below). A missing row (legacy database)
+        // is bootstrapped once, starting at content_version 1.
+        {
+          const previous = await getDatasetState(tx);
+          if (contentChanged || metadataChanged || !previous) {
+            const computed = await computeDatasetState(tx);
+            await upsertDatasetStateInner(tx, {
+              ...computed,
+              contentVersion: (previous?.contentVersion ?? 0) + 1,
+              integrityVerifiedContentVersion: null,
+              updatedRunId: runId,
+            });
+          }
+        }
+        await finishFetchRun(tx, runId, {
+          status: 'success',
+          wbLastUpdated,
+          universeSnapshot,
+          ...totals,
+          // Phase 8E: persisted terminal summary rides the existing UPDATE.
+          progressSummary: buildFinalProgressSummary({ stage: 'complete', status: 'success', trigger }),
+        });
       });
-    });
 
     const summary = {
       status: 'success',
@@ -1096,52 +1246,12 @@ export async function refreshData(options = {}) {
     noteRefreshSuccess();
     return summary;
   } catch (error) {
-    // PARTIAL refresh (Phase 6C O7): some indicators failed, so the outer
-    // transaction above rolled back EVERYTHING published in this attempt
-    // (including the indicators that had already been written inside it).
-    // The attempt is recorded exactly as the pre-O7 staged design recorded
-    // it — per-indicator failures, no live-table changes — and the previous
-    // dataset stays exactly as it was. Last-success freshness does not
-    // advance (only 'success' runs move it).
-    if (error?.code === 'REFRESH_PARTIAL_ROLLBACK') {
-      lastProgress = { ...lastProgress, stage: 'partial' };
-      await upsertIngestYearStats(db, runId, yearStats);
-      await finishFetchRun(db, runId, {
-        status: 'partial',
-        wbLastUpdated,
-        universeSnapshot,
-        errorMessage: error.failureSummary,
-        ...totals,
-        // Phase 8E: persisted terminal summary rides the existing UPDATE.
-        progressSummary: buildFinalProgressSummary({ stage: 'partial', status: 'partial', trigger }),
-      });
-      const summary = {
-        status: 'partial',
-        runId,
-        trigger,
-        requestedStartYear,
-        requestedEndYear,
-        fetchedStartYear,
-        fetchedEndYear,
-        wbLastUpdated,
-        eligibleUniverse: eligibleUniverseSize,
-        aggregateUniverse: aggregateUniverseSize,
-        universeSnapshot,
-        yearStats,
-        errorMessage: error.failureSummary,
-        ...totals,
-        perIndicator,
-      };
-      lastProgress = { ...lastProgress, stage: 'complete', summary };
-      return summary;
-    }
-
     lastProgress = { ...lastProgress, stage: 'failed', error: error.message };
 
-    // Total failure (zero indicators staged, or metadata/bootstrapping
-    // failed, or the publish transaction itself failed): NOTHING from this
-    // refresh was ever published to the live tables — staging keeps all
-    // writes behind the single publish transaction, which rolls back on
+    // Total failure (zero indicators staged, acquisition/publish failure, or
+    // the publish transaction itself failed): NOTHING from this refresh was
+    // ever published to the live tables — acquisition writes nothing to live
+    // tables at all, and the single short publish transaction rolls back on
     // error. The previous dataset is therefore intact by construction.
     //
     // error.datasetPreserved states that accurately: no restore of a
@@ -1212,6 +1322,17 @@ export async function refreshData(options = {}) {
         // Best effort; the stale row is recoverable via recoverRefreshLock().
       }
     }
+    // Phase 8O: the per-attempt temp staging directory (if any) is removed
+    // on every path — success, partial, failure, retry. Spilled rows are
+    // replayed inside the publish above or never needed again.
+    if (stagingDir) {
+      try {
+        await cleanupStagingDir(stagingDir);
+      } catch {
+        // Best effort; the OS reclaims tmp eventually.
+      }
+      stagingDir = null;
+    }
   }
   // Reached only when retrying (success and partial returned above, other
   // failures rethrew). The next iteration re-initializes progress state,
@@ -1253,10 +1374,13 @@ export async function ensureDataPresent(db, options = {}) {
  *     AUTO_REFRESH_FAIL_COOLDOWN_MS so a down API cannot loop refreshes.
  *    Manual refreshes are unaffected by the cooldown.
  *
- * @param {object} [db]
- * @param {{ ttlHours?:number, autoStale?:boolean, autoEmpty?:boolean, onWarn?:Function, ignoreCooldown?:boolean }} [options]
- * `ignoreCooldown` is for the scheduled-retry timer only: the retry ladder
- * already spaces attempts, so the post-failure cooldown must not block it.
+  * @param {object} [db]
+  * @param {{ ttlHours?:number, autoStale?:boolean, autoEmpty?:boolean, onWarn?:Function, ignoreCooldown?:boolean, onTransportFailure?:Function }} [options]
+  * `ignoreCooldown` is for the scheduled-retry timer only: the retry ladder
+  * already spaces attempts, so the post-failure cooldown must not block it.
+  * `onTransportFailure(error)` fires when the background attempt dies with a
+  * transport-class error (after the bounded inline retries): server wiring
+  * uses it to trigger runtime fallback without changing any retry semantics.
  * @returns {Promise<{ triggered:boolean, reason:string }>}
  */
 export async function maybeAutoRefresh(db, options = {}) {
@@ -1308,6 +1432,16 @@ export async function maybeAutoRefresh(db, options = {}) {
       // Recorded in fetch_runs by refreshData itself; log without crashing,
       // then schedule the backed-off retry.
       options.onWarn?.({ message: `Automatic ${trigger} refresh failed: ${error.message}` });
+      // Phase 8K: a transport-class death means the database itself may be
+      // gone (not just the data source): offer failover a chance. All other
+      // error classes skip it by classifier construction. Never throws.
+      if (isTransportError(error)) {
+        try {
+          options.onTransportFailure?.(error);
+        } catch {
+          // Best effort; the retry below proceeds regardless.
+        }
+      }
       scheduleRefreshRetry(handle, { trigger, onWarn: options.onWarn });
     },
   );

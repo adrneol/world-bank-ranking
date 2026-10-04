@@ -478,13 +478,24 @@ Local-only files (`.env`, `.env.local`) are never committed.
 | `DB_MODE` | backend | `turso` or `local` to force the backend; empty = automatic (Turso when configured). Local development sets `DB_MODE=local` so dev work can never touch production Turso. |
 | `TURSO_DATABASE_URL` | backend | Turso Cloud database URL. Secret deployment value — never commit, never log (only the host is logged). |
 | `TURSO_AUTH_TOKEN` | backend | Turso auth token. Secret — never commit, log, or return from any endpoint. |
-| `ALLOW_LOCAL_DB_FALLBACK` | backend | When Turso is unreachable at boot and a valid non-empty local DB exists, serve from it with a loud warning (default true). Never masks an outage with an empty database and never triggers an unattended seed. |
+| `ALLOW_LOCAL_DB_FALLBACK` | backend | When Turso is unreachable at boot and a valid non-empty local DB exists, serve from it with a loud warning (default true). Never masks an outage with an empty database and never triggers an unattended seed. A genuine mid-serving Turso transport failure also fails over to the validated fallback immediately (see below). |
 | `REFRESH_RATE_LIMIT_MAX` / `REFRESH_RATE_LIMIT_WINDOW_MS` | backend | Manual-refresh abuse protection (defaults 10 per 60 s per IP; GET endpoints never limited). |
 | `WB_AUTO_INGEST_ON_EMPTY` / `WB_AUTO_REFRESH_ON_STALE` | backend | Boot empty-ingest and stale-cache background refresh (defaults 1/1; set 0 to require manual refresh). |
 | `WB_PER_PAGE` / `WB_MAX_RETRIES` / `WB_RETRY_BASE_MS` / `WB_TIMEOUT_MS` | backend | World Bank client tuning (defaults 20000 / 5 / 500 ms / 30000 ms). |
 | `GEO_PROVIDER_URL` / `GEO_TIMEOUT_MS` | backend | Keyless IP-geolocation endpoint with `{ip}` placeholder (default `https://ipwho.is/{ip}?fields=country_code`) and single-attempt bound (default 3000 ms). UX default only. |
 | `DEFAULT_START_YEAR` / `DEFAULT_END_YEAR` | backend | Default analysis parameters (currently 2000 / 2025). The available-year selector remains data-driven and is derived from stored World Bank observations. |
 | `INGEST_START_YEAR` / `INGEST_END_YEAR` | backend | Default refresh fetch range (defaults 1960 / current calendar year, so future World Bank years are picked up). |
+| `WB_FAILOVER_COOLDOWN_MS` | backend | Minimum interval between runtime fallback validations (default 5 min). Failover itself is immediate after a confirmed transport failure; this only bounds repeat validations. |
+| `WB_RECOVERY_REPROBE_MS` | backend | How often a fallback-serving process asks whether Turso is back (default 15 min). Never per-request; data-status never probes. |
+| `WB_RECOVERY_CONFIRM_MS` | backend | How long Turso must remain continuously healthy before promotion back from fallback (default 60 s). One healthy probe starts the window but never promotes alone; 0 promotes on first healthy probe. |
+| `WB_RECOVERY_PROBE_TIMEOUT_MS` | backend | Bound for one recovery probe round-trip (default 10 s). |
+| `WB_RECOVERY_RECONCILE_COOLDOWN_MS` | backend | Cooldown between Turso catch-up refreshes when fallback holds newer data (default 30 min). A failed catch-up never hot-loops. |
+
+Backend `.env` is read once at process start and never hot-reloaded: changing any
+variable above requires a backend restart. In particular, editing `.env` while
+the server runs does not change its database target — use the Status page's
+reported target (which always reflects the actual active handle) to verify
+failover and recovery, not the file on disk.
 
 See `frontend/.env.example` and `backend/.env.example`. Real `.env` /
 `.env.local` files are local-only and never committed. `backend/.env.example`
@@ -542,6 +553,20 @@ observation writes. A newly published World Bank vintage is picked up by the
 next refresh after TTL expiry, or immediately via manual refresh. The actual
 World Bank vintage behind each analysis is always visible in API responses
 (`vintage` / `wbLastUpdated` evidence) and in the UI next to every result.
+
+Runtime failover and guarded recovery: a genuine mid-serving Turso transport
+failure (after the bounded retries) validates the existing local database and
+swaps future traffic to `Local SQLite (production fallback)` immediately, with
+the Status page reporting the actual active handle. While on fallback, TTL
+refresh continues normally against it. When Turso is reachable again,
+recovery first compares stored content directly (reads only, no World Bank
+fetch, no writes): identical content promotes through a short health
+confirmation window with zero fetch and zero writes, and only genuinely
+diverged content triggers a full catch-up refresh — which, like every
+refresh, publishes atomically or rolls back, never partially. Background
+recovery never drives the user-facing 20-indicator progress UI; the Status
+page shows a calm backup notice instead, and manual refreshes keep their
+detailed progress display.
 
 ## Source / Methodology
 

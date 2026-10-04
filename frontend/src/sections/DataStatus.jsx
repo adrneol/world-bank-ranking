@@ -211,6 +211,15 @@ export default function DataStatus({ onRefreshed }) {
   const refreshRolledBack =
     (useLive && (liveStage === 'partial' || liveStage === 'failed')) ||
     (!useLive && (persistedSummary?.status === 'partial' || persistedSummary?.status === 'failed'));
+  // Phase 8N: background database recovery is infrastructure state, not a
+  // user refresh. While fallback serves and the ledger/snapshot belongs to a
+  // recovery run, show one calm line instead of the 20-indicator checklist,
+  // progress bar, and rollback alert. Manual refreshes reset the ledger with
+  // their own trigger, so they always render the full UI below.
+  const activeTrigger = useLive ? (data?.progress?.trigger ?? null) : (persistedSummary?.trigger ?? null);
+  const fallbackActive = data?.database?.fallback === true;
+  const showRecoveryCalm =
+    activeTrigger === 'recovery' && fallbackActive && !refreshState.running;
 
   // Resolved refresh timestamps (UTC ISO from the backend; never fabricated).
   const refreshStartedAt =
@@ -435,7 +444,11 @@ export default function DataStatus({ onRefreshed }) {
             </div>
           </dl>
 
-          {refreshState.running || inProgress ? (
+          {showRecoveryCalm ? (
+            <p className="status status-loading" role="status">
+              Using backup database while the primary recovers. Current data remain available below.
+            </p>
+          ) : refreshState.running || inProgress ? (
             <p className="status status-loading" role="status">
               Refresh in progress{data.progress?.stage ? ` — ${data.progress.stage}` : ''}. Current data remain
               available below; duplicate refreshes are blocked.
@@ -444,7 +457,23 @@ export default function DataStatus({ onRefreshed }) {
           {showRefreshPanel ? (
             <div className="refresh-progress" aria-live="polite">
               <h3>Refresh</h3>
-              {polling ? (
+              {showRecoveryCalm ? (
+                <p>
+                  Using backup database while the primary recovers.
+                  {refreshStartedAt ? (
+                    <>
+                      <br />
+                      Started: {formatUtcDateTimeSeconds(refreshStartedAt) ?? refreshStartedAt}
+                    </>
+                  ) : null}
+                  {refreshElapsedText ? (
+                    <>
+                      <br />
+                      Elapsed: {refreshElapsedText}
+                    </>
+                  ) : null}
+                </p>
+              ) : polling ? (
                 <p>
                   Refresh in progress
                   {refreshStartedAt ? (
@@ -471,13 +500,18 @@ export default function DataStatus({ onRefreshed }) {
               ) : (
                 <p>No refresh recorded yet.</p>
               )}
-              <p className="refresh-count">
-                Progress: {doneCount} / {activeKeys.length} indicators
-              </p>
-              <progress value={doneCount} max={Math.max(activeKeys.length, 1)}>
-                {doneCount} / {activeKeys.length}
-              </progress>
-              {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey)}</p> : null}
+              {!showRecoveryCalm ? (
+                <>
+                  <p className="refresh-count">
+                    Progress: {doneCount} / {activeKeys.length} indicators
+                  </p>
+                  <progress value={doneCount} max={Math.max(activeKeys.length, 1)}>
+                    {doneCount} / {activeKeys.length}
+                  </progress>
+                  {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey)}</p> : null}
+                </>
+              ) : null}
+              {!showRecoveryCalm ? (
               <details
                 className="refresh-details"
                 open={detailsOpen}
@@ -564,6 +598,7 @@ export default function DataStatus({ onRefreshed }) {
                   </dl>
                 ) : null}
               </details>
+              ) : null}
             </div>
           ) : null}
           {refreshState.error ? (
@@ -571,7 +606,7 @@ export default function DataStatus({ onRefreshed }) {
               {refreshState.error}
             </p>
           ) : null}
-          {!refreshState.error && lastRunFailed && !inProgress ? (
+          {!refreshState.error && lastRunFailed && !inProgress && !showRecoveryCalm ? (
             <p className="status status-error" role="alert">
               The most recent refresh run failed. The previous valid dataset remains available.
             </p>

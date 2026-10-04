@@ -466,6 +466,98 @@ export async function getObservationsForCompare(db, indicatorId, startYear, endY
   );
 }
 
+/** Exact element-wise observation comparison with O10 identity semantics. */
+function observationTuplesEqual(aRows, bRows) {
+  if (!Array.isArray(aRows) || !Array.isArray(bRows)) return false;
+  if (aRows.length !== bRows.length) return false;
+  const byKey = new Map();
+  for (const row of aRows) {
+    const key = `${row.countryId}\n${row.year}`;
+    if (byKey.has(key)) return false;
+    byKey.set(key, row);
+  }
+  for (const row of bRows) {
+    const key = `${row.countryId}\n${row.year}`;
+    const match = byKey.get(key);
+    if (!match) return false;
+    if (!Object.is(match.value, row.value) && match.value !== row.value) return false;
+    if ((match.valueRaw ?? null) !== (row.valueRaw ?? null)) return false;
+    byKey.delete(key);
+  }
+  return byKey.size === 0;
+}
+
+/** Symmetric country-metadata comparison (both directions must agree). */
+function countryRowsEqual(aRows, bRows) {
+  const norm = (row) =>
+    JSON.stringify([
+      row.id,
+      row.iso2 ?? null,
+      row.iso3 ?? null,
+      row.name ?? null,
+      row.region ?? null,
+      row.region_id ?? null,
+      row.admin_region ?? null,
+      row.income_level ?? null,
+      row.lending_type ?? null,
+      row.capital_city ?? null,
+      row.is_aggregate ?? 0,
+      row.aggregate_reason ?? null,
+    ]);
+  if (!Array.isArray(aRows) || !Array.isArray(bRows)) return false;
+  if (aRows.length !== bRows.length) return false;
+  const aNorm = aRows.map(norm).sort();
+  const bNorm = bRows.map(norm).sort();
+  return aNorm.every((v, i) => v === bNorm[i]);
+}
+
+/**
+ * Phase 8N: stored-content equivalence across two database handles.
+ *
+ * Compares what is actually stored — every indicator's full observation set
+ * with O10 identity semantics plus symmetric country metadata — using the
+ * same minimal-column reads as the O10 proof, one indicator at a time.
+ * Pure reads: no transaction, no World Bank fetch, no writes, no memo
+ * interaction. Used by guarded recovery to prove a behind-on-timestamps
+ * primary already holds byte-identical content, so promotion needs no
+ * catch-up refresh at all.
+ *
+ * @returns {{identical:boolean, comparedIndicators:number, differingIndicators:string[], countriesMatch:boolean, rowsCompared:number}}
+ */
+export async function compareDatasetContent(dbA, dbB) {
+  const [indicatorsA, indicatorsB] = await Promise.all([listIndicators(dbA), listIndicators(dbB)]);
+  const byCodeA = new Map(indicatorsA.map((row) => [row.code, row]));
+  const byCodeB = new Map(indicatorsB.map((row) => [row.code, row]));
+  const codes = new Set([...byCodeA.keys(), ...byCodeB.keys()]);
+  const differingIndicators = [];
+  let comparedIndicators = 0;
+  let rowsCompared = 0;
+  for (const code of codes) {
+    const a = byCodeA.get(code);
+    const b = byCodeB.get(code);
+    if (!a || !b) {
+      differingIndicators.push(code);
+      continue;
+    }
+    comparedIndicators += 1;
+    const [rowsA, rowsB] = await Promise.all([
+      getObservationsForCompare(dbA, a.id, 1900, 2100),
+      getObservationsForCompare(dbB, b.id, 1900, 2100),
+    ]);
+    rowsCompared += rowsA.length + rowsB.length;
+    if (!observationTuplesEqual(rowsA, rowsB)) differingIndicators.push(code);
+  }
+  const [countriesA, countriesB] = await Promise.all([listCountries(dbA), listCountries(dbB)]);
+  const countriesMatch = countryRowsEqual(countriesA, countriesB);
+  return {
+    identical: differingIndicators.length === 0 && countriesMatch,
+    comparedIndicators,
+    differingIndicators,
+    countriesMatch,
+    rowsCompared,
+  };
+}
+
 /**
  * Every eligible (non-aggregate) observation for one indicator and year.
  *

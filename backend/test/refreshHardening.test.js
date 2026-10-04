@@ -403,3 +403,61 @@ test('I. production config rejects indicator substitution; test override is gate
     else process.env.WB_ALLOW_TEST_INDICATOR_OVERRIDES = savedGate;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Q. Phase 8N: a mid-publish database failure with the exact shape observed
+// live during Turso catch-up recovery (SQLITE_UNKNOWN "stored sql reference
+// is invalid") rolls back atomically: byte-identical dataset, failed run
+// recorded outside the transaction, lock released, freshness unmoved.
+// ---------------------------------------------------------------------------
+
+test('Q. mid-publish stored-reference failure rolls back with zero partial writes', async () => {
+  const { db, repository } = await seedFullDb();
+  const { refreshData } = await import('../src/wb/ingest.js');
+  stub.reset();
+
+  // Force one indicator to need publication so the publish path (DELETE +
+  // batched upserts inside the single O7 transaction) actually executes.
+  await queryExec(
+    db,
+    'UPDATE observations SET value = value + 1 WHERE rowid = (SELECT MIN(rowid) FROM observations)',
+  );
+  const before = await datasetSnapshot(db);
+  const lastSuccessBefore = await repository.getLastSuccessfulFetchTime(db);
+
+  // Sabotage the FIRST publish batch with the exact live-observed shape:
+  // staging/fetch already succeeded, then the write dies mid-transaction.
+  const origTransaction = db.transaction.bind(db);
+  db.transaction = async (...args) => {
+    const tx = await origTransaction(...args);
+    if (typeof tx.batch === 'function') {
+      const origBatch = tx.batch.bind(tx);
+      let calls = 0;
+      tx.batch = (...bargs) => {
+        calls += 1;
+        if (calls === 1) {
+          const error = new Error('SQLITE_UNKNOWN: Input error: stored sql reference is invalid: 1');
+          error.name = 'LibsqlError';
+          error.code = 'SQLITE_UNKNOWN';
+          return Promise.reject(error);
+        }
+        return origBatch(...bargs);
+      };
+    }
+    return tx;
+  };
+
+  await assert.rejects(
+    refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-midpublish-fail' }),
+    (error) => error instanceof Error,
+  );
+
+  // Atomicity: the published dataset is EXACTLY the pre-refresh one —
+  // including the locally mutated row, which the failed publish did not touch.
+  const after = await datasetSnapshot(db);
+  assert.deepEqual(after, before);
+  assert.equal((await repository.getLatestFetchRun(db, { status: null })).status, 'failed');
+  assert.equal(await repository.getLastSuccessfulFetchTime(db), lastSuccessBefore);
+  assert.deepEqual(await lockState(db, repository), { locked: false, runId: null });
+  db.close();
+});

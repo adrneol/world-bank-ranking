@@ -20,11 +20,15 @@ test.before(async () => {
   useStubBaseUrl(stub.baseUrl);
   process.env.WB_RECOVERY_REPROBE_MS = '0';
   process.env.WB_RECOVERY_PROBE_TIMEOUT_MS = '5000';
+  // Existing tests below assert immediate promotion; the confirmation
+  // window (Phase 8L) is covered by dedicated tests with explicit windows.
+  process.env.WB_RECOVERY_CONFIRM_MS = '0';
 });
 
 test.after(async () => {
   delete process.env.WB_RECOVERY_REPROBE_MS;
   delete process.env.WB_RECOVERY_PROBE_TIMEOUT_MS;
+  delete process.env.WB_RECOVERY_CONFIRM_MS;
   await stub?.close();
   stub = null;
 });

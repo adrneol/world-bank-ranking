@@ -133,6 +133,27 @@ test('classifier: transport shapes retry, semantic shapes do not', async () => {
   assert.equal(isTransportError('nope'), false);
 });
 
+test('classifier: Hrana auth-shaped SERVER_ERROR never retries or fails over', async () => {
+  // Verified live against @libsql/client: a wrong token yields LibsqlError /
+  // SERVER_ERROR with "HTTP status 400" — same envelope as transport death
+  // ("HTTP status 404"), but auth must fail fast, never retry or fail over.
+  const { isTransportError } = await import('../src/db/driver.js');
+  for (const status of [400, 401, 403]) {
+    const auth = Object.assign(new Error(`SERVER_ERROR: Server returned HTTP status ${status}`), {
+      name: 'LibsqlError',
+      code: 'SERVER_ERROR',
+    });
+    assert.equal(isTransportError(auth), false, `Hrana HTTP ${status} is auth-shaped, not transport`);
+  }
+  for (const status of [404, 500, 503]) {
+    const transport = Object.assign(new Error(`SERVER_ERROR: Server returned HTTP status ${status}`), {
+      name: 'LibsqlError',
+      code: 'SERVER_ERROR',
+    });
+    assert.equal(isTransportError(transport), true, `Hrana HTTP ${status} stays transport`);
+  }
+});
+
 test('SELECT retries once on transport failure then succeeds', async () => {
   const { queryAll } = await import('../src/db/driver.js');
   const { createMemoryDb } = await import('../src/db/index.js');

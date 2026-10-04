@@ -1195,8 +1195,13 @@ hr.ddivider {
   width: 100%;
   max-width: 800px;
   margin-top: 0.75rem;
-  padding: 0.25rem 0.25rem 0.5rem;
+  padding: 1.1rem 1.25rem;
   line-height: 1.7;
+  /* Lighter than the white section cards: a quiet inset explanatory note. */
+  background: #faf9f6;
+  border: 1px solid var(--line);
+  border-left: 3px solid #cfc9ba;
+  border-radius: 6px;
 }
 
 .resilience-body .resilience-lead {
@@ -1225,8 +1230,7 @@ hr.ddivider {
 @media (max-width: 40rem) {
   .resilience-body {
     max-width: 100%;
-    padding-left: 0;
-    padding-right: 0;
+    padding: 1rem;
   }
 }
 
