@@ -415,6 +415,79 @@ test('status serves metadata fingerprint + years + merged integrity, marks verif
   }
 });
 
+/**
+ * The one-time production repair, rehearsed end to end.
+ *
+ * A stale derived vintage is detected, a FAILED vintage-provenance result is
+ * never persisted as a verification, and the repair statement (which also
+ * invalidates the persisted verification) makes the next status request
+ * re-derive and re-persist the correct report.
+ */
+test('a failed vintage-provenance result is never cached; the repair invalidates the memo', async () => {
+  const { db, repository } = await seedDb();
+  const svc = await startStatusServer(db);
+  try {
+    // 1. A healthy dataset verifies and persists its report.
+    const healthy = await svc.status();
+    assert.ok(healthy.integrity.passed, 'the healthy dataset passes');
+    const verified = await repository.getDatasetState(db);
+    assert.equal(verified.integrityVerifiedContentVersion, verified.contentVersion);
+    assert.ok(
+      JSON.parse(verified.integrityChecksJson).some((c) => c.check === 'L.vintage_provenance'),
+      'the persisted report contains the vintage-provenance check',
+    );
+
+    // 2. Corrupt ONLY the derived row (the observations are untouched): this
+    //    is the production defect's footprint.
+    await db.execute({
+      sql: 'UPDATE dataset_state SET max_wb_last_updated = ? WHERE id = 1',
+      args: ['2019-01-01'],
+    });
+
+    // 3. The next status request must NOT report "pass" on a stale vintage.
+    const corrupted = await svc.status();
+    assert.equal(corrupted.integrity.passed, false, 'the stale vintage is reported as a failure');
+    const failing = corrupted.integrity.checks.find((c) => c.check === 'L.vintage_provenance');
+    assert.equal(failing.status, 'fail');
+    assert.equal(failing.detail?.cachedVintage ?? null, null, 'the status payload carries no detail');
+    const afterFailure = await repository.getDatasetState(db);
+    // A FAILED report is never persisted as a verification: the stored report
+    // is the previous (passing) one, and the verification mark is unchanged.
+    assert.equal(
+      afterFailure.integrityVerifiedContentVersion,
+      verified.integrityVerifiedContentVersion,
+      'a failed report does not advance the verification mark',
+    );
+
+    // 4. The repair: derive the vintage FROM the observations and invalidate
+    //    the persisted verification so the next request recomputes it.
+    await db.execute({
+      sql: `UPDATE dataset_state
+              SET max_wb_last_updated = (
+                    SELECT MAX(wb_last_updated) FROM observations WHERE wb_last_updated IS NOT NULL
+                  ),
+                  integrity_verified_content_version = NULL,
+                  integrity_checks_json = NULL,
+                  updated_at = ?
+            WHERE id = 1`,
+      args: [new Date().toISOString()],
+    });
+
+    // 5. The next status request re-derives, re-verifies and re-persists.
+    const repaired = await svc.status();
+    assert.ok(repaired.integrity.passed, 'the repaired dataset passes');
+    const repairedState = await repository.getDatasetState(db);
+    assert.equal(repairedState.integrityVerifiedContentVersion, repairedState.contentVersion);
+    assert.ok(
+      JSON.parse(repairedState.integrityChecksJson).some((c) => c.check === 'L.vintage_provenance'),
+      'the re-persisted report contains the vintage-provenance check',
+    );
+  } finally {
+    await svc.close();
+    db.close();
+  }
+});
+
 test('status separates the last successful check from the last data change', async () => {
   const { db, repository, refreshData } = await seedDb();
   const svc = await startStatusServer(db);

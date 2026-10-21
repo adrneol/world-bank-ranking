@@ -7,6 +7,7 @@
  * and GDP/Prices regression.
  */
 
+import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 

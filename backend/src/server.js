@@ -76,6 +76,7 @@ import {
   getCachedIntegrity,
   integrityCacheKey,
   resetIntegrityCache,
+  storedReportMatchesCurrentVintage,
 } from './services/statusCache.js';
 import {
   mergeIntegrityChecks,
@@ -2025,16 +2026,23 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
           },
         );
         const expensive = await getCachedExpensiveIntegrity(
-          expensiveIntegrityKey(state.contentVersion),
+          // The key carries the derived vintage as well as the content
+          // generation: the L.vintage_provenance check compares the derived
+          // row with the stored observations, and the derived row can change
+          // without the observations changing.
+          expensiveIntegrityKey(state.contentVersion, state.maxWbLastUpdated),
           async () => {
             // Restart-safe shortcut (Phase 7B Part 6): when this exact
             // content generation already passed verification in a previous
             // process lifetime, the persisted deterministic checks are the
-            // exact report — no rescan. Anything unparseable falls through
-            // to the live battery below.
+            // exact report — no rescan. The report is reusable only when it
+            // was produced against the CURRENT derived vintage: a corrected
+            // dataset_state row must be re-verified, not served from the memo.
             if (state.integrityVerifiedContentVersion === state.contentVersion) {
               const stored = parseStoredIntegrityChecks(state);
-              if (stored) return { passed: stored.every((c) => c.status === 'pass'), checks: stored };
+              if (stored && storedReportMatchesCurrentVintage(stored, state.maxWbLastUpdated)) {
+                return { passed: stored.every((c) => c.status === 'pass'), checks: stored };
+              }
             }
             const checks = await runExpensiveIntegrityChecks(h);
             return { passed: checks.every((c) => c.status === 'pass'), checks };
@@ -2145,13 +2153,15 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       // is the LOCAL retrieval timestamp. Additive, read-only, derived —
       // no ingestion semantics involved.
       wbLastUpdated: await getMaxWbLastUpdated(h),
-      // LAST SUCCESSFUL CHECK vs LAST ACTUAL DATA CHANGE.
+      // LAST SUCCESSFUL CHECK vs LAST ACTUAL DATA WRITE.
       // `cache.lastSuccessAt` (spread in above) is the time of the latest
       // successful World Bank CHECK — it advances even when the check proved
       // every value identical and wrote nothing. `lastDataChangeAt` is the
-      // moment observation rows were last written (MAX(observations.fetched_at)
-      // via the dataset fingerprint), i.e. the last time the stored data
-      // actually changed. Null when nothing is stored yet.
+      // moment observation VALUES were last written (MAX(observations.fetched_at)
+      // via the dataset fingerprint). It deliberately does NOT move for a
+      // metadata-only provenance advance: that rewrite leaves `fetched_at`
+      // untouched, so this timestamp keeps meaning "the stored data changed",
+      // not "anything at all was written". Null when nothing is stored yet.
       lastDataChangeAt: fingerprint?.maxFetchedAt ?? null,
       inProgress: isRefreshInProgress(),
       progress: getIngestProgress(),

@@ -6,6 +6,7 @@
  * (dynamic, no hardcoding), missing-data behavior, and GDP regression.
  */
 
+import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 

@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
 import { fileURLToPath } from 'node:url';
-import config from '../config.js';
+import config, { BACKEND_ROOT } from '../config.js';
 import { queryExec } from './driver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +28,53 @@ const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
 let db = null;
 let dbDescriptor = null;
+
+/**
+ * THE PROTECTED DEVELOPMENT DATABASE.
+ *
+ * `backend/data/worldbank.db` is a project artifact, not a test fixture. A
+ * test process must never open it: the application under test can issue a
+ * boot-time or TTL refresh, and that would republish live World Bank data
+ * into the developer's working database.
+ *
+ * The test bootstrap (backend/test/isolation.js) redirects DATABASE_FILE to a
+ * disposable per-process copy before `src/config.js` freezes the path. This
+ * guard is the backstop for the case where that bootstrap did NOT run (for
+ * example a single test file executed without the suite's --import hook):
+ * the protected file is refused LOUDLY instead of being opened.
+ */
+export const PROTECTED_DEV_DATABASE = path.join(BACKEND_ROOT, 'data', 'worldbank.db');
+
+/** True when this process is a test process (node --test child or NODE_ENV=test). */
+export function isTestProcess() {
+  return process.env.NODE_TEST_CONTEXT !== undefined || process.env.NODE_ENV === 'test';
+}
+
+/** Path comparison that is case-insensitive on Windows. */
+function samePath(a, b) {
+  if (!a || !b) return false;
+  const norm = (value) => {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * Refuse to open the protected development database from a test process.
+ * Throws a loud, actionable error; never returns a handle.
+ */
+export function assertNotProtectedDatabase(file) {
+  if (!isTestProcess()) return;
+  if (!samePath(file, PROTECTED_DEV_DATABASE)) return;
+  throw new Error(
+    `Refusing to open the protected development database (${file}) in a test process. ` +
+      'The repository database is a project artifact and must never be modified by tests. ' +
+      'Run the suite with `npm test` (backend/package.json), which preloads ' +
+      'test/isolation.js and points DATABASE_FILE at a disposable copy, or set ' +
+      'DATABASE_FILE to a disposable database yourself.',
+  );
+}
 
 /**
  * Columns added after the first release.
@@ -158,6 +205,7 @@ export function getDb() {
     return db;
   }
   const file = config.databaseFile;
+  assertNotProtectedDatabase(file);
   if (file !== ':memory:') {
     fs.mkdirSync(path.dirname(file), { recursive: true });
   }
@@ -216,6 +264,9 @@ export function closeDb() {
  */
 export async function openExistingLocalDb() {
   const file = config.databaseFile;
+  // The guard runs OUTSIDE the try: a refusal must be loud, not swallowed
+  // into the "no usable fallback" answer below.
+  assertNotProtectedDatabase(file);
   try {
     if (file === ':memory:') return null;
     if (!fs.existsSync(file)) return null;

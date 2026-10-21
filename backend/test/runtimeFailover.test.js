@@ -16,6 +16,7 @@ import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
 
 let stub = null;
 let previousTarget = null;
+let previousDbMode = null;
 
 test.before(async () => {
   stub = await startStubWorldBank({});
@@ -29,6 +30,15 @@ test.before(async () => {
   // Existing promotion tests assert immediate switch-back; confirmation
   // windows (Phase 8L) are covered by dedicated tests with explicit windows.
   process.env.WB_RECOVERY_CONFIRM_MS = '0';
+  // This file exercises the TURSO-primary scenarios, so it declares that
+  // policy itself instead of depending on the ambient DB_MODE of whatever
+  // configuration the suite runs under. The declaration happens BEFORE
+  // `src/config.js` is imported (configuration freezes at import time), and
+  // it changes no connection: every handle used here is injected, and the
+  // Turso credentials stay unavailable (the isolation bootstrap empties
+  // them), so nothing can reach a remote database.
+  previousDbMode = process.env.DB_MODE;
+  process.env.DB_MODE = 'turso';
   const { getActiveDbInfo } = await import('../src/server.js');
   previousTarget = getActiveDbInfo();
 });
@@ -41,6 +51,8 @@ test.after(async () => {
   delete process.env.WB_RECOVERY_REPROBE_MS;
   delete process.env.WB_RECOVERY_PROBE_TIMEOUT_MS;
   delete process.env.WB_RECOVERY_CONFIRM_MS;
+  if (previousDbMode === undefined || previousDbMode === null) delete process.env.DB_MODE;
+  else process.env.DB_MODE = previousDbMode;
   const { setActiveDbInfo } = await import('../src/server.js');
   setActiveDbInfo(previousTarget);
   await stub?.close();

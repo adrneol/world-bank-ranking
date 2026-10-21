@@ -15,7 +15,7 @@
     "refresh:http": "node src/scripts/refreshViaHttp.js",
     "audit:live": "node src/scripts/liveAudit.js",
     "snapshot:create": "node src/scripts/createSnapshot.js",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --import ./test/isolation.js --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

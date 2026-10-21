@@ -431,12 +431,16 @@ export default function DataStatus({ onRefreshed }) {
               </dd>
             </div>
             <div>
-              <dt>Last data change (UTC)</dt>
+              <dt>Last data write (UTC)</dt>
               <dd>
                 {data.lastDataChangeAt
                   ? (formatUtcDateTime(data.lastDataChangeAt) ?? data.lastDataChangeAt)
                   : '—'}
-                <span className="muted"> (when the stored observations were last written)</span>
+                <span className="muted">
+                  {' '}
+                  (observation values were last written; a metadata-only provenance update does not
+                  move this)
+                </span>
               </dd>
             </div>
             <div>

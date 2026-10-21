@@ -68,9 +68,36 @@ export function cheapIntegrityKey(runId) {
   return `cheap:success:${String(runId ?? 'none')}`;
 }
 
-/** Exact key for the expensive battery: the observation-content generation. */
-export function expensiveIntegrityKey(contentVersion) {
-  return `expensive:content:${String(contentVersion ?? 'none')}`;
+/**
+ * Exact key for the expensive battery: the observation-content generation AND
+ * the derived dataset vintage the report was produced against.
+ *
+ * The vintage is part of the key because the battery now contains the
+ * L.vintage_provenance check, whose inputs are the observations (content) AND
+ * the derived dataset_state row. The derived row can change WITHOUT the
+ * observations changing (a correction, or an out-of-band edit), so a key built
+ * from the content generation alone would serve a memoized report that no
+ * longer describes the current state — exactly the class of bug the
+ * L.vintage_provenance check exists to detect.
+ */
+export function expensiveIntegrityKey(contentVersion, vintage) {
+  return `expensive:content:${String(contentVersion ?? 'none')}:vintage:${String(vintage ?? 'none')}`;
+}
+
+/**
+ * Whether a PERSISTED expensive report may be reused for the current derived
+ * vintage.
+ *
+ * The report is only valid for the derived vintage it was produced against:
+ * its L.vintage_provenance detail records that vintage. A corrected (or
+ * corrupted) dataset_state row must be re-verified, never served from the
+ * memo.
+ */
+export function storedReportMatchesCurrentVintage(checks, currentVintage) {
+  if (!Array.isArray(checks)) return false;
+  const check = checks.find((c) => c?.check === 'L.vintage_provenance');
+  if (!check || !check.detail || typeof check.detail !== 'object') return false;
+  return (check.detail.cachedVintage ?? null) === (currentVintage ?? null);
 }
 
 async function getCachedSlot(slot, key, compute) {

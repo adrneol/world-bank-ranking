@@ -93,11 +93,14 @@ describe('status and audit freshness semantics', () => {
     await flushReact(act);
     expect(container.textContent).toContain('World Bank data vintage');
     expect(container.textContent).toContain('13 July 2026');
-    // The successful CHECK time and the last DATA CHANGE are distinct facts.
+    // The successful CHECK time and the last DATA WRITE are distinct facts.
     expect(container.textContent).toContain('Last successful World Bank check');
     expect(container.textContent).toContain('28 September 2026, 00:25 UTC');
-    expect(container.textContent).toContain('Last data change');
+    expect(container.textContent).toContain('Last data write');
     expect(container.textContent).toContain('24 September 2026, 11:02 UTC');
+    // The data-write timestamp must not claim to cover every write: a
+    // metadata-only provenance update does not move it.
+    expect(container.textContent).toContain('provenance update does not');
     // The old mislabel (retrieval time presented AS the vintage) is gone.
     expect(container.textContent).not.toContain('(retrieved)');
     expect(container.textContent).toContain('5 h ago');

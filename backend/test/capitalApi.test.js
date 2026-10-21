@@ -7,6 +7,7 @@
  * missing-data behavior, and GDP/Prices/Trade regression.
  */
 
+import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 

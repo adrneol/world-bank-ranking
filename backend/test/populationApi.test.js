@@ -6,6 +6,7 @@
  * mean LOO with country−benchmark gaps, group filter, missing-data states.
  */
 
+import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
