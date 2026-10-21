@@ -136,6 +136,7 @@ import {
   upsertIngestYearStats,
   upsertIngestYearStatsInner,
   upsertObservationsInner,
+  updateObservationsProvenanceInner,
 } from '../db/repository.js';
 import {
   buildUniverse,
@@ -565,6 +566,48 @@ export function isIndicatorPayloadUnchanged(stored, staged) {
 }
 
 /**
+ * Distinct World Bank provenance stamps carried by the STORED rows of one
+ * indicator/range, plus whether any row carries no stamp at all.
+ *
+ * Used to decide whether a value-identical payload still needs a metadata-only
+ * provenance advance: the stored rows must all carry the CURRENT upstream
+ * release stamp for the dataset vintage to describe the release the pipeline
+ * has actually retrieved.
+ *
+ * @param {{wbLastUpdated?:string|null}[]} stored
+ * @returns {{stamps:string[], hasUnstamped:boolean, rowCount:number}}
+ */
+export function collectStoredVintages(stored) {
+  const stamps = new Set();
+  let hasUnstamped = false;
+  let rowCount = 0;
+  for (const row of stored ?? []) {
+    rowCount += 1;
+    const stamp = row?.wbLastUpdated ?? null;
+    if (stamp === null || stamp === '') hasUnstamped = true;
+    else stamps.add(stamp);
+  }
+  return { stamps: [...stamps].sort(), hasUnstamped, rowCount };
+}
+
+/**
+ * Whether the stored rows of an indicator still carry the CURRENT upstream
+ * release stamp.
+ *
+ * True means a metadata-only provenance advance is required: the economic
+ * values are identical (O10 proved it) but the stored rows describe an
+ * older release than the payload just retrieved.
+ */
+export function storedVintageNeedsAdvance(storedVintages, upstreamVintage) {
+  if (!storedVintages) return false;
+  if (upstreamVintage === null || upstreamVintage === undefined || upstreamVintage === '') return false;
+  if (storedVintages.rowCount === 0) return false;
+  if (storedVintages.hasUnstamped) return true;
+  if (storedVintages.stamps.length !== 1) return true;
+  return storedVintages.stamps[0] !== upstreamVintage;
+}
+
+/**
  * Phase 7D-2: exact country-metadata unchanged proof.
  *
  * Compares staged country rows against stored rows with the EXACT
@@ -734,6 +777,7 @@ export function buildFinalProgressSummary({ stage, status, trigger } = {}) {
         status: found.status,
         ...(Number.isFinite(found.rows) ? { rows: found.rows } : {}),
         ...(found.error ? { error: String(found.error).slice(0, 500) } : {}),
+        ...(found.provenanceUpdated ? { provenanceUpdated: true } : {}),
         ...(found.at ? { at: found.at } : {}),
       };
     }
@@ -1007,6 +1051,12 @@ export async function refreshData(options = {}) {
     // never the staged rows themselves, so memory stays bounded no matter
     // how many indicators changed.
     const changedPlans = [];
+    // Metadata-only provenance plans (value-identical payloads whose stored
+    // rows still carry an older upstream release stamp). Each holds the
+    // indicator id and the new stamp; the rows themselves stay untouched
+    // except for their provenance column, which is advanced inside the same
+    // atomic publish transaction.
+    const provenancePlans = [];
     for (const metricKey of metricKeys) {
         lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
 
@@ -1068,6 +1118,7 @@ export async function refreshData(options = {}) {
         // identical and left untouched.
         const existingIndicator = await getIndicatorByMetricKey(db, metricKey);
         let unchanged = false;
+        let storedVintages = null;
         if (existingIndicator) {
           const stored = await getObservationsForCompare(
             db,
@@ -1076,11 +1127,31 @@ export async function refreshData(options = {}) {
             fetchedEndYear,
           );
           unchanged = isIndicatorPayloadUnchanged(stored, result.stagedRows);
+          storedVintages = collectStoredVintages(stored);
         }
         if (unchanged) {
           result.skippedUnchanged = true;
           totals.rowsSkippedUnchanged += result.rowsUpserted;
           result.stagedRows = EMPTY_RELEASED_ROWS;
+          // Provenance advance (metadata only): the ECONOMIC values are
+          // identical, but the stored rows may still carry the PREVIOUS
+          // release's `lastupdated`. Leaving them untouched would make the
+          // dataset's derived vintage describe an older release than the one
+          // just retrieved. The stamp is advanced by a targeted UPDATE inside
+          // the atomic publish transaction (no value row is rewritten).
+          const needsProvenanceAdvance = storedVintageNeedsAdvance(
+            storedVintages,
+            result.lastUpdated,
+          );
+          if (needsProvenanceAdvance && existingIndicator) {
+            provenancePlans.push({
+              metricKey,
+              indicatorCode: result.indicatorCode,
+              indicatorId: existingIndicator.id,
+              wbLastUpdated: result.lastUpdated,
+              rows: result.rowsUpserted,
+            });
+          }
           recordStep(metricKey, 'unchanged', { rows: result.rowsUpserted });
           succeededCount += 1;
           continue;
@@ -1190,16 +1261,45 @@ export async function refreshData(options = {}) {
           await upsertObservationsInner(tx, stagedRows, (row) => ({ ...row, indicatorId: indicator.id }));
           recordStep(plan.metricKey, 'published', { rows: plan.rows });
         }
+        // Metadata-only provenance advance for value-identical indicators whose
+        // stored rows still carry an older upstream release stamp. Only the
+        // `wb_last_updated` column is rewritten: no economic value and no
+        // value_raw is touched, and `fetched_at` deliberately stays at the
+        // moment the DATA was last written, so "last data change" remains a
+        // truthful signal. Runs inside this same transaction: a failed
+        // refresh can never publish a partial provenance advance.
+        for (const plan of provenancePlans) {
+          const changed = await updateObservationsProvenanceInner(
+            tx,
+            plan.indicatorId,
+            fetchedStartYear,
+            fetchedEndYear,
+            plan.wbLastUpdated,
+          );
+          if (changed > 0) {
+            contentChanged = true;
+            recordStep(plan.metricKey, 'unchanged', {
+              rows: plan.rows,
+              provenanceUpdated: true,
+            });
+          }
+        }
         await upsertIngestYearStatsInner(tx, runId, yearStats);
         // Phase 7B dataset_state: maintained INSIDE the same atomic publish
         // transaction, so observations and metadata commit or roll back
         // together — a partial/failed attempt can never leave a half-updated
         // row behind. A content change (observations rewritten OR country
-        // metadata rewritten) recomputes the exact scan-derived values (rare:
-        // only on real change) and advances content_version exactly once; an
-        // all-unchanged attempt leaves every field untouched (freshness still
-        // advances via the success run below). A missing row (legacy database)
-        // is bootstrapped once, starting at content_version 1.
+        // metadata rewritten OR a provenance stamp advanced) recomputes the
+        // exact scan-derived values (rare: only on real change) and advances
+        // content_version exactly once; an all-unchanged attempt leaves every
+        // field untouched (freshness still advances via the success run
+        // below). A missing row (legacy database) is bootstrapped once,
+        // starting at content_version 1.
+        //
+        // The recomputed vintage comes from a DIRECT scan of the observations
+        // table (computeDatasetState -> scanMaxWbLastUpdated), never from the
+        // cached row: deriving this field from the cache that holds it would
+        // freeze the reported vintage across upstream releases.
         {
           const previous = await getDatasetState(tx);
           if (contentChanged || metadataChanged || !previous) {

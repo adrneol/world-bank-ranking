@@ -449,21 +449,73 @@ export async function getObservation(db, countryId, indicatorId, year) {
 /**
  * Stored observation tuples for one indicator across an inclusive year range,
  * for the Phase 6C O10 unchanged-indicator proof. Minimal columns only
- * (identity + exact stored value + exact stored raw string); one indicator at
- * a time, so peak memory stays bounded. Includes aggregate-typed rows: the
- * comparison must cover everything the publish would rewrite.
+ * (identity + exact stored value + exact stored raw string + the stored
+ * provenance stamp); one indicator at a time, so peak memory stays bounded.
+ * Includes aggregate-typed rows: the comparison must cover everything the
+ * publish would rewrite.
  *
- * @returns {{countryId:string, year:number, value:number, valueRaw:string|null}[]}
+ * `wbLastUpdated` is carried so the caller can tell whether the stored rows
+ * still carry the CURRENT upstream vintage (a metadata-only advance is then
+ * required) without a second query over the same range.
+ *
+ * @returns {{countryId:string, year:number, value:number, valueRaw:string|null, wbLastUpdated:string|null}[]}
  */
 export async function getObservationsForCompare(db, indicatorId, startYear, endYear) {
   return queryAll(
     db,
-    `SELECT country_id AS countryId, year, value, value_raw AS valueRaw
+    `SELECT country_id AS countryId, year, value, value_raw AS valueRaw,
+            wb_last_updated AS wbLastUpdated
        FROM observations
        WHERE indicator_id = ? AND year BETWEEN ? AND ?
        ORDER BY country_id, year`,
     [indicatorId, startYear, endYear],
   );
+}
+
+/**
+ * Advance ONLY the World Bank provenance stamp of the stored rows of one
+ * indicator inside an inclusive year range.
+ *
+ * Used when the upstream payload is proven VALUE-IDENTICAL to what is
+ * already stored but the upstream `lastupdated` (the release vintage) has
+ * advanced. The economic values and their raw decimal representation are
+ * untouched: only the metadata column is rewritten, and only for the rows
+ * that actually carry a different stamp.
+ *
+ * Rationale: `observations.wb_last_updated` records the WDI `lastupdated` of
+ * the payload that produced the stored row (schema.sql). A row left behind
+ * by an upstream release that changed nothing but its metadata would keep the
+ * PREVIOUS release's stamp, and the dataset's derived vintage (MAX of that
+ * column) would then describe an older release than the one the pipeline has
+ * actually retrieved.
+ *
+ * Must run inside the atomic publish transaction: a failed refresh must never
+ * publish a partial provenance advance.
+ *
+ * @returns {number} number of rows whose stamp actually changed
+ */
+export async function updateObservationsProvenanceInner(
+  db,
+  indicatorId,
+  startYear,
+  endYear,
+  wbLastUpdated,
+) {
+  const target =
+    wbLastUpdated === null || wbLastUpdated === undefined || wbLastUpdated === ''
+      ? null
+      : wbLastUpdated;
+  if (target === null) return 0;
+  const info = await queryRun(
+    db,
+    `UPDATE observations
+        SET wb_last_updated = ?
+      WHERE indicator_id = ?
+        AND year BETWEEN ? AND ?
+        AND wb_last_updated IS NOT ?`,
+    [target, indicatorId, startYear, endYear, target],
+  );
+  return info.changes;
 }
 
 /** Exact element-wise observation comparison with O10 identity semantics. */
@@ -944,6 +996,28 @@ export function buildYearsPayload(indicators, rows) {
 }
 
 /**
+ * Scan the maximum non-null World Bank provenance stamp actually STORED in
+ * the observations table.
+ *
+ * This is the single authoritative source for the dataset vintage. It is kept
+ * deliberately separate from getMaxWbLastUpdated(), which serves the cached
+ * dataset_state value to ordinary readers: a writer that derives the cached
+ * value FROM the cached value can never advance it (that self-reference is
+ * what froze the reported vintage on an upstream release).
+ *
+ * The scan runs where the dataset state is actually recomputed (a content
+ * change) and where a consistency check demands it — never on an ordinary
+ * read path.
+ */
+export async function scanMaxWbLastUpdated(db) {
+  const row = await queryGet(
+    db,
+    'SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL',
+  );
+  return row?.v ?? null;
+}
+
+/**
  * Latest upstream World Bank vintage behind the stored dataset: the maximum
  * non-null `wb_last_updated` across observations (each row carries the WDI
  * `lastupdated` metadata from its own retrieval). Null when nothing stored.
@@ -951,15 +1025,15 @@ export function buildYearsPayload(indicators, rows) {
  *
  * Phase 7B: served from dataset_state when derived (stored-dataset vintage,
  * exactly the scan's value); absent row falls back to the legacy scan.
+ *
+ * READ ONLY. Never use this function as the source when WRITING the derived
+ * dataset_state row — use scanMaxWbLastUpdated() for that (see
+ * computeDatasetState).
  */
 export async function getMaxWbLastUpdated(db) {
   const state = await getDatasetState(db);
   if (state) return state.maxWbLastUpdated;
-  const row = await queryGet(
-    db,
-    'SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL',
-  );
-  return row?.v ?? null;
+  return await scanMaxWbLastUpdated(db);
 }
 
 /**
@@ -1428,11 +1502,17 @@ export function parseDatasetYears(state) {
  * validation, and changed-refresh maintenance inside the publish tx).
  * Runs COUNT(*) + MAX(fetched_at) + MAX(wb_last_updated) + the shared
  * available-years group-by — the same statements the legacy paths run.
+ *
+ * The vintage is scanned from the observations table DIRECTLY
+ * (scanMaxWbLastUpdated). It is never taken from the cached dataset_state
+ * row: deriving a field from the cache that holds that same field makes the
+ * cache self-perpetuating and freezes the reported vintage across upstream
+ * releases.
  */
 export async function computeDatasetState(db) {
   const observationCount = await countObservations(db);
   const maxFetchedRow = await queryGet(db, 'SELECT MAX(fetched_at) AS t FROM observations');
-  const maxWbLastUpdated = await getMaxWbLastUpdated(db);
+  const maxWbLastUpdated = await scanMaxWbLastUpdated(db);
   const indicators = await listIndicators(db);
   const rows = await queryAll(db, AVAILABLE_YEARS_GROUP_SQL);
   const payload = buildYearsPayload(indicators, rows);
@@ -1541,6 +1621,7 @@ export const EXPENSIVE_CHECK_NAMES = Object.freeze([
   'E.invalid_year',
   'F.non_finite_value',
   'F.raw_round_trip',
+  'L.vintage_provenance',
 ]);
 
 /**

@@ -2118,6 +2118,25 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
         summary: summary ?? null,
       };
     }
+    // Refresh outcome (Phase 8E terminal ledger): how many indicators were
+    // CHECKED, how many actually carried CHANGED data, how many were
+    // UNCHANGED and how many FAILED. "checked" is deliberately not the same
+    // number as "changed": a successful check that proves every value
+    // identical changes nothing. Additive; derived from the persisted
+    // progress summary, never from a second source of truth.
+    const outcomeCounts = persistedRefresh
+      ? (parseProgressSummary(persistedRefresh.progress_summary)?.counts ?? null)
+      : null;
+    const refreshOutcome = outcomeCounts
+      ? {
+          checked: Math.max(0, (outcomeCounts.total ?? 0) - (outcomeCounts.notAttempted ?? 0)),
+          updated: outcomeCounts.updated ?? 0,
+          unchanged: outcomeCounts.unchanged ?? 0,
+          failed: outcomeCounts.failed ?? 0,
+          notAttempted: outcomeCounts.notAttempted ?? 0,
+          total: outcomeCounts.total ?? 0,
+        }
+      : null;
     res.json({
       ...cache,
       // Authoritative upstream World Bank vintage: MAX(wb_last_updated)
@@ -2126,11 +2145,21 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       // is the LOCAL retrieval timestamp. Additive, read-only, derived —
       // no ingestion semantics involved.
       wbLastUpdated: await getMaxWbLastUpdated(h),
+      // LAST SUCCESSFUL CHECK vs LAST ACTUAL DATA CHANGE.
+      // `cache.lastSuccessAt` (spread in above) is the time of the latest
+      // successful World Bank CHECK — it advances even when the check proved
+      // every value identical and wrote nothing. `lastDataChangeAt` is the
+      // moment observation rows were last written (MAX(observations.fetched_at)
+      // via the dataset fingerprint), i.e. the last time the stored data
+      // actually changed. Null when nothing is stored yet.
+      lastDataChangeAt: fingerprint?.maxFetchedAt ?? null,
       inProgress: isRefreshInProgress(),
       progress: getIngestProgress(),
       // Phase 8E: persisted last completed refresh (survives remount/reload;
       // live `progress` above remains the in-memory ledger during a run).
       lastRefresh,
+      // Phase 8E: terminal per-indicator outcome of the last completed run.
+      refreshOutcome,
       retry: getRefreshRetryState(),
       lock,
       integrity,

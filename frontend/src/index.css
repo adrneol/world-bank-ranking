@@ -790,6 +790,14 @@ thead .sticky-col {
   overflow-wrap: anywhere;
 }
 
+/* Supplementary clarifier inside a fact value (e.g. "the source was checked;
+   the check may have found no changes"). Never a second value: the muted
+   weight keeps the timestamp itself visually dominant. */
+.facts dd .muted {
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
 /* ---------- structured details panel (shared grid system) ---------- */
 /* One grid definition shared by every Details section, so corresponding
    fields start at identical horizontal positions regardless of content.

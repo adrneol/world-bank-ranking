@@ -19,6 +19,7 @@ const STATUS = {
   observations: 228776,
   fresh: true,
   lastSuccessAt: '2026-09-28T00:25:14.000Z',
+  lastDataChangeAt: '2026-09-24T11:02:00.000Z',
   wbLastUpdated: '2026-07-13',
   ageHours: 5,
   ttlHours: 24,
@@ -30,6 +31,7 @@ const STATUS = {
   autoRefresh: { enabled: true },
   refreshRequiresAuth: true,
   lastRun: { status: 'success' },
+  refreshOutcome: { checked: 20, updated: 0, unchanged: 20, failed: 0, notAttempted: 0, total: 20 },
   latestRuns: [],
 };
 
@@ -91,11 +93,27 @@ describe('status and audit freshness semantics', () => {
     await flushReact(act);
     expect(container.textContent).toContain('World Bank data vintage');
     expect(container.textContent).toContain('13 July 2026');
-    expect(container.textContent).toContain('Data retrieved');
+    // The successful CHECK time and the last DATA CHANGE are distinct facts.
+    expect(container.textContent).toContain('Last successful World Bank check');
     expect(container.textContent).toContain('28 September 2026, 00:25 UTC');
+    expect(container.textContent).toContain('Last data change');
+    expect(container.textContent).toContain('24 September 2026, 11:02 UTC');
     // The old mislabel (retrieval time presented AS the vintage) is gone.
     expect(container.textContent).not.toContain('(retrieved)');
     expect(container.textContent).toContain('5 h ago');
+    cleanup();
+  });
+
+  it('status reports the refresh outcome without calling unchanged work "changed"', async () => {
+    stub = stubFetch([['/api/data-status', STATUS]]);
+    const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
+    await flushReact(act);
+    expect(container.textContent).toContain('20 checked');
+    expect(container.textContent).toContain('0 changed');
+    expect(container.textContent).toContain('20 unchanged');
+    expect(container.textContent).toContain('0 failed');
+    // "20/20" must never be presented as "20/20 rewritten".
+    expect(container.textContent).not.toContain('20 rewritten');
     cleanup();
   });
 

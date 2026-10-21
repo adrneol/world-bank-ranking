@@ -152,3 +152,77 @@ test('I detects a missing India series for an ingested indicator', async () => {
     ['nominal_current'],
   );
 });
+
+test('L detects a derived dataset_state vintage that disagrees with the stored provenance', async () => {
+  const { db, repository, indicator } = await seedEdgeCaseDb();
+  // The Inner write variant does not invalidate the derived row, so the
+  // mismatch can be constructed exactly as it appeared in production: the
+  // cached row names an OLD release while the observations carry a newer one.
+  await repository.upsertObservationsInner(db, [
+    {
+      countryId: 'IND',
+      indicatorId: indicator.id,
+      year: 2005,
+      value: 100,
+      valueRaw: '100',
+      wbLastUpdated: '2026-10-08',
+    },
+  ]);
+  await repository.upsertDatasetStateInner(db, {
+    observationCount: 1,
+    maxFetchedAt: null,
+    maxWbLastUpdated: '2026-07-13',
+    yearsJson: '{"perMetric":{},"years":[]}',
+    contentVersion: 1,
+    integrityVerifiedContentVersion: null,
+    integrityChecksJson: null,
+    updatedRunId: null,
+  });
+
+  const report = await run(db);
+  const check = report.checks.find((c) => c.check === 'L.vintage_provenance');
+  assert.equal(check.status, 'fail', 'the stale derived vintage is detected');
+  assert.equal(check.detail.cachedVintage, '2026-07-13');
+  assert.equal(check.detail.storedVintage, '2026-10-08');
+  assert.equal(report.passed, false);
+});
+
+test('L passes when the derived vintage matches the stored provenance', async () => {
+  const { db, repository, indicator } = await seedEdgeCaseDb();
+  await repository.upsertObservationsInner(db, [
+    {
+      countryId: 'IND',
+      indicatorId: indicator.id,
+      year: 2005,
+      value: 100,
+      valueRaw: '100',
+      wbLastUpdated: '2026-10-08',
+    },
+  ]);
+  await repository.upsertDatasetStateInner(db, {
+    observationCount: 1,
+    maxFetchedAt: null,
+    maxWbLastUpdated: '2026-10-08',
+    yearsJson: '{"perMetric":{},"years":[]}',
+    contentVersion: 1,
+    integrityVerifiedContentVersion: null,
+    integrityChecksJson: null,
+    updatedRunId: null,
+  });
+
+  const report = await run(db);
+  const check = report.checks.find((c) => c.check === 'L.vintage_provenance');
+  assert.equal(check.status, 'pass');
+  assert.equal(check.detail.cachedVintage, '2026-10-08');
+  assert.equal(check.detail.storedVintage, '2026-10-08');
+});
+
+test('L is vacuous without a derived row and with no stored provenance', async () => {
+  // No dataset_state row: readers fall back to exact scans, so there is
+  // nothing to disagree with (same "unknown" semantics as the other checks).
+  const { db } = await createMemoryTestDb();
+  const report = await run(db);
+  const check = report.checks.find((c) => c.check === 'L.vintage_provenance');
+  assert.equal(check.status, 'pass');
+  assert.equal(check.detail.statePresent, false);
+});

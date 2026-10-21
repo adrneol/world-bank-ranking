@@ -65,8 +65,9 @@ CREATE TABLE IF NOT EXISTS observations (
   year            INTEGER NOT NULL,
   value           REAL    NOT NULL,        -- queryable numeric (IEEE-754 double)
   value_raw       TEXT,                   -- canonical decimal string of the accepted value
-  wb_last_updated TEXT,                    -- API lastupdated for this payload
-  fetched_at      TEXT    NOT NULL,        -- when this row was retrieved
+  wb_last_updated TEXT,                    -- API lastupdated of the payload that produced this row
+                                           -- (the World Bank release vintage, NOT the retrieval time)
+  fetched_at      TEXT    NOT NULL,        -- when this row was retrieved/written
   PRIMARY KEY (country_id, indicator_id, year),
   FOREIGN KEY (country_id)   REFERENCES countries (id)  ON DELETE CASCADE,
   FOREIGN KEY (indicator_id) REFERENCES indicators (id) ON DELETE CASCADE
@@ -197,9 +198,12 @@ INSERT OR IGNORE INTO refresh_locks (id, locked, updated_at)
 --     aggregate alike), exactly as countObservations() defines it.
 --   max_fetched_at: MAX(fetched_at) over all observations, exactly as the
 --     dataset fingerprint defines it.
---   max_wb_last_updated: MAX(wb_last_updated) over non-null values, exactly
---     as getMaxWbLastUpdated() defines it. This is the STORED dataset
---     vintage, not the latest checked source-run vintage.
+--   max_wb_last_updated: MAX(wb_last_updated) over non-null values, i.e. the
+--     STORED dataset vintage. It is RECOMPUTED by scanning the observations
+--     table (repository.computeDatasetState -> scanMaxWbLastUpdated) and must
+--     never be copied from this row's own previous value: a self-referential
+--     derivation freezes the reported vintage across upstream releases. The
+--     read path (repository.getMaxWbLastUpdated) serves this cached value.
 --   years_json: JSON {perMetric: {metricKey: [years]}, years: [...]} built by
 --     the same grouping as listAvailableYears(): eligible observations only,
 --     per-metric ascending, global = exact union of the per-metric sets.

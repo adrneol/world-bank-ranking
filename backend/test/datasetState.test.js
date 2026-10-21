@@ -54,16 +54,27 @@ async function seedDb() {
   return { db, repository, refreshData, seedSummary: summary };
 }
 
-/** Legacy scan-derived truth, independent of dataset_state. */
+/**
+ * Legacy scan-derived truth, independent of dataset_state.
+ *
+ * The vintage is read with an EXPLICIT SQL query, never through
+ * repository.getMaxWbLastUpdated(): that function is part of the code under
+ * test (it serves the cached dataset_state row), so using it as the oracle
+ * made this comparison tautological and allowed a stale-vintage regression
+ * to pass unnoticed.
+ */
 async function scanTruth(db, repository) {
   const count = await repository.countObservations(db);
   const maxFetchedRow = await db.execute({ sql: 'SELECT MAX(fetched_at) AS t FROM observations', args: [] });
-  const maxVintage = await repository.getMaxWbLastUpdated(db);
+  const maxVintageRow = await db.execute({
+    sql: 'SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL',
+    args: [],
+  });
   const years = await repository.listAvailableYears(db);
   return {
     count,
     maxFetchedAt: maxFetchedRow.rows[0]?.t ?? null,
-    maxWbLastUpdated: maxVintage,
+    maxWbLastUpdated: maxVintageRow.rows[0]?.v ?? null,
     years,
   };
 }
@@ -404,6 +415,49 @@ test('status serves metadata fingerprint + years + merged integrity, marks verif
   }
 });
 
+test('status separates the last successful check from the last data change', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  const svc = await startStatusServer(db);
+  try {
+    const first = await svc.status();
+    // The successful CHECK time and the last DATA CHANGE are separate facts.
+    assert.ok(first.lastSuccessAt, 'the successful check timestamp is served');
+    assert.ok(first.lastDataChangeAt, 'the last data change timestamp is served');
+    assert.notEqual(
+      first.lastDataChangeAt,
+      null,
+      'the dataset state records when observations were last written',
+    );
+    // The refresh outcome distinguishes checked / changed / unchanged / failed.
+    assert.ok(first.refreshOutcome, 'the terminal outcome is served');
+    assert.equal(first.refreshOutcome.total, 20);
+    assert.equal(first.refreshOutcome.checked, 20);
+    assert.equal(first.refreshOutcome.updated, 20, 'the seed published every indicator');
+    assert.equal(first.refreshOutcome.unchanged, 0);
+    assert.equal(first.refreshOutcome.failed, 0);
+
+    // A successful check that changed NOTHING keeps the data-change stamp but
+    // advances the check stamp, and reports the run as unchanged.
+    const dataChangeBefore = first.lastDataChangeAt;
+    stub.reset();
+    const unchanged = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-status-check' });
+    assert.equal(unchanged.status, 'success');
+    const second = await svc.status();
+    assert.equal(second.lastDataChangeAt, dataChangeBefore, 'no data changed: the change stamp is unchanged');
+    assert.ok(
+      second.lastSuccessAt >= first.lastSuccessAt,
+      'the successful check stamp advanced',
+    );
+    assert.equal(second.refreshOutcome.updated, 0, 'nothing was rewritten');
+    assert.equal(second.refreshOutcome.unchanged, 20, 'every indicator was proven identical');
+    assert.equal(second.refreshOutcome.checked, 20);
+    assert.equal(second.refreshOutcome.failed, 0);
+  } finally {
+    await svc.close();
+    db.close();
+  }
+});
+
 test('unchanged refresh reuses expensive verification; changed refresh re-verifies', async () => {
   const { db, repository, refreshData } = await seedDb();
   const svc = await startStatusServer(db);
@@ -506,7 +560,14 @@ test('corrupt stored checks fall back to a live rescan and self-heal', async () 
     assert.ok(healed.integrityChecksJson && healed.integrityChecksJson !== 'bogus', 'stored report repaired');
     assert.deepEqual(
       JSON.parse(healed.integrityChecksJson).map((c) => c.check).sort(),
-      ['C.unknown_iso3', 'D.duplicate_observation', 'E.invalid_year', 'F.non_finite_value', 'F.raw_round_trip'].sort(),
+      [
+        'C.unknown_iso3',
+        'D.duplicate_observation',
+        'E.invalid_year',
+        'F.non_finite_value',
+        'F.raw_round_trip',
+        'L.vintage_provenance',
+      ].sort(),
     );
   } finally {
     await svc.close();
@@ -673,6 +734,210 @@ test('unchanged refresh writes zero country statements', async () => {
     const after = await repository.getDatasetState(db);
     assert.ok(after, 'state row intact');
   } finally {
+    db.close();
+  }
+});
+
+// ============================================================
+// STALE-VINTAGE REGRESSION (the confirmed production defect).
+//
+// The derived dataset_state row used to be recomputed from the cached row
+// itself, so an upstream release that changed the stored values left the
+// reported vintage frozen at the previous release's date forever. Every
+// assertion below compares against an EXPLICIT SQL query over the
+// observations table - never against a repository getter that reads the
+// cache under test.
+// ============================================================
+
+/** Every distinct provenance stamp currently stored, with its row count. */
+async function storedVintageRows(db) {
+  const rows = await db.execute({
+    sql: 'SELECT wb_last_updated AS stamp, COUNT(*) AS n FROM observations GROUP BY 1 ORDER BY 1',
+    args: [],
+  });
+  return rows.rows.map((r) => ({ stamp: r.stamp ?? null, n: Number(r.n) }));
+}
+
+test('recomputing an existing dataset_state row re-derives the vintage from observations', async () => {
+  const { db, repository } = await seedDb();
+  try {
+    const truth = await scanTruth(db, repository);
+    assert.ok(truth.maxWbLastUpdated, 'fixture rows carry a provenance stamp');
+
+    // Poison the derived row with an intentionally older vintage: the exact
+    // production shape of the defect (cached row = old release, observations
+    // = newer release).
+    const staleVintage = '2019-01-01';
+    await db.execute({
+      sql: 'UPDATE dataset_state SET max_wb_last_updated = ? WHERE id = 1',
+      args: [staleVintage],
+    });
+    // The cached READER is unchanged: it still serves the cached row (the
+    // read optimization stays intact).
+    assert.equal(await repository.getMaxWbLastUpdated(db), staleVintage, 'reader still serves the cached row');
+
+    // The WRITER must not copy that cached value forward.
+    const recomputed = await repository.computeDatasetState(db);
+    assert.equal(
+      recomputed.maxWbLastUpdated,
+      truth.maxWbLastUpdated,
+      'recompute re-derives the vintage from the observations table',
+    );
+    assert.notEqual(recomputed.maxWbLastUpdated, staleVintage, 'the stale cached value is not copied forward');
+  } finally {
+    db.close();
+  }
+});
+
+test('content-changing refresh publishes the new vintage and the derived row agrees', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  try {
+    const before = await repository.getDatasetState(db);
+    const olderVintage = '2021-05-05';
+    const newerVintage = '2026-10-08';
+
+    stub.reset();
+    stub.setSeriesLastUpdated(olderVintage);
+    rowsTransform = (metricKey, baseRows) => {
+      if (metricKey !== 'nominal_current') return baseRows;
+      let bumped = false;
+      return baseRows.map((row) => {
+        if (!bumped && row.value !== null && row.value !== undefined) {
+          bumped = true;
+          const n = Number(row.value);
+          return { ...row, value: typeof row.value === 'string' ? String(n + 1) : n + 1 };
+        }
+        return row;
+      });
+    };
+    const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-vintage-change' });
+    assert.equal(summary.status, 'success');
+    assert.ok(summary.rowsUpserted > 0, 'values were rewritten');
+
+    // Now the upstream release advances again (new vintage, same values for
+    // the indicators that did not change).
+    stub.reset();
+    stub.setSeriesLastUpdated(newerVintage);
+    const second = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-vintage-change-2' });
+    assert.equal(second.status, 'success');
+
+    const truth = await scanTruth(db, repository);
+    const after = await repository.getDatasetState(db);
+    assert.equal(after.maxWbLastUpdated, truth.maxWbLastUpdated, 'derived vintage equals the stored provenance');
+    assert.equal(after.maxWbLastUpdated, newerVintage, 'derived vintage is the newest release');
+    assert.ok(after.contentVersion > before.contentVersion, 'content version advanced');
+    const stamps = await storedVintageRows(db);
+    assert.deepEqual(
+      stamps.map((s) => s.stamp),
+      [newerVintage],
+      'every stored row carries the newest release stamp',
+    );
+  } finally {
+    rowsTransform = null;
+    db.close();
+  }
+});
+
+test('upstream metadata advancing without value changes updates provenance only', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  try {
+    const beforeState = await repository.getDatasetState(db);
+    const beforeRows = await db.execute({
+      sql: 'SELECT indicator_id AS i, country_id AS c, year AS y, value AS v, value_raw AS vr FROM observations ORDER BY i, c, y',
+      args: [],
+    });
+    const beforeVintages = await storedVintageRows(db);
+    assert.equal(beforeVintages.length, 1, 'fixture starts with one provenance stamp');
+
+    const newerVintage = '2026-10-08';
+    stub.reset();
+    stub.setSeriesLastUpdated(newerVintage);
+    const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-vintage-advance' });
+    assert.equal(summary.status, 'success');
+    assert.equal(summary.rowsUpserted, 0, 'no economic observation row was rewritten');
+    assert.ok(summary.rowsSkippedUnchanged > 0, 'rows were proven identical');
+
+    // Values and their raw decimal representation are untouched.
+    const afterRows = await db.execute({
+      sql: 'SELECT indicator_id AS i, country_id AS c, year AS y, value AS v, value_raw AS vr FROM observations ORDER BY i, c, y',
+      args: [],
+    });
+    assert.deepEqual(afterRows.rows, beforeRows.rows, 'economic values and raw strings are unchanged');
+
+    // The provenance stamp advanced to the new release.
+    const afterVintages = await storedVintageRows(db);
+    assert.deepEqual(
+      afterVintages.map((s) => s.stamp),
+      [newerVintage],
+      'provenance advanced to the new release',
+    );
+    assert.equal(
+      afterVintages[0].n,
+      beforeVintages[0].n,
+      'no row was added or removed by the metadata-only advance',
+    );
+
+    // The derived row agrees with the stored provenance and was recomputed.
+    const truth = await scanTruth(db, repository);
+    const afterState = await repository.getDatasetState(db);
+    assert.equal(afterState.maxWbLastUpdated, truth.maxWbLastUpdated, 'derived vintage matches the scan');
+    assert.equal(afterState.maxWbLastUpdated, newerVintage, 'derived vintage is the new release');
+    assert.ok(
+      afterState.contentVersion > beforeState.contentVersion,
+      'a provenance advance is a content change (memo keys must advance)',
+    );
+  } finally {
+    stub.reset();
+    db.close();
+  }
+});
+
+test('a generic older-to-newer vintage transition is followed (not hard-coded to any release)', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  try {
+    // Deliberately arbitrary dates: the behaviour must follow whatever the
+    // upstream reports, so every future World Bank release is covered.
+    const genericOlder = '2018-03-04';
+    const genericNewer = '2023-11-19';
+    stub.reset();
+    stub.setSeriesLastUpdated(genericOlder);
+    const first = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-generic-older' });
+    assert.equal(first.status, 'success');
+    let truth = await scanTruth(db, repository);
+    assert.equal((await repository.getDatasetState(db)).maxWbLastUpdated, genericOlder);
+    assert.equal(truth.maxWbLastUpdated, genericOlder);
+
+    stub.reset();
+    stub.setSeriesLastUpdated(genericNewer);
+    const second = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-generic-newer' });
+    assert.equal(second.status, 'success');
+    truth = await scanTruth(db, repository);
+    assert.equal((await repository.getDatasetState(db)).maxWbLastUpdated, genericNewer);
+    assert.equal(truth.maxWbLastUpdated, genericNewer);
+  } finally {
+    stub.reset();
+    db.close();
+  }
+});
+
+test('a failed refresh publishes no provenance advance', async () => {
+  const { db, repository, refreshData } = await seedDb();
+  try {
+    const beforeState = await repository.getDatasetState(db);
+    const beforeVintages = await storedVintageRows(db);
+
+    stub.reset();
+    stub.setSeriesLastUpdated('2026-10-08');
+    stub.failNextMatching({ status: 500, times: 50, substring: '/country/all/indicator/NY.GDP.MKTP.KD' });
+    const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-vintage-rollback' });
+    assert.equal(summary.status, 'partial', 'the refresh failed and published nothing');
+
+    const afterVintages = await storedVintageRows(db);
+    assert.deepEqual(afterVintages, beforeVintages, 'no provenance was advanced by the failed run');
+    const afterState = await repository.getDatasetState(db);
+    assert.deepEqual(afterState, beforeState, 'the derived row is exactly as before');
+  } finally {
+    stub.reset();
     db.close();
   }
 });

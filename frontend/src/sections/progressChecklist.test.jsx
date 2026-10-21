@@ -83,7 +83,7 @@ describe('refresh progress checklist', () => {
     await flushReact(act);
     expect(container.textContent).toContain('Refresh in progress');
     expect(container.textContent).toContain('Started: 1 October 2026, 13:17:02 UTC');
-    expect(container.textContent).toContain('Progress: 1 / 3 indicators');
+    expect(container.textContent).toContain('Indicators checked: 1 / 3');
     expect(container.textContent).toContain('Current: Label nominal_constant');
     expect(container.textContent).toContain('Label nominal_current');
     expect(container.textContent).toContain('up to date');
@@ -173,7 +173,7 @@ describe('refresh progress checklist', () => {
     expect(details.open).toBe(false);
     expect(container.textContent).toContain('Show refresh details');
     expect(container.textContent).toContain('Last refresh completed successfully');
-    expect(container.textContent).toContain('Progress: 3 / 3 indicators');
+    expect(container.textContent).toContain('Indicators checked: 3 / 3');
     // Disclosure is presentation only: expanding reveals all indicators.
     await act(async () => {
       details.querySelector('summary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
@@ -197,7 +197,7 @@ describe('refresh progress checklist', () => {
     const done = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     expect(done.container.textContent).toContain('Last refresh completed successfully');
-    expect(done.container.textContent).toContain('Progress: 3 / 3 indicators');
+    expect(done.container.textContent).toContain('Indicators checked: 3 / 3');
     done.cleanup();
     document.body.innerHTML = '';
 

@@ -61,6 +61,11 @@ export async function startStubWorldBank(options = {}) {
     seriesRowsFor: options.seriesRowsFor ?? null,
     countryRowsFor: options.countryRowsFor ?? null,
     invalidJson: false,
+    // Upstream release vintage reported in the series envelope's meta block.
+    // null = use each metric family's fixture vintage; a string overrides it
+    // for every series, so a test can simulate the World Bank advancing
+    // `lastupdated` between refreshes (a new release that changed no values).
+    seriesLastUpdated: null,
   };
 
   // Per-capita metrics are served from the committed versioned snapshot; the
@@ -177,7 +182,7 @@ export async function startStubWorldBank(options = {}) {
       send(
         collectionEnvelope(filtered, params, {
           total: filtered.length + state.metaTotalOffset,
-          lastupdated: baseMeta.lastupdated,
+          lastupdated: state.seriesLastUpdated ?? baseMeta.lastupdated,
         }),
       );
       return;
@@ -214,6 +219,16 @@ export async function startStubWorldBank(options = {}) {
       state.failMatching = null;
       state.metaTotalOffset = 0;
       state.invalidJson = false;
+      state.seriesLastUpdated = null;
+    },
+    /**
+     * Override the upstream release vintage (`lastupdated`) reported in every
+     * series envelope. Pass null to restore the per-metric fixture vintage.
+     * Simulates the World Bank publishing a new release whose VALUES are
+     * unchanged but whose metadata stamp has advanced.
+     */
+    setSeriesLastUpdated(value) {
+      state.seriesLastUpdated = value ?? null;
     },
     /** Fail the next `times` requests with the given status (and Retry-After). */
     failNext({ status = 500, times = 1, retryAfter, body } = {}) {

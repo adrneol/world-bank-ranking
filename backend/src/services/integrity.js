@@ -19,6 +19,9 @@
  *   J. inconsistent country metadata (blank ids, blank ISO3 on eligible rows)
  *   K. metric registry self-consistency (unique metric keys, unique World Bank
  *      codes, every metric reachable from exactly one subject)
+ *   L. derived-vintage consistency (the cached dataset_state vintage equals
+ *      MAX(observations.wb_last_updated); a derived row that disagrees with
+ *      its own source data would report a stale World Bank vintage)
  *
  * check() returns a report; it never throws on a failed CHECK (only on a
  * broken database connection). Callers decide whether a failure blocks
@@ -215,6 +218,46 @@ export async function runExpensiveIntegrityChecks(db) {
     }),
   );
 
+  // L. Derived-vintage consistency: the cached dataset_state vintage must
+  //    equal the maximum provenance stamp actually STORED in the observations
+  //    table. A dataset_state row that disagrees with its own source data
+  //    reports a stale World Bank vintage to every reader (status page,
+  //    About page, dataset fingerprint) while the data itself is current.
+  //    This is the check that makes such a divergence visible instead of
+  //    silent. Read-only: it never refreshes and never writes.
+  const [stateRow, storedVintageRow] = await batchGet(db, [
+    {
+      sql: 'SELECT max_wb_last_updated AS maxWbLastUpdated FROM dataset_state WHERE id = 1',
+    },
+    {
+      sql: 'SELECT MAX(wb_last_updated) AS v FROM observations WHERE wb_last_updated IS NOT NULL',
+    },
+  ]).catch((error) => {
+    // Legacy database without the dataset_state table: nothing to compare,
+    // and the check must never break the battery.
+    if (/no such table/i.test(error?.message ?? '')) return [[], []];
+    throw error;
+  });
+  const cachedVintage = stateRow?.[0]?.maxWbLastUpdated ?? null;
+  const storedVintage = storedVintageRow?.[0]?.v ?? null;
+  const statePresent = Array.isArray(stateRow) && stateRow.length > 0;
+  // No derived row at all: the readers fall back to exact scans, so there is
+  // nothing to disagree with (same "unknown" semantics as the other checks).
+  // No stored provenance on either side: also consistent (null == null).
+  const vintageConsistent = !statePresent || cachedVintage === storedVintage;
+  checks.push(
+    result('L.vintage_provenance', vintageConsistent, {
+      cachedVintage,
+      storedVintage,
+      statePresent,
+      note: !statePresent
+        ? 'no derived dataset_state row: readers use exact scans (nothing to compare)'
+        : cachedVintage === storedVintage
+          ? 'derived vintage matches the stored observation provenance'
+          : 'derived dataset_state vintage disagrees with MAX(observations.wb_last_updated)',
+    }),
+  );
+
   return checks;
 }
 
@@ -351,6 +394,7 @@ export const INTEGRITY_CHECK_ORDER = Object.freeze([
   'I.india_observations',
   'J.metadata_consistency',
   'K.registry_consistency',
+  'L.vintage_provenance',
 ]);
 
 /**

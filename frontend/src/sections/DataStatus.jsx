@@ -200,6 +200,29 @@ export default function DataStatus({ onRefreshed }) {
   const doneCount = activeKeys.filter((k) =>
     ['published', 'unchanged', 'failed'].includes(activeStepByKey.get(k)?.status),
   ).length;
+  // Terminal outcome of the last completed run: checked / changed / unchanged /
+  // failed. "checked" is deliberately NOT "changed": a successful check can
+  // prove every value identical without writing anything. The backend sends
+  // the normalized shape; the persisted summary counts are the fallback.
+  const outcomeCounts =
+    data?.refreshOutcome && typeof data.refreshOutcome === 'object'
+      ? data.refreshOutcome
+      : persistedSummary?.counts && typeof persistedSummary.counts === 'object'
+        ? persistedSummary.counts
+        : null;
+  const refreshOutcomeText = (() => {
+    if (!outcomeCounts) return null;
+    const total = outcomeCounts.total ?? null;
+    const notAttempted = outcomeCounts.notAttempted ?? 0;
+    const checked =
+      outcomeCounts.checked ?? (total !== null ? Math.max(0, total - notAttempted) : null);
+    const parts = [];
+    if (checked !== null && checked !== undefined) parts.push(`${checked} checked`);
+    if (outcomeCounts.updated !== undefined) parts.push(`${outcomeCounts.updated} changed`);
+    if (outcomeCounts.unchanged !== undefined) parts.push(`${outcomeCounts.unchanged} unchanged`);
+    if (outcomeCounts.failed !== undefined) parts.push(`${outcomeCounts.failed} failed`);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  })();
   // The Refresh section always exists once data exists (even with zero known
   // indicators it renders the header + empty note instead of unmounting).
   const showRefreshPanel = hasData;
@@ -401,8 +424,20 @@ export default function DataStatus({ onRefreshed }) {
               <dd>{data.wbLastUpdated ? (formatVintageDate(data.wbLastUpdated) ?? data.wbLastUpdated) : '—'}</dd>
             </div>
             <div>
-              <dt>Data retrieved UTC</dt>
-              <dd>{data.lastSuccessAt ? (formatUtcDateTime(data.lastSuccessAt) ?? data.lastSuccessAt) : '—'}</dd>
+              <dt>Last successful World Bank check (UTC)</dt>
+              <dd>
+                {data.lastSuccessAt ? (formatUtcDateTime(data.lastSuccessAt) ?? data.lastSuccessAt) : '—'}
+                <span className="muted"> (the source was checked; the check may have found no changes)</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Last data change (UTC)</dt>
+              <dd>
+                {data.lastDataChangeAt
+                  ? (formatUtcDateTime(data.lastDataChangeAt) ?? data.lastDataChangeAt)
+                  : '—'}
+                <span className="muted"> (when the stored observations were last written)</span>
+              </dd>
             </div>
             <div>
               <dt>Cache age / TTL</dt>
@@ -503,11 +538,14 @@ export default function DataStatus({ onRefreshed }) {
               {!showRecoveryCalm ? (
                 <>
                   <p className="refresh-count">
-                    Progress: {doneCount} / {activeKeys.length} indicators
+                    Indicators checked: {doneCount} / {activeKeys.length}
                   </p>
                   <progress value={doneCount} max={Math.max(activeKeys.length, 1)}>
                     {doneCount} / {activeKeys.length}
                   </progress>
+                  {refreshOutcomeText ? (
+                    <p className="refresh-count">Last run: {refreshOutcomeText}</p>
+                  ) : null}
                   {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey)}</p> : null}
                 </>
               ) : null}
