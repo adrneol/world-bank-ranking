@@ -213,6 +213,10 @@ export async function startStubWorldBank(options = {}) {
     baseUrl,
     state,
     requestCount: () => state.requests.length,
+    /** How many requests hit a path containing `substring` (e.g. one series). */
+    requestsFor(substring) {
+      return state.requests.filter((r) => String(r.path).includes(substring)).length;
+    },
     reset() {
       state.requests.length = 0;
       state.failure = null;
