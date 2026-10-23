@@ -700,6 +700,91 @@ export async function getEligibleObservationsForYears(db, indicatorId, years) {
 }
 
 /**
+ * Stored observations for an explicit list of country/aggregate codes over an
+ * explicit list of years.
+ *
+ * Compare-specific bulk read: it replaces the per-entity, per-year
+ * `getObservation` round trips with ONE statement, and it deliberately does
+ * NOT filter on `c.is_aggregate`, because an official World Bank aggregate
+ * is a first-class entity of a comparison (its published observation is used
+ * as published, never reconstructed). The aggregate filter of
+ * `getEligibleObservationsForYears` remains the ranking-universe rule and is
+ * untouched.
+ *
+ * The query is served by idx_observations_country
+ * (country_id, indicator_id, year); no full-table scan is introduced.
+ *
+ * @param {object} db
+ * @param {number} indicatorId
+ * @param {string[]} iso3List
+ * @param {number[]} years
+ * @returns {{iso3:string, name:string|null, year:number, value:number, valueRaw:string|null, wbLastUpdated:string|null}[]}
+ */
+export async function getObservationsForEntityList(db, indicatorId, iso3List, years) {
+  const codes = [...new Set((iso3List ?? []).map((c) => String(c).toUpperCase()).filter(Boolean))].sort();
+  const uniqueYears = [...new Set((years ?? []).filter((y) => Number.isInteger(y)))].sort((a, b) => a - b);
+  if (codes.length === 0 || uniqueYears.length === 0) return [];
+  const codePlaceholders = codes.map(() => '?').join(',');
+  const yearPlaceholders = uniqueYears.map(() => '?').join(',');
+  return queryAll(
+    db,
+    `
+      SELECT o.country_id AS iso3,
+             c.name       AS name,
+             o.year       AS year,
+             o.value      AS value,
+             o.value_raw  AS valueRaw,
+             o.wb_last_updated AS wbLastUpdated
+      FROM observations o
+      JOIN countries c ON c.id = o.country_id
+      WHERE o.indicator_id = ?
+        AND o.country_id IN (${codePlaceholders})
+        AND o.year IN (${yearPlaceholders})
+      ORDER BY o.country_id, o.year
+    `,
+    [indicatorId, ...codes, ...uniqueYears],
+  );
+}
+
+/**
+ * Cheap, index-served signature of one indicator's stored rows for a year set.
+ *
+ * Used by the Compare cache as a second invalidation signal next to the
+ * dataset content version: it changes when rows are added or removed for the
+ * indicator, and when the World Bank vintage stamps of its rows change — so
+ * an in-place correction of the stored provenance cannot be served from a
+ * stale cached comparison. It deliberately does not sum the values: the
+ * dataset content version is the authority for value mutations (it advances
+ * inside the publish transaction), and a float sum would make the key
+ * fragile.
+ *
+ * @param {object} db
+ * @param {number} indicatorId
+ * @param {number[]} years
+ * @returns {{rows:number, minVintage:string|null, maxVintage:string|null}}
+ */
+export async function getObservationYearSignature(db, indicatorId, years) {
+  const unique = [...new Set((years ?? []).filter((y) => Number.isInteger(y)))].sort((a, b) => a - b);
+  if (unique.length === 0) return { rows: 0, minVintage: null, maxVintage: null };
+  const placeholders = unique.map(() => '?').join(',');
+  const row = await queryGet(
+    db,
+    `SELECT COUNT(*) AS rows,
+            MIN(o.wb_last_updated) AS minVintage,
+            MAX(o.wb_last_updated) AS maxVintage
+       FROM observations o
+      WHERE o.indicator_id = ?
+        AND o.year IN (${placeholders})`,
+    [indicatorId, ...unique],
+  );
+  return {
+    rows: Number(row?.rows ?? 0),
+    minVintage: row?.minVintage ?? null,
+    maxVintage: row?.maxVintage ?? null,
+  };
+}
+
+/**
  * Bulk economy metadata for a supplied ISO3 list.
  *
  * @param {object} db

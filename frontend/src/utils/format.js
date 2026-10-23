@@ -52,6 +52,16 @@ export function readableReason(reason) {
   return String(reason).replace(/_/g, ' ');
 }
 
+/**
+ * Human wording for the Compare universe exclusion reasons. The wording
+ * mirrors the backend reason codes exactly and never invents a cause.
+ */
+export const UNIVERSE_REASON_LABELS = Object.freeze({
+  comparison_participant: 'excluded because it takes part in the comparison',
+  missing_required_observation: 'excluded because a required observation is missing',
+  basis_formula_not_computable: 'excluded because the selected basis formula cannot be computed from these observations',
+});
+
 const VINTAGE_MONTHS = Object.freeze([
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

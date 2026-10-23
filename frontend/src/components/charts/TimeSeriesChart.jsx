@@ -33,6 +33,12 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
   const narrow = useIsNarrowChart();
   const { keys, rows, labels } = alignSeries(series);
   if (rows.length === 0) return null;
+  // Adaptive tick count: enough year labels to be readable without crowding,
+  // never thinning the plotted data points (tick-label thinning is separate
+  // from data-point filtering).
+  const tickCount = narrow
+    ? Math.min(4, rows.length)
+    : Math.min(Math.max(6, Math.ceil(rows.length / 6)), rows.length);
   const legendItems =
     labels.length > 1
       ? keys.map((key, i) => ({
@@ -51,7 +57,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
               dataKey="x"
               type="number"
               domain={['dataMin', 'dataMax']}
-              tickCount={Math.min(8, rows.length)}
+              tickCount={tickCount}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
               tickFormatter={(x) => String(x)}
             />

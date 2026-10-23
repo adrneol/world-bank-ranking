@@ -25,6 +25,7 @@ import PopulationMovement from './PopulationMovement.jsx';
 import PricesMovement from './PricesMovement.jsx';
 import TradeMovement from './TradeMovement.jsx';
 import fixtures from './movementUsaFixtures.json';
+import { hydrateRegistry, METRICS, SUBJECTS } from '../config/metrics.js';
 
 /**
  * jsdom reports zero-size containers, so Recharts renders nothing without a
@@ -49,9 +50,35 @@ function stubPlotSize() {
 
 beforeEach(() => {
   stubPlotSize();
+  hydrateRegistry({
+    subjects: Object.values(SUBJECTS).map(({ key, label }) => ({ key, label })),
+    production: Object.values(METRICS).map((metric) => ({
+      ...metric,
+      label: metric.title,
+      shortLabel: metric.shortTitle,
+      observationType: metric.subject === 'gdp_total' ? 'FLOW' : 'LEVEL',
+      validChangeTypes: ['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR'],
+      periodAggregation: metric.subject === 'gdp_total' ? ['SUM', 'AVG'] : [],
+      comparisonCapability: ['COUNTRY', 'OFFICIAL_AGGREGATE', ...(metric.aggregation === 'SUM' ? ['CUSTOM_GROUP'] : [])],
+      rankingDirection: 'DESC',
+    })),
+  });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  hydrateRegistry({
+    subjects: Object.values(SUBJECTS).map(({ key, label }) => ({ key, label })),
+    production: Object.values(METRICS).map((metric) => ({
+      ...metric,
+      label: metric.title,
+      shortLabel: metric.shortTitle,
+      observationType: metric.subject === 'gdp_total' ? 'FLOW' : 'LEVEL',
+      validChangeTypes: ['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR'],
+      periodAggregation: metric.subject === 'gdp_total' ? ['SUM', 'AVG'] : [],
+      comparisonCapability: ['COUNTRY', 'OFFICIAL_AGGREGATE', ...(metric.aggregation === 'SUM' ? ['CUSTOM_GROUP'] : [])],
+      rankingDirection: 'DESC',
+    })),
+  });
 });
 
 const FAMILIES = [
@@ -172,7 +199,8 @@ describe('comparison section with a future year', () => {
 
   /** A SYNTHETIC 2025-to-2026 comparison payload (2026 values are synthetic).
    *  A two-year comparison requires a change operation ('level' takes one
-   *  year), so the payload uses the absolute-change shape. */
+   *  year), so the payload uses the absolute-change shape. Interval results
+   *  are part of the response: the UI never refetches or recalculates values. */
   const COMPARE_2026 = {
     available: true,
     metric: {
@@ -182,25 +210,88 @@ describe('comparison section with a future year', () => {
       unitLong: 'current US$',
       indicatorCode: 'NY.GDP.PCAP.CD',
     },
-    years: { a: 2025, b: 2026 },
+    years: { a: 2025, b: 2026, c: null },
     operation: 'absolute_change',
     groupMode: 'observed',
+    mode: 'observed',
+    analysis: {
+      id: 'absolute_change',
+      label: 'Absolute change',
+      requiredObservationYears: [2025, 2026],
+      seriesYears: [2025, 2026],
+      ignoredPeriods: [],
+      boundary: { start: 2025, end: 2026, inclusiveStart: true, inclusiveEnd: true, kind: 'observation_years' },
+    },
     entities: {
       a: { kind: 'country', iso3: 'USA', name: 'United States' },
       b: { kind: 'country', iso3: 'IND', name: 'India' },
     },
     results: {
-      a: { kind: 'country', iso3: 'USA', name: 'United States', value: 81000 },
-      b: { kind: 'country', iso3: 'IND', name: 'India', value: 2900 },
+      a: {
+        kind: 'country',
+        iso3: 'USA',
+        name: 'United States',
+        observed: {
+          2025: { available: true, reason: null, value: 78000, valueRaw: '78000', provenance: 'RAW', complete: true },
+          2026: { available: true, reason: null, value: 81000, valueRaw: '81000', provenance: 'RAW', complete: true },
+        },
+        likeForLike: {
+          2025: { available: true, reason: null, value: 78000, valueRaw: '78000', provenance: 'RAW', complete: true },
+          2026: { available: true, reason: null, value: 81000, valueRaw: '81000', provenance: 'RAW', complete: true },
+        },
+        series: {
+          basis: 'ENTITY_OWN_OBSERVATION',
+          points: [
+            { year: 2025, value: 78000, complete: true },
+            { year: 2026, value: 81000, complete: true },
+          ],
+          partialYears: [],
+        },
+      },
+      b: {
+        kind: 'country',
+        iso3: 'IND',
+        name: 'India',
+        observed: {
+          2025: { available: true, reason: null, value: 2700, valueRaw: '2700', provenance: 'RAW', complete: true },
+          2026: { available: true, reason: null, value: 2900, valueRaw: '2900', provenance: 'RAW', complete: true },
+        },
+        likeForLike: {
+          2025: { available: true, reason: null, value: 2700, valueRaw: '2700', provenance: 'RAW', complete: true },
+          2026: { available: true, reason: null, value: 2900, valueRaw: '2900', provenance: 'RAW', complete: true },
+        },
+        series: {
+          basis: 'ENTITY_OWN_OBSERVATION',
+          points: [
+            { year: 2025, value: 2700, complete: true },
+            { year: 2026, value: 2900, complete: true },
+          ],
+          partialYears: [],
+        },
+      },
       comparison: {
         available: true,
+        reason: null,
         unit: 'current US$',
         a: { computable: true, value: 3000, unit: 'current US$' },
         b: { computable: true, value: 200, unit: 'current US$' },
         gap: { value: 2800, unit: 'current US$' },
+        intervalResults: [{
+          id: 'AB', label: 'A → B', start: 2025, end: 2026, kind: 'change',
+          formula: 'B − A', unit: 'current US$', gapUnit: 'current US$', available: true,
+          observations: {
+            a: [{ year: 2025, value: 78000, unit: 'current US$', available: true, complete: true }, { year: 2026, value: 81000, unit: 'current US$', available: true, complete: true }],
+            b: [{ year: 2025, value: 2700, unit: 'current US$', available: true, complete: true }, { year: 2026, value: 2900, unit: 'current US$', available: true, complete: true }],
+          },
+          a: { computable: true, value: 3000, unit: 'current US$' },
+          b: { computable: true, value: 200, unit: 'current US$' },
+          gap: { value: 2800, unit: 'current US$', reason: null },
+        }],
         provenance: { kind: 'RAW' },
       },
     },
+    universe: { counts: { candidates: 2, complete: 2, reference: 0 }, included: [], excluded: { participants: [], incomplete: [], distinct: [] } },
+    diagnostics: [],
     vintage: { wbLastUpdated: '2026-10-08', mixedVintage: false },
     source: {},
   };
@@ -230,6 +321,7 @@ describe('comparison section with a future year', () => {
           metricKey="nominal_current"
           yearA={2025}
           yearB={2026}
+          yearC={null}
           operation="absolute_change"
           groupMode="observed"
           onEntityA={noop}
@@ -239,6 +331,7 @@ describe('comparison section with a future year', () => {
           onMetric={noop}
           onYearA={noop}
           onYearB={noop}
+          onYearC={noop}
           onOperation={noop}
           onGroupMode={noop}
         />,
@@ -247,11 +340,14 @@ describe('comparison section with a future year', () => {
     ctx = { stub, cleanup: () => act(() => root.unmount()) || container.remove() };
     await flushReact(act);
 
-    // 1. The trajectory fan-out asks the backend for the future year.
+    // 1. The comparison request itself carries the future year, and the chart
+    //    series comes from that response: no observations request is issued.
     const observationCalls = stub.calls.filter((href) => href.includes('/api/observations'));
-    expect(observationCalls.length).toBeGreaterThan(0);
-    expect(observationCalls.some((href) => href.includes('year=2026'))).toBe(true);
-    expect(observationCalls.some((href) => href.includes('year=2025'))).toBe(true);
+    expect(observationCalls.length).toBe(0);
+    const compareCall = stub.calls.find((href) => href.includes('/api/compare'));
+    expect(compareCall).toBeTruthy();
+    expect(compareCall).toContain('yearA=2025');
+    expect(compareCall).toContain('yearB=2026');
 
     // 2. The year selectors offer the future year and show it as selected.
     const trigger = container.querySelector('#cmp-year-b');
@@ -264,14 +360,15 @@ describe('comparison section with a future year', () => {
       document.querySelector('.combo-filter')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
 
-    // 3. The rendered result carries the future year, and the trajectory chart
-    //    it renders has 2025 and 2026 on its axis.
+    // 3. The result panel carries the future endpoint and charts the selected
+    //    absolute-change result on an interval axis.
     expect(container.textContent).toContain('2026');
     const chartTicks = [...container.querySelectorAll('svg .recharts-cartesian-axis-tick-value')].map(
       (el) => el.textContent,
     );
-    expect(chartTicks).toContain('2026');
-    expect(chartTicks).toContain('2025');
+    expect(container.textContent).toContain('Absolute change by interval');
+    expect(container.textContent).toContain('3,000 current US$');
+    expect(chartTicks).toContain('A → B');
   });
 });
 

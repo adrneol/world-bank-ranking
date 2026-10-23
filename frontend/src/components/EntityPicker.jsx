@@ -8,7 +8,7 @@
  * Emits plain entity objects; entityToSpec() renders the API wire form.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
 import { SearchableSelect } from './controls.jsx';
@@ -65,6 +65,10 @@ function GroupPreview({ members, label, metricKey }) {
 
 function GroupBuilder({ countries, value, onChange, id, metricKey }) {
   const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const addButtonRef = useRef(null);
+  const searchRef = useRef(null);
+  const candidateRefs = useRef([]);
   const members = value?.members ?? [];
   const memberSet = useMemo(() => new Set(value?.members ?? []), [value]);
   const q = query.trim().toLowerCase();
@@ -78,32 +82,68 @@ function GroupBuilder({ countries, value, onChange, id, metricKey }) {
             String(c.name ?? '').toLowerCase().includes(q) ||
             String(c.iso3 ?? '').toLowerCase().includes(q),
         )
-        .slice(0, 60),
+        .slice(0, 40),
     [countries, memberSet, q],
   );
 
   function add(iso3) {
+    if (memberSet.has(iso3)) return;
     onChange({ kind: 'custom_group', members: [...members, iso3], label: value?.label ?? null });
+    setTimeout(() => searchRef.current?.focus(), 0);
   }
   function remove(iso3) {
     onChange({ kind: 'custom_group', members: members.filter((m) => m !== iso3), label: value?.label ?? null });
+    setTimeout(() => addButtonRef.current?.focus(), 0);
   }
 
   return (
     <div className="group-builder">
-      <Field label="Group label (optional)" htmlFor={id + '-group-label'}>
-        <input
-          id={id + '-group-label'}
-          type="text"
-          value={value?.label ?? ''}
-          maxLength={80}
-          placeholder="e.g. Indian Ocean peers"
-          autoComplete="off"
-          onChange={(event) => onChange({ kind: 'custom_group', members, label: event.target.value || null })}
-        />
-      </Field>
+      <details className="group-name-details">
+        <summary>Name this group (optional)</summary>
+        <Field label="Group name" htmlFor={id + '-group-label'}>
+          <input
+            id={id + '-group-label'}
+            type="text"
+            value={value?.label ?? ''}
+            maxLength={80}
+            placeholder="e.g. Indian Ocean peers"
+            autoComplete="off"
+            onChange={(event) => onChange({ kind: 'custom_group', members, label: event.target.value || null })}
+          />
+        </Field>
+        <p className="footnote">This name identifies the custom group in result headings and charts.</p>
+      </details>
+      <div className="group-selection-heading">
+        <strong aria-live="polite">{members.length} selected</strong>
+        <button
+          ref={addButtonRef}
+          type="button"
+          className="btn btn-secondary"
+          aria-expanded={open}
+          aria-controls={`${id}-country-options`}
+          onClick={() => {
+            const next = !open;
+            setOpen(next);
+            if (next) setTimeout(() => searchRef.current?.focus(), 0);
+          }}
+        >
+          {open ? 'Close country list' : 'Add countries'}
+        </button>
+        {members.length > 0 ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              onChange({ kind: 'custom_group', members: [], label: value?.label ?? null });
+              setQuery('');
+              setOpen(false);
+              addButtonRef.current?.focus();
+            }}
+          >Clear selection</button>
+        ) : null}
+      </div>
       {members.length > 0 ? (
-        <ul className="chip-list" aria-label="Selected group members">
+        <ul className="chip-list group-selected-chips" aria-label={`${members.length} selected group members`}>
           {members.map((iso3) => {
             const name = countries.find((c) => c.iso3 === iso3)?.name ?? iso3;
             return (
@@ -123,44 +163,69 @@ function GroupBuilder({ countries, value, onChange, id, metricKey }) {
             );
           })}
         </ul>
-      ) : (
-        <p className="muted">No members yet — search below and add economies.</p>
-      )}
-      <div className="group-add-row">
-        <input
-          type="search"
-          value={query}
-          placeholder="Search economies to add…"
-          aria-label="Search economies to add to the group"
-          autoComplete="off"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {members.length > 0 ? (
-          <button type="button" className="btn btn-ghost" onClick={() => onChange({ kind: 'custom_group', members: [], label: value?.label ?? null })}>
-            Clear
-          </button>
-        ) : null}
-      </div>
-      {q ? (
-        candidates.length > 0 ? (
-          <ul className="candidate-list" aria-label="Matching economies">
-            {candidates.map((c) => (
+      ) : <p className="muted group-empty">No countries selected. Choose “Add countries” to search.</p>}
+      {open ? (
+        <div className="group-country-menu" id={`${id}-country-options`}>
+          <div className="group-add-row">
+            <input
+              ref={searchRef}
+              id={`${id}-group-search`}
+              type="search"
+              value={query}
+              placeholder="Search by country or ISO code…"
+              aria-label="Search countries to add to the group"
+              aria-controls={`${id}-candidate-list`}
+              autoComplete="off"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' && candidates.length) {
+                  event.preventDefault();
+                  candidateRefs.current[0]?.focus();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setOpen(false);
+                  addButtonRef.current?.focus();
+                }
+              }}
+            />
+            {query ? <button type="button" className="btn btn-ghost" onClick={() => { setQuery(''); searchRef.current?.focus(); }}>Clear search</button> : null}
+          </div>
+          {candidates.length > 0 ? (
+            <ul className="candidate-list" id={`${id}-candidate-list`} aria-label="Available countries" role="listbox">
+              {candidates.map((c, index) => (
               <li key={c.iso3}>
-                <button type="button" className="candidate-add" onClick={() => add(c.iso3)}>
+                <button
+                  ref={(node) => { candidateRefs.current[index] = node; }}
+                  type="button"
+                  className="candidate-add"
+                  role="option"
+                  aria-selected="false"
+                  onClick={() => add(c.iso3)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      const delta = event.key === 'ArrowDown' ? 1 : -1;
+                      candidateRefs.current[(index + delta + candidates.length) % candidates.length]?.focus();
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      setOpen(false);
+                      addButtonRef.current?.focus();
+                    }
+                  }}
+                >
                   <span>
                     {c.name} <span className="mono muted">{c.iso3}</span>
                   </span>
-                  <span aria-hidden="true">+</span>
+                  <span aria-hidden="true">Add</span>
                 </button>
               </li>
             ))}
           </ul>
-        ) : (
-          <p className="muted">No matching economies.</p>
-        )
+          ) : <p className="muted group-no-matches">{q ? 'No matching countries.' : 'No more countries to add.'}</p>}
+        </div>
       ) : null}
       <p className="footnote" id={`${id}-group-note`}>
-        User-selected group — never an official region. Members: {members.length}.
+        Request-defined country group — not an official World Bank aggregate. Changing membership recalculates the comparison.
       </p>
       <GroupPreview members={members} label={value?.label ?? null} metricKey={metricKey} />
     </div>
@@ -223,9 +288,10 @@ export default function EntityPicker({ id, label, value, countries = [], aggrega
         />
       ) : null}
       {kind === 'custom_group' ? (
-        <Field label={label} htmlFor={`${id}-group-search`}>
+        <div className="field">
+          <span className="field-label">{label}</span>
           <GroupBuilder countries={countries} value={value} onChange={onChange} id={id} metricKey={metricKey} />
-        </Field>
+        </div>
       ) : null}
     </div>
   );

@@ -1,1 +1,882 @@
-{"available":true,"reason":null,"entities":{"a":{"kind":"country","iso3":"USA","name":"United States","source":"WORLD_BANK"},"b":{"kind":"country","iso3":"CHN","name":"China","source":"WORLD_BANK"}},"metric":{"key":"total_current","subject":"gdp_total","domain":"NATIONAL_ACCOUNTS","family":"GDP_TOTAL","indicatorCode":"NY.GDP.MKTP.CD","label":"Total GDP — Nominal — Current US$","shortLabel":"Current US$","unit":"current US$","unitLong":"current US$","currencySymbol":"$","group":"usd","priceBasis":"current","currencyBasis":"USD","frequency":"ANNUAL","observationType":"LEVEL","validChangeTypes":["ABSOLUTE","PERCENT","YOY","CAGR"],"aggregation":"SUM","rankingDirection":"DESC","interpretation":"MORE_IS_MORE","comparisonCapability":["COUNTRY","OFFICIAL_AGGREGATE","CUSTOM_GROUP"],"signDomain":"POSITIVE_ONLY","requiredDenominator":null,"quotation":null,"derivation":{"kind":"RAW"},"lifecycle":"PRODUCTION","ppp":false,"baseYear":null,"displayScale":"trillions","displayDecimals":2,"periodAggregation":[],"worldBankPage":"https://data.worldbank.org/indicator/NY.GDP.MKTP.CD"},"years":{"a":1960,"b":2025},"operation":"level","groupMode":"observed","capability":{"allowed":true,"reason":null},"results":{"a":{"kind":"country","iso3":"USA","name":"United States","source":"WORLD_BANK","values":{"1960":{"available":true,"reason":null,"value":541988586206.897,"valueRaw":"541988586206.897","provenance":"RAW"},"2025":{"available":true,"reason":null,"value":30769700000000,"valueRaw":"30769700000000","provenance":"RAW"}}},"b":{"kind":"country","iso3":"CHN","name":"China","source":"WORLD_BANK","values":{"1960":{"available":true,"reason":null,"value":59846235024.7318,"valueRaw":"59846235024.7318","provenance":"RAW"},"2025":{"available":true,"reason":null,"value":19498039388042.6,"valueRaw":"19498039388042.6","provenance":"RAW"}}},"comparison":{"available":true,"reason":null,"perYear":{"1960":{"a":541988586206.897,"b":59846235024.7318,"gap":482142351182.16516,"gapReason":null,"unit":"current US$"},"2025":{"a":30769700000000,"b":19498039388042.6,"gap":11271660611957.398,"gapReason":null,"unit":"current US$"}},"unit":"current US$"}},"vintage":{"coherent":true,"lastUpdatedValues":["2026-07-13"],"warning":null},"source":{"provider":"World Bank","dataset":"World Development Indicators (WDI)","apiDocumentation":["https://datahelpdesk.worldbank.org/knowledgebase/articles/898581","https://datahelpdesk.worldbank.org/knowledgebase/articles/898599"],"wording":"Rank calculated from World Bank WDI observations.","disclaimer":"The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.","focusCountry":{"iso3":"IND","name":"India"},"apiBaseUrl":"https://api.worldbank.org/v2"},"methodology":{"source":"World Bank","dataset":"World Development Indicators (WDI)","rankWording":"Rank calculated from World Bank WDI observations.","rankDisclaimer":"The World Bank provides the underlying observations. Historical country ranks shown by this application are calculated by this application from those observations. The World Bank does not publish the rank values produced here.","levelRanking":"value in the metric-declared direction (DESC; ASC where the registry declares lower-values-first), ISO3 ASC; rank = 1-based ordinal position. Ties are ordered deterministically by ISO3 and therefore receive distinct ordinal positions.","yoyFormula":"((currentRaw / previousRaw) - 1) * 100, raw values only; missing or non-positive base yields null, never 0%.","yoyRanking":"YoY DESC, ISO3 ASC; denominator counts valid YoY pairs only.","numericalRepresentation":"Observations are stored as SQLite REAL (IEEE-754 double, used for all comparisons and arithmetic — deterministic for a fixed snapshot) alongside value_raw TEXT (canonical decimal string, audit only). Nothing is rounded before calculation; formatting is presentation-only.","universeRule":{"eligibleDefinition":"A country/economy is eligible when its World Bank metadata does not mark it as an aggregate.","aggregateRule":"Excluded when region.id is \"NA\", or region.value is \"Aggregates\", or the ISO3 code is blank.","observationRule":"An observation is ranked only when its value is non-null, its ISO3 is non-blank, its ISO3 exists in the metadata, and that entity is not an aggregate.","denominatorMeaning":"The denominator is the number of eligible countries/economies holding a valid World Bank observation for that indicator and year. It changes between years because observation availability differs. It does not mean the number of countries in the world.","blankIso3Note":"World Bank income-group aggregates (for example \"High income\", \"Lower middle income\") are returned with an empty countryiso3code and are excluded by the blank-ISO3 rule. Excluding them is required for a country-level ranking."},"pricesMovement":"Prices-only canonical methodology (prices/method-cpiindex.txt, prices/cpiInflationmethodology.txt, prices/gdpDeflator.txt): CPI Index 2 bases (annual raw, no rank; period endpoint change (E/S-1)*100, ASC competition rank); CPI Inflation 3 bases (annual raw; average S+1..E; cumulative prod(S+1..E)(1+r/100)-1, all ASC competition); GDP-deflator 3 bases (same structure). Observed/Like-for-like are universes, identical formulas. Benchmark=mean(other eligible), PP=benchmark-focus, focus excluded. Full precision; competition ranking (1,1,3). Missing required years invalidate the period (never zero-filled/interpolated). Country groups are dynamic WB classifications (income/region/lending); Developed/Developing/Underdeveloped labels are not in the authoritative data and are not exposed.","tradeMovement":"Trade-only canonical methodology (trade/tademethod.txt): annual value (raw, DESC competition rank, USD gap); CAGR ((E/S)^(1/(E-S))-1, DESC, pp gap, start>0 required, end=0 valid as -100%); inclusive period total S..E (11/11/21 obs, DESC, USD gap); inclusive period average total/(E-S+1) (DESC, USD/year gap). Observed/Like-for-like are universes, identical formulas. Benchmark=mean(other eligible), gap=benchmark-focus, focus excluded. Full precision; competition ranking (1,1,3). Missing required years exclude the economy (never zero-filled/interpolated). Current-US$ values are nominal (quantities, prices, exchange rates, composition), not real-volume growth.","capitalMovement":"Capital-only canonical methodology (capitalflow/capitalflowmethod.txt): FDI annual raw, cumulative sum S+1..E, average sum/(E-S) (all DESC, USD gaps); FDI/GDP annual raw WDI ratio, average ratio S+1..E, cumulative FDI/cumulative GDP (all DESC, pp gaps); unranked endpoint diagnostics only; no % growth basis. Gap = country-focus minus other-eligible mean (positive = above). Negative/zero flows are data. Full precision; competition ranking (1,1,3). Missing required years (incl. GDP legs) exclude the economy. Cumulative FDI is summed flows, never a stock.","fxMovement":"FX-only canonical methodology (ExchangeRate/exchangerate.txt): annual level raw LCU per US$ (never ranked/benchmarked); annual change ((t/t-1)-1, DESC competition, frozen direction); period change ((E/S)-1 endpoints-only, DESC competition); CAGR display-only secondary. Benchmark = leave-one-out MEDIAN eligible-economy change; gap = country − median (pp). Positive = depreciation vs USD. Full precision. Missing t-1/t or S/E excludes. Nominal official bilateral vs USD only; no continuity metadata stored (no fabricated detectors).","externalMovement":"External-only canonical methodology (ExternalSector/externalsector.txt): CA annual/average/cumulative CA/GDP from CA+GDP legs (S+1..E, pp); reserves annual stock (USD, size-only), endpoint % change S/E (pp), annual import coverage R/Imports*12 (months); remittances annual/cumulative/average S+1..E (USD) + cumulative intensity ΣRemit/ΣGDP (pp). All DESC competition; per-basis frozen mean/median LOO benchmark (median: reserves stock/change, remittance levels; mean: ratios/coverage); gap = country − benchmark. Negative/zero are data. Full precision; strict completeness.","populationMovement":"Population-only canonical methodology (population/pop.txt): annual stock (raw, DESC, mean gap, people); endpoint absolute change E−S (DESC, mean gap, people); endpoint % growth (DESC, mean gap, pp) with display-only CAGR. Stock semantics: never summed/averaged/sequenced. Gap = country − mean (positive = above). Full precision; competition ranking (1,1,3). Missing endpoints exclude. Estimates, not headcounts; no welfare claims."}}
+{
+  "available": true,
+  "reason": null,
+  "entities": {
+    "a": {
+      "kind": "country",
+      "iso3": "USA",
+      "name": "United States",
+      "source": "WORLD_BANK"
+    },
+    "b": {
+      "kind": "country",
+      "iso3": "CHN",
+      "name": "China",
+      "source": "WORLD_BANK"
+    }
+  },
+  "metric": {
+    "key": "total_current",
+    "subject": "gdp_total",
+    "domain": "NATIONAL_ACCOUNTS",
+    "family": "GDP_TOTAL",
+    "indicatorCode": "NY.GDP.MKTP.CD",
+    "label": "Total GDP — Nominal — Current US$",
+    "shortLabel": "Current US$",
+    "unit": "current US$",
+    "unitLong": "current US$",
+    "currencySymbol": "$",
+    "group": "usd",
+    "priceBasis": "current",
+    "currencyBasis": "USD",
+    "frequency": "ANNUAL",
+    "observationType": "LEVEL",
+    "validChangeTypes": [
+      "ABSOLUTE",
+      "PERCENT",
+      "YOY",
+      "CAGR"
+    ],
+    "aggregation": "SUM",
+    "rankingDirection": "DESC",
+    "interpretation": "MORE_IS_MORE",
+    "comparisonCapability": [
+      "COUNTRY",
+      "OFFICIAL_AGGREGATE",
+      "CUSTOM_GROUP"
+    ],
+    "signDomain": "POSITIVE_ONLY",
+    "requiredDenominator": null,
+    "quotation": null,
+    "derivation": {
+      "kind": "RAW"
+    },
+    "lifecycle": "PRODUCTION",
+    "ppp": false,
+    "baseYear": null,
+    "displayScale": "trillions",
+    "displayDecimals": 2,
+    "periodAggregation": [],
+    "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.MKTP.CD"
+  },
+  "years": {
+    "a": 1960,
+    "b": 2025,
+    "c": null
+  },
+  "operation": "level",
+  "groupMode": "observed",
+  "mode": "observed",
+  "analysis": {
+    "id": "level",
+    "label": "Level",
+    "kind": "point",
+    "formula": "stored observation at the selected period(s)",
+    "transform": null,
+    "startYear": 1960,
+    "midYear": null,
+    "endYear": 2025,
+    "endpointYears": null,
+    "requiredObservationYears": [
+      1960,
+      2025
+    ],
+    "seriesYears": [
+      1960,
+      1970,
+      1980,
+      1990,
+      2000,
+      2010,
+      2020,
+      2025
+    ],
+    "ignoredPeriods": [],
+    "boundary": {
+      "start": 1960,
+      "end": 2025,
+      "inclusiveStart": true,
+      "inclusiveEnd": true,
+      "kind": "observation_years"
+    },
+    "intervals": [],
+    "membership": {
+      "kind": "none",
+      "shared": null,
+      "sharedCount": null,
+      "nested": null,
+      "note": null
+    }
+  },
+  "capability": {
+    "allowed": true,
+    "reason": null
+  },
+  "universe": {
+    "mode": "observed",
+    "requiredObservationYears": [
+      1960,
+      2025
+    ],
+    "candidates": [
+      "CHN",
+      "IND",
+      "USA"
+    ],
+    "candidateCount": 3,
+    "complete": [
+      "CHN",
+      "IND",
+      "USA"
+    ],
+    "completeCount": 3,
+    "included": [
+      "IND"
+    ],
+    "includedCount": 1,
+    "membershipHash": "fnv1a32:00000000",
+    "completeMembershipHash": "fnv1a32:00000000",
+    "excluded": {
+      "participants": [
+        {
+          "iso3": "CHN",
+          "role": "entity",
+          "inCompleteSet": true
+        },
+        {
+          "iso3": "USA",
+          "role": "entity",
+          "inCompleteSet": true
+        }
+      ],
+      "incomplete": [],
+      "distinct": [
+        {
+          "iso3": "CHN",
+          "reasons": [
+            "comparison_participant"
+          ],
+          "missingYears": []
+        },
+        {
+          "iso3": "USA",
+          "reasons": [
+            "comparison_participant"
+          ],
+          "missingYears": []
+        }
+      ]
+    },
+    "counts": {
+      "candidates": 3,
+      "complete": 3,
+      "reference": 1,
+      "excludedDistinct": 2,
+      "excludedParticipants": 2,
+      "excludedIncomplete": 0,
+      "missingObservations": 0
+    },
+    "missingObservations": [],
+    "membershipRule": {
+      "eligibleDefinition": "A country/economy is eligible when its World Bank metadata does not mark it as an aggregate."
+    }
+  },
+  "results": {
+    "a": {
+      "kind": "country",
+      "iso3": "USA",
+      "name": "United States",
+      "source": "WORLD_BANK",
+      "values": {
+        "1960": {
+          "available": true,
+          "reason": null,
+          "value": 541988586206.897,
+          "valueRaw": "541988586206.897",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1970": {
+          "available": true,
+          "reason": null,
+          "value": 1073189800000,
+          "valueRaw": "1073189800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1980": {
+          "available": true,
+          "reason": null,
+          "value": 2857247000000,
+          "valueRaw": "2857247000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1990": {
+          "available": true,
+          "reason": null,
+          "value": 5963003000000,
+          "valueRaw": "5963003000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2000": {
+          "available": true,
+          "reason": null,
+          "value": 10252070000000,
+          "valueRaw": "10252070000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2010": {
+          "available": true,
+          "reason": null,
+          "value": 14992070000000,
+          "valueRaw": "14992070000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2020": {
+          "available": true,
+          "reason": null,
+          "value": 21061060000000,
+          "valueRaw": "21061060000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2025": {
+          "available": true,
+          "reason": null,
+          "value": 30769700000000,
+          "valueRaw": "30769700000000",
+          "provenance": "RAW",
+          "complete": true
+        }
+      },
+      "observed": {
+        "1960": {
+          "available": true,
+          "reason": null,
+          "value": 541988586206.897,
+          "valueRaw": "541988586206.897",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1970": {
+          "available": true,
+          "reason": null,
+          "value": 1073189800000,
+          "valueRaw": "1073189800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1980": {
+          "available": true,
+          "reason": null,
+          "value": 2857247000000,
+          "valueRaw": "2857247000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1990": {
+          "available": true,
+          "reason": null,
+          "value": 5963003000000,
+          "valueRaw": "5963003000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2000": {
+          "available": true,
+          "reason": null,
+          "value": 10252070000000,
+          "valueRaw": "10252070000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2010": {
+          "available": true,
+          "reason": null,
+          "value": 14992070000000,
+          "valueRaw": "14992070000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2020": {
+          "available": true,
+          "reason": null,
+          "value": 21061060000000,
+          "valueRaw": "21061060000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2025": {
+          "available": true,
+          "reason": null,
+          "value": 30769700000000,
+          "valueRaw": "30769700000000",
+          "provenance": "RAW",
+          "complete": true
+        }
+      },
+      "likeForLike": {
+        "1960": {
+          "available": true,
+          "reason": null,
+          "value": 541988586206.897,
+          "valueRaw": "541988586206.897",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1970": {
+          "available": true,
+          "reason": null,
+          "value": 1073189800000,
+          "valueRaw": "1073189800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1980": {
+          "available": true,
+          "reason": null,
+          "value": 2857247000000,
+          "valueRaw": "2857247000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1990": {
+          "available": true,
+          "reason": null,
+          "value": 5963003000000,
+          "valueRaw": "5963003000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2000": {
+          "available": true,
+          "reason": null,
+          "value": 10252070000000,
+          "valueRaw": "10252070000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2010": {
+          "available": true,
+          "reason": null,
+          "value": 14992070000000,
+          "valueRaw": "14992070000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2020": {
+          "available": true,
+          "reason": null,
+          "value": 21061060000000,
+          "valueRaw": "21061060000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2025": {
+          "available": true,
+          "reason": null,
+          "value": 30769700000000,
+          "valueRaw": "30769700000000",
+          "provenance": "RAW",
+          "complete": true
+        }
+      },
+      "coverageBasis": {
+        "observed": "ENTITY_OWN_OBSERVATION",
+        "like_for_like": "ENTITY_OWN_OBSERVATION",
+        "usedMembers": [
+          "USA"
+        ],
+        "usedMemberCount": 1,
+        "missingYears": [],
+        "note": "The entity’s own stored observation, admitted only when it exists at every required observation year."
+      },
+      "coverage": {
+        "requiredObservationYears": [
+          1960,
+          2025
+        ],
+        "complete": true,
+        "missingYears": [],
+        "byYear": {
+          "1960": {
+            "available": true,
+            "value": 541988586206.897
+          },
+          "1970": {
+            "available": true,
+            "value": 1073189800000
+          },
+          "1980": {
+            "available": true,
+            "value": 2857247000000
+          },
+          "1990": {
+            "available": true,
+            "value": 5963003000000
+          },
+          "2000": {
+            "available": true,
+            "value": 10252070000000
+          },
+          "2010": {
+            "available": true,
+            "value": 14992070000000
+          },
+          "2020": {
+            "available": true,
+            "value": 21061060000000
+          },
+          "2025": {
+            "available": true,
+            "value": 30769700000000
+          }
+        }
+      },
+      "series": {
+        "basis": "ENTITY_OWN_OBSERVATION",
+        "points": [
+          {
+            "year": 1960,
+            "value": 541988586206.897,
+            "complete": true
+          },
+          {
+            "year": 1970,
+            "value": 1073189800000,
+            "complete": true
+          },
+          {
+            "year": 1980,
+            "value": 2857247000000,
+            "complete": true
+          },
+          {
+            "year": 1990,
+            "value": 5963003000000,
+            "complete": true
+          },
+          {
+            "year": 2000,
+            "value": 10252070000000,
+            "complete": true
+          },
+          {
+            "year": 2010,
+            "value": 14992070000000,
+            "complete": true
+          },
+          {
+            "year": 2020,
+            "value": 21061060000000,
+            "complete": true
+          },
+          {
+            "year": 2025,
+            "value": 30769700000000,
+            "complete": true
+          }
+        ],
+        "partialYears": [],
+        "members": [
+          "USA"
+        ],
+        "note": "The entity’s own stored World Bank observations."
+      }
+    },
+    "b": {
+      "kind": "country",
+      "iso3": "CHN",
+      "name": "China",
+      "source": "WORLD_BANK",
+      "values": {
+        "1960": {
+          "available": true,
+          "reason": null,
+          "value": 59846235024.7318,
+          "valueRaw": "59846235024.7318",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1970": {
+          "available": true,
+          "reason": null,
+          "value": 226881800000,
+          "valueRaw": "226881800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1980": {
+          "available": true,
+          "reason": null,
+          "value": 303419700000,
+          "valueRaw": "303419700000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1990": {
+          "available": true,
+          "reason": null,
+          "value": 356669800000,
+          "valueRaw": "356669800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2000": {
+          "available": true,
+          "reason": null,
+          "value": 1205550000000,
+          "valueRaw": "1205550000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2010": {
+          "available": true,
+          "reason": null,
+          "value": 6087190000000,
+          "valueRaw": "6087190000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2020": {
+          "available": true,
+          "reason": null,
+          "value": 14258730000000,
+          "valueRaw": "14258730000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2025": {
+          "available": true,
+          "reason": null,
+          "value": 19498039388042.6,
+          "valueRaw": "19498039388042.6",
+          "provenance": "RAW",
+          "complete": true
+        }
+      },
+      "observed": {
+        "1960": {
+          "available": true,
+          "reason": null,
+          "value": 59846235024.7318,
+          "valueRaw": "59846235024.7318",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1970": {
+          "available": true,
+          "reason": null,
+          "value": 226881800000,
+          "valueRaw": "226881800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1980": {
+          "available": true,
+          "reason": null,
+          "value": 303419700000,
+          "valueRaw": "303419700000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1990": {
+          "available": true,
+          "reason": null,
+          "value": 356669800000,
+          "valueRaw": "356669800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2000": {
+          "available": true,
+          "reason": null,
+          "value": 1205550000000,
+          "valueRaw": "1205550000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2010": {
+          "available": true,
+          "reason": null,
+          "value": 6087190000000,
+          "valueRaw": "6087190000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2020": {
+          "available": true,
+          "reason": null,
+          "value": 14258730000000,
+          "valueRaw": "14258730000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2025": {
+          "available": true,
+          "reason": null,
+          "value": 19498039388042.6,
+          "valueRaw": "19498039388042.6",
+          "provenance": "RAW",
+          "complete": true
+        }
+      },
+      "likeForLike": {
+        "1960": {
+          "available": true,
+          "reason": null,
+          "value": 59846235024.7318,
+          "valueRaw": "59846235024.7318",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1970": {
+          "available": true,
+          "reason": null,
+          "value": 226881800000,
+          "valueRaw": "226881800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1980": {
+          "available": true,
+          "reason": null,
+          "value": 303419700000,
+          "valueRaw": "303419700000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "1990": {
+          "available": true,
+          "reason": null,
+          "value": 356669800000,
+          "valueRaw": "356669800000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2000": {
+          "available": true,
+          "reason": null,
+          "value": 1205550000000,
+          "valueRaw": "1205550000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2010": {
+          "available": true,
+          "reason": null,
+          "value": 6087190000000,
+          "valueRaw": "6087190000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2020": {
+          "available": true,
+          "reason": null,
+          "value": 14258730000000,
+          "valueRaw": "14258730000000",
+          "provenance": "RAW",
+          "complete": true
+        },
+        "2025": {
+          "available": true,
+          "reason": null,
+          "value": 19498039388042.6,
+          "valueRaw": "19498039388042.6",
+          "provenance": "RAW",
+          "complete": true
+        }
+      },
+      "coverageBasis": {
+        "observed": "ENTITY_OWN_OBSERVATION",
+        "like_for_like": "ENTITY_OWN_OBSERVATION",
+        "usedMembers": [
+          "CHN"
+        ],
+        "usedMemberCount": 1,
+        "missingYears": [],
+        "note": "The entity’s own stored observation, admitted only when it exists at every required observation year."
+      },
+      "coverage": {
+        "requiredObservationYears": [
+          1960,
+          2025
+        ],
+        "complete": true,
+        "missingYears": [],
+        "byYear": {
+          "1960": {
+            "available": true,
+            "value": 59846235024.7318
+          },
+          "1970": {
+            "available": true,
+            "value": 226881800000
+          },
+          "1980": {
+            "available": true,
+            "value": 303419700000
+          },
+          "1990": {
+            "available": true,
+            "value": 356669800000
+          },
+          "2000": {
+            "available": true,
+            "value": 1205550000000
+          },
+          "2010": {
+            "available": true,
+            "value": 6087190000000
+          },
+          "2020": {
+            "available": true,
+            "value": 14258730000000
+          },
+          "2025": {
+            "available": true,
+            "value": 19498039388042.6
+          }
+        }
+      },
+      "series": {
+        "basis": "ENTITY_OWN_OBSERVATION",
+        "points": [
+          {
+            "year": 1960,
+            "value": 59846235024.7318,
+            "complete": true
+          },
+          {
+            "year": 1970,
+            "value": 226881800000,
+            "complete": true
+          },
+          {
+            "year": 1980,
+            "value": 303419700000,
+            "complete": true
+          },
+          {
+            "year": 1990,
+            "value": 356669800000,
+            "complete": true
+          },
+          {
+            "year": 2000,
+            "value": 1205550000000,
+            "complete": true
+          },
+          {
+            "year": 2010,
+            "value": 6087190000000,
+            "complete": true
+          },
+          {
+            "year": 2020,
+            "value": 14258730000000,
+            "complete": true
+          },
+          {
+            "year": 2025,
+            "value": 19498039388042.6,
+            "complete": true
+          }
+        ],
+        "partialYears": [],
+        "members": [
+          "CHN"
+        ],
+        "note": "The entity’s own stored World Bank observations."
+      }
+    },
+    "comparison": {
+      "available": true,
+      "reason": null,
+      "detail": null,
+      "scope": "none",
+      "blockedYears": [],
+      "perYear": {
+        "1960": {
+          "a": 541988586206.897,
+          "b": 59846235024.7318,
+          "gap": 482142351182.16516,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "1970": {
+          "a": 1073189800000,
+          "b": 226881800000,
+          "gap": 846308000000,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "1980": {
+          "a": 2857247000000,
+          "b": 303419700000,
+          "gap": 2553827300000,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "1990": {
+          "a": 5963003000000,
+          "b": 356669800000,
+          "gap": 5606333200000,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "2000": {
+          "a": 10252070000000,
+          "b": 1205550000000,
+          "gap": 9046520000000,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "2010": {
+          "a": 14992070000000,
+          "b": 6087190000000,
+          "gap": 8904880000000,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "2020": {
+          "a": 21061060000000,
+          "b": 14258730000000,
+          "gap": 6802330000000,
+          "gapReason": null,
+          "unit": "current US$"
+        },
+        "2025": {
+          "a": 30769700000000,
+          "b": 19498039388042.6,
+          "gap": 11271660611957.398,
+          "gapReason": null,
+          "unit": "current US$"
+        }
+      },
+      "unit": "current US$"
+    }
+  },
+  "diagnostics": [],
+  "vintage": {
+    "coherent": true,
+    "lastUpdatedValues": [
+      "2026-07-13"
+    ],
+    "warning": null
+  },
+  "source": {
+    "provider": "World Bank",
+    "dataset": "World Development Indicators (WDI)",
+    "focusCountry": {
+      "iso3": "IND",
+      "name": "India"
+    },
+    "apiBaseUrl": "https://api.worldbank.org/v2"
+  },
+  "cached": false
+}

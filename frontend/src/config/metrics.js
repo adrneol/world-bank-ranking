@@ -20,6 +20,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.CD',
     unit: 'current US$',
     subject: 'gdp_per_capita',
+    aggregation: 'NOT_AGGREGATABLE',
     displayDecimals: 0,
   }),
   nominal_constant: Object.freeze({
@@ -29,6 +30,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.KD',
     unit: 'constant 2015 US$',
     subject: 'gdp_per_capita',
+    aggregation: 'NOT_AGGREGATABLE',
     displayDecimals: 0,
   }),
   ppp_current: Object.freeze({
@@ -38,6 +40,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.PP.CD',
     unit: 'current international $',
     subject: 'gdp_per_capita',
+    aggregation: 'NOT_AGGREGATABLE',
     displayDecimals: 0,
   }),
   ppp_constant: Object.freeze({
@@ -47,6 +50,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.PCAP.PP.KD',
     unit: 'constant 2021 international $',
     subject: 'gdp_per_capita',
+    aggregation: 'NOT_AGGREGATABLE',
     displayDecimals: 0,
   }),
   total_current: Object.freeze({
@@ -56,6 +60,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.CD',
     unit: 'current US$',
     subject: 'gdp_total',
+    aggregation: 'SUM',
     displayDecimals: 2,
   }),
   total_constant: Object.freeze({
@@ -65,6 +70,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.KD',
     unit: 'constant 2015 US$',
     subject: 'gdp_total',
+    aggregation: 'SUM',
     displayDecimals: 2,
   }),
   total_ppp_current: Object.freeze({
@@ -74,6 +80,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.PP.CD',
     unit: 'current international $',
     subject: 'gdp_total',
+    aggregation: 'SUM',
     displayDecimals: 2,
   }),
   total_ppp_constant: Object.freeze({
@@ -83,6 +90,7 @@ export const STATIC_METRICS = Object.freeze({
     indicatorCode: 'NY.GDP.MKTP.PP.KD',
     unit: 'constant 2021 international $',
     subject: 'gdp_total',
+    aggregation: 'SUM',
     displayDecimals: 2,
   }),
 });
@@ -116,6 +124,101 @@ export const STATIC_SUBJECTS = Object.freeze({
 });
 
 export const STATIC_SUBJECT_KEYS = Object.freeze(Object.keys(STATIC_SUBJECTS));
+
+/**
+ * User-facing metric families: economic concepts selected as the "Metric"
+ * dimension. Each family groups one or more registered canonical metric keys
+ * (measurement variants) that share the same economic concept.
+ *
+ * For GDP and GDP per capita, the family has multiple bases (price/currency
+ * variants). For all other metrics, the family has a single canonical key.
+ *
+ * This is frontend display metadata only; it does not duplicate the backend
+ * calculation registry. The canonical metric key resolved from a family +
+ * basis drives the API `indicator` parameter and all calculations.
+ */
+export const METRIC_FAMILIES = Object.freeze({
+  total_gdp: Object.freeze({
+    key: 'total_gdp',
+    label: 'Total GDP',
+    metricKeys: Object.freeze(['total_current', 'total_constant', 'total_ppp_current', 'total_ppp_constant']),
+    defaultBasis: 'total_current',
+  }),
+  gdp_per_capita: Object.freeze({
+    key: 'gdp_per_capita',
+    label: 'GDP per capita',
+    metricKeys: Object.freeze(['nominal_current', 'nominal_constant', 'ppp_current', 'ppp_constant']),
+    defaultBasis: 'nominal_current',
+  }),
+  inflation_cpi: Object.freeze({
+    key: 'inflation_cpi',
+    label: 'CPI inflation',
+    metricKeys: Object.freeze(['inflation_cpi']),
+    defaultBasis: 'inflation_cpi',
+  }),
+  inflation_cpi_index: Object.freeze({
+    key: 'inflation_cpi_index',
+    label: 'CPI index',
+    metricKeys: Object.freeze(['inflation_cpi_index']),
+    defaultBasis: 'inflation_cpi_index',
+  }),
+  inflation_deflator: Object.freeze({
+    key: 'inflation_deflator',
+    label: 'GDP-deflator inflation',
+    metricKeys: Object.freeze(['inflation_deflator']),
+    defaultBasis: 'inflation_deflator',
+  }),
+  exports_current: Object.freeze({
+    key: 'exports_current',
+    label: 'Exports',
+    metricKeys: Object.freeze(['exports_current']),
+    defaultBasis: 'exports_current',
+  }),
+  imports_current: Object.freeze({
+    key: 'imports_current',
+    label: 'Imports',
+    metricKeys: Object.freeze(['imports_current']),
+    defaultBasis: 'imports_current',
+  }),
+  fdi_inflows: Object.freeze({
+    key: 'fdi_inflows',
+    label: 'Foreign direct investment',
+    metricKeys: Object.freeze(['fdi_inflows', 'fdi_inflows_pct_gdp']),
+    defaultBasis: 'fdi_inflows',
+  }),
+  fx_official: Object.freeze({
+    key: 'fx_official',
+    label: 'Exchange rates',
+    metricKeys: Object.freeze(['fx_official']),
+    defaultBasis: 'fx_official',
+  }),
+  current_account: Object.freeze({
+    key: 'current_account',
+    label: 'Current account',
+    metricKeys: Object.freeze(['current_account']),
+    defaultBasis: 'current_account',
+  }),
+  reserves_ex_gold: Object.freeze({
+    key: 'reserves_ex_gold',
+    label: 'Reserves',
+    metricKeys: Object.freeze(['reserves_ex_gold']),
+    defaultBasis: 'reserves_ex_gold',
+  }),
+  remittances_received: Object.freeze({
+    key: 'remittances_received',
+    label: 'Remittances',
+    metricKeys: Object.freeze(['remittances_received']),
+    defaultBasis: 'remittances_received',
+  }),
+  population_total: Object.freeze({
+    key: 'population_total',
+    label: 'Population',
+    metricKeys: Object.freeze(['population_total']),
+    defaultBasis: 'population_total',
+  }),
+});
+
+export const METRIC_FAMILY_KEYS = Object.freeze(Object.keys(METRIC_FAMILIES));
 
 /**
  * Active registry (live bindings: importers always see the hydrated maps).
@@ -280,19 +383,143 @@ export function metricCapabilities(key) {
 }
 
 /**
+ * Display label for a measurement basis (metric key), derived from registry
+ * metadata (priceBasis / currencyBasis / baseYear / unit). Never hardcodes
+ * price-base semantics from a generic label.
+ */
+export function basisLabelForMetric(key) {
+  const metric = METRICS[key] ?? {};
+  const currency = metric.currencyBasis;
+  const prices = metric.priceBasis;
+  if (prices === 'current' || prices === 'constant') {
+    const priceLabel = prices === 'current' ? 'Current prices' : `Constant prices${metric.baseYear ? ` (${metric.baseYear})` : ''}`;
+    const currencyLabel = currency === 'INTERNATIONAL_DOLLAR' ? 'PPP international dollars' : currency === 'USD' ? 'US dollars' : null;
+    return [priceLabel, currencyLabel].filter(Boolean).join(' · ');
+  }
+  return `Registry-defined · ${metric.unitLong ?? metric.unit ?? metricTitle(key)}`;
+}
+
+/**
+ * Family options for the Compare Metric selector: economic concepts only,
+ * never individual series variants or analytical operations.
+ */
+export function metricFamilyOptions() {
+  return Object.values(METRIC_FAMILIES).map((family) => ({
+    value: family.key,
+    label: family.label,
+  }));
+}
+
+/**
+ * Resolve the metric family that contains a canonical metric key.
+ * Returns null when the key belongs to no family.
+ */
+export function familyForMetricKey(metricKey) {
+  for (const family of Object.values(METRIC_FAMILIES)) {
+    if (family.metricKeys.includes(metricKey)) return family.key;
+  }
+  return null;
+}
+
+/**
+ * Basis options for one metric family. For multi-variant families (GDP, GDP
+ * per capita) each canonical metric key is a basis. For single-key families
+ * the movement bases of the sole metric are offered.
+ */
+export function basisOptionsForFamily(familyKey, yearA = null, yearEnd = null) {
+  const family = METRIC_FAMILIES[familyKey];
+  if (!family) return [];
+  if (family.metricKeys.length > 1) {
+    return family.metricKeys.map((key) => ({
+      id: key,
+      label: basisLabelForMetric(key),
+      metricKey: key,
+      available: true,
+    }));
+  }
+  const metricKey = family.metricKeys[0];
+  const movementOptions = movementBasisOptions(metricKey, yearA, yearEnd);
+  // The metric key itself is always a valid basis (the base measurement);
+  // movement bases are additional compatible definitions.
+  return [
+    { id: metricKey, label: basisLabelForMetric(metricKey), metricKey, available: true },
+    ...movementOptions.map((basis) => ({
+      id: basis.id,
+      label: basis.label,
+      metricKey,
+      available: basis.available,
+    })),
+  ];
+}
+
+/**
+ * Resolve the canonical metric key (API `indicator`) from a family + basis.
+ * For multi-variant families the basis id IS the canonical key; for
+ * single-key families the family's metric key is used regardless of basis.
+ */
+export function resolveCanonicalMetric(familyKey, basisId) {
+  const family = METRIC_FAMILIES[familyKey];
+  if (!family) return null;
+  if (family.metricKeys.length > 1) {
+    return family.metricKeys.includes(basisId) ? basisId : null;
+  }
+  return family.metricKeys[0];
+}
+
+/**
+ * Default basis id for one metric family.
+ */
+export function defaultBasisForFamily(familyKey) {
+  const family = METRIC_FAMILIES[familyKey];
+  return family ? family.defaultBasis : null;
+}
+
+/**
  * Compare operations derivable from a metric's declared change types.
  * Backend remains authoritative (it re-validates); this only decides which
  * actions the UI offers, so an unsupported button can never be rendered.
+ *
+ * `periods` describes the year roles the operation uses:
+ *   'start'        Year A only.
+ *   'start-end'    Year A plus an end year (Year C, or Year B as the
+ *                  two-year fallback); Year B partitions the analysis when
+ *                  both B and C are supplied.
+ *   'start-optional-mid-end' Year A and C, with an optional middle point B.
  */
 export const COMPARE_OPERATIONS = Object.freeze([
-  { id: 'level', label: 'Level', needsYears: 1 },
-  { id: 'absolute_change', label: 'Absolute change', needsYears: 2 },
-  { id: 'percent_change', label: 'Percent change', needsYears: 2 },
-  { id: 'pp_change', label: 'Percentage-point change', needsYears: 2 },
-  { id: 'index_point_change', label: 'Index-point change', needsYears: 2 },
-  { id: 'cagr', label: 'CAGR', needsYears: 2 },
-  { id: 'cross_rate', label: 'Cross-rate', needsYears: 1 },
+  { id: 'level', label: 'Level', needsYears: 1, periods: 'start' },
+  { id: 'absolute_change', label: 'Absolute change', needsYears: 2, periods: 'start-end' },
+  { id: 'percent_change', label: 'Percent change', needsYears: 2, periods: 'start-end' },
+  { id: 'pp_change', label: 'Percentage-point change', needsYears: 2, periods: 'start-end' },
+  { id: 'index_point_change', label: 'Index-point change', needsYears: 2, periods: 'start-end' },
+  { id: 'cagr', label: 'CAGR', needsYears: 2, periods: 'start-end' },
+  { id: 'cross_rate', label: 'Cross-rate', needsYears: 1, periods: 'start' },
+  { id: 'period_total', label: 'Period total', needsYears: 2, periods: 'start-end' },
+  { id: 'period_average', label: 'Period average', needsYears: 2, periods: 'start-end' },
+  { id: 'movement_period_total', label: 'Movement period total', needsYears: 2, periods: 'start-end' },
+  { id: 'movement_period_average', label: 'Movement period average', needsYears: 2, periods: 'start-end' },
+  { id: 'movement_inflation_cumulative', label: 'Cumulative inflation', needsYears: 2, periods: 'start-end' },
+  { id: 'period_total_growth', label: 'Period-total growth', needsYears: 2, periods: 'start-optional-mid-end' },
+  { id: 'segmented_growth', label: 'Segmented growth', needsYears: 2, periods: 'start-optional-mid-end' },
 ]);
+
+/**
+ * Which year roles an operation uses, and which controls the builder shows.
+ * Mirrors the backend analysis planner (domain/compareAnalysis.js); the
+ * backend remains authoritative and reports the periods it actually used.
+ */
+export function comparePeriodRequirements(operation) {
+  const def = COMPARE_OPERATIONS.find((op) => op.id === operation);
+  const periods = def?.periods ?? 'start';
+  return {
+    periods,
+    usesStart: true,
+    usesEnd: periods !== 'start',
+    usesMid: false,
+    showOptionalMid: periods === 'start-end' || periods === 'start-optional-mid-end',
+    requiresEnd: periods === 'start-optional-mid-end',
+  };
+}
 
 const OPERATION_CHANGE_TYPE = Object.freeze({
   absolute_change: 'ABSOLUTE',
@@ -300,6 +527,14 @@ const OPERATION_CHANGE_TYPE = Object.freeze({
   pp_change: 'PP',
   index_point_change: 'INDEX_POINT',
   cagr: 'CAGR',
+  segmented_growth: 'PERCENT',
+});
+
+/** Period-aggregation capability each period operation needs. */
+const OPERATION_PERIOD_TYPE = Object.freeze({
+  period_total: 'SUM',
+  period_average: 'AVG',
+  period_total_growth: 'SUM',
 });
 
 export function operationsFor(metricKey) {
@@ -307,6 +542,7 @@ export function operationsFor(metricKey) {
   // Static fallback (pre-hydration GDP registry) mirrors backend semantics:
   // level always; change ops per known GDP declarations.
   const declared = caps ? caps.validChangeTypes : ['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR'];
+  const periodAggregation = caps ? (caps.periodAggregation ?? []) : [];
   return COMPARE_OPERATIONS.filter((op) => {
     if (op.id === 'level') return true;
     if (op.id === 'cross_rate') {
@@ -314,6 +550,8 @@ export function operationsFor(metricKey) {
         ? caps.observationType === 'QUOTED_RATE' && caps.quotation?.convention === 'LCU_PER_USD'
         : false;
     }
+    const periodType = OPERATION_PERIOD_TYPE[op.id];
+    if (periodType) return periodAggregation.includes(periodType);
     return declared.includes(OPERATION_CHANGE_TYPE[op.id]);
   });
 }
@@ -562,8 +800,23 @@ export function operationsForEntities(metricKey, entityA, entityB) {
   const involvesGroup = kinds.includes('custom_group');
   const groupSupported = supportsGroupValues(metricKey);
   const bothCountries = entityA.kind === 'country' && entityB.kind === 'country';
+  // The metric registry declares which entity kinds may take part in a
+  // comparison. The backend enforces it; the UI mirrors it so an
+  // unsupported combination is never offered as if it were valid.
+  const capability = caps?.comparisonCapability ?? [];
+  const capabilityToken = (kind) =>
+    kind === 'country' ? 'COUNTRY' : kind === 'wb_aggregate' ? 'OFFICIAL_AGGREGATE' : 'CUSTOM_GROUP';
+  const capabilityLabel = (kind) =>
+    kind === 'country' ? 'a country' : kind === 'wb_aggregate' ? 'an official aggregate' : 'a custom group';
   return base.map((op) => {
     if (!op.available) return op;
+    if (capability.length > 0) {
+      for (const kind of kinds) {
+        if (!capability.includes(capabilityToken(kind))) {
+          return { ...op, available: false, disabledReason: `This metric cannot be compared with ${capabilityLabel(kind)}` };
+        }
+      }
+    }
     // Cross-rates need two country legs with compatible quotations.
     if (op.id === 'cross_rate' && !bothCountries) {
       return { ...op, available: false, disabledReason: 'Cross-rate needs two countries' };
@@ -584,6 +837,107 @@ export function operationsForEntities(metricKey, entityA, entityB) {
     }
     return op;
   });
+}
+
+/**
+ * Compare's Analysis menu is a method picker, not a dump of every transform
+ * the backend can theoretically calculate. Start with the methods Movement
+ * approves for this metric, map those methods to the verified Compare API
+ * operation, then add only a small set of Compare-specific calculations
+ * whose measurement types make their units unambiguous.
+ *
+ * A missing mapping is deliberately omitted: a mathematical transform is
+ * not sufficient evidence that it is the approved Movement method.
+ */
+const MOVEMENT_BASIS_COMPARE_OPERATION = Object.freeze({
+  level: 'level',
+  growth: 'percent_change',
+  period_total: 'period_total',
+  period_average: 'period_average',
+  cpi_index_annual: 'level',
+  cpi_index_period_change: 'percent_change',
+  cpi_inflation_annual: 'level',
+  deflator_annual: 'level',
+  exp_annual_value: 'level',
+  imp_annual_value: 'level',
+  exp_period_cagr: 'cagr',
+  imp_period_cagr: 'cagr',
+  fdi_annual_value: 'level',
+  fx_annual_rate: 'level',
+  fx_annual_change: 'percent_change',
+  fx_period_change: 'percent_change',
+  res_annual_stock: 'level',
+  res_period_change: 'absolute_change',
+  fdi_period_cumulative: 'movement_period_total',
+  fdi_period_average: 'movement_period_average',
+  fdigdp_period_average: 'movement_period_average',
+  cpi_inflation_average: 'movement_period_average',
+  deflator_average: 'movement_period_average',
+  cpi_inflation_cumulative: 'movement_inflation_cumulative',
+  deflator_cumulative: 'movement_inflation_cumulative',
+  exp_period_total: 'movement_period_total',
+  imp_period_total: 'movement_period_total',
+  exp_period_average: 'movement_period_average',
+  imp_period_average: 'movement_period_average',
+  remit_period_cumulative: 'movement_period_total',
+  remit_period_average: 'movement_period_average',
+  pop_annual_value: 'level',
+  pop_period_change: 'absolute_change',
+  pop_period_growth: 'percent_change',
+});
+
+/** Available, method-aligned analyses for one Compare request. */
+export function compareAnalysisOptions(metricKey, entityA, entityB, yearA = null, yearEnd = null) {
+  const available = operationsForEntities(metricKey, entityA, entityB).filter((option) => option.available);
+  const byId = new Map(available.map((option) => [option.id, option]));
+  const options = [];
+  const used = new Set();
+
+  for (const basis of movementBasisOptions(metricKey, yearA, yearEnd)) {
+    if (basis.id === 'fx_annual_change' && !(yearA != null && yearEnd != null && Number(yearEnd) - Number(yearA) === 1)) continue;
+    const operation = MOVEMENT_BASIS_COMPARE_OPERATION[basis.id];
+    if (!operation || used.has(operation)) continue;
+    if (!byId.has(operation)) {
+      const caps = metricCapabilities(metricKey);
+      const entityKinds = [entityA?.kind, entityB?.kind].filter(Boolean);
+      const capabilityToken = (kind) => kind === 'country' ? 'COUNTRY' : kind === 'wb_aggregate' ? 'OFFICIAL_AGGREGATE' : 'CUSTOM_GROUP';
+      const supportsEntities = !caps?.comparisonCapability?.length || entityKinds.every((kind) => caps.comparisonCapability.includes(capabilityToken(kind)));
+      const supportsGroups = !entityKinds.includes('custom_group') || supportsGroupValues(metricKey);
+      if (!['movement_period_total', 'movement_period_average', 'movement_inflation_cumulative'].includes(operation) || !supportsEntities || !supportsGroups) continue;
+    }
+    const label = basis.id === 'fx_annual_change' ? 'Annual Nominal FX Change' : basis.label;
+    options.push({ value: operation, label, methodId: basis.id, source: 'movement' });
+    used.add(operation);
+  }
+
+  // Absolute endpoint differences are a meaningful Compare-specific method
+  // for additive or level measures; unlike rank change, the unit is retained.
+  if (byId.has('absolute_change') && !used.has('absolute_change')) {
+    options.push({ value: 'absolute_change', label: 'Absolute change', source: 'compare' });
+    used.add('absolute_change');
+  }
+  if (byId.has('period_total_growth') && !used.has('period_total_growth')) {
+    options.push({ value: 'period_total_growth', label: 'Growth in adjacent period totals', source: 'compare' });
+    used.add('period_total_growth');
+  }
+  // Percentage-point and index-point differences are only offered for their
+  // declared measurement types, where those units have a clear meaning.
+  const type = metricCapabilities(metricKey)?.observationType;
+  for (const [operation, validType, label] of [
+    ['pp_change', 'RATE', 'Percentage-point change'],
+    ['index_point_change', 'INDEX', 'Index-point change'],
+  ]) {
+    if (type === validType && byId.has(operation) && !used.has(operation)) {
+      options.push({ value: operation, label, source: 'compare' });
+      used.add(operation);
+    }
+  }
+  // Cross-rate is a Compare-only operation with explicit country-leg rules.
+  if (byId.has('cross_rate') && !used.has('cross_rate')) {
+    options.push({ value: 'cross_rate', label: 'Cross-rate', source: 'compare' });
+    used.add('cross_rate');
+  }
+  return options;
 }
 
 /** Human-readable observation-type label for metric headers. */

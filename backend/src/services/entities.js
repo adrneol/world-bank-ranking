@@ -27,6 +27,7 @@
 
 import { getCountriesByIso3List, getCountry } from '../db/repository.js';
 import { TRANSFORMS, canTransform } from '../domain/transforms.js';
+import { COMPARE_REASON_CODES, gateCompareAnalysis } from '../domain/compareAnalysis.js';
 
 /** Entity kinds (wire + internal). */
 export const ENTITY_KINDS = Object.freeze({
@@ -58,12 +59,35 @@ export const ENTITY_ERROR_CODES = Object.freeze({
   LIKE_FOR_LIKE_REQUIRES_GROUP: 'LIKE_FOR_LIKE_REQUIRES_GROUP',
   INVALID_GROUP_MODE: 'INVALID_GROUP_MODE',
   INVALID_INDICATOR: 'INVALID_INDICATOR',
+  INVALID_BASIS: 'INVALID_BASIS',
   MISSING_YEAR: 'MISSING_YEAR',
   SAME_YEAR_SELECTED: 'SAME_YEAR_SELECTED',
   INVALID_OPERATION: 'INVALID_OPERATION',
+  // Compare-specific blocking reasons (analysis plan + coverage).
+  INVALID_YEAR_ORDER: COMPARE_REASON_CODES.INVALID_YEAR_ORDER,
+  COVERAGE_INCOMPLETE: 'COVERAGE_INCOMPLETE',
+  AGGREGATE_COVERAGE_NOT_COMPARABLE: 'AGGREGATE_COVERAGE_NOT_COMPARABLE',
+  EMPTY_COMMON_UNIVERSE: 'EMPTY_COMMON_UNIVERSE',
+  PARTIAL_COMPARISON: 'PARTIAL_COMPARISON',
 });
 
-/** Compare operations (value/change only — ranking lives elsewhere). */
+/**
+ * Capability token of an entity kind, as declared by the metric registry
+ * (`comparisonCapability`).
+ */
+const CAPABILITY_TOKEN_BY_KIND = Object.freeze({
+  [ENTITY_KINDS.COUNTRY]: 'COUNTRY',
+  [ENTITY_KINDS.OFFICIAL_AGGREGATE]: 'OFFICIAL_AGGREGATE',
+  [ENTITY_KINDS.CUSTOM_GROUP]: 'CUSTOM_GROUP',
+});
+
+/**
+ * Compare operations include annual Level positions and value/change results.
+ * The period analyses reuse the project's approved strict period transforms
+ * (PERIOD_SUM, PERIOD_AVG, PERIOD_SUM_PERCENT_CHANGE) and the segmented
+ * growth reuses the approved percent-change transform over one shared
+ * universe.
+ */
 export const COMPARE_OPERATIONS = Object.freeze([
   'level',
   'absolute_change',
@@ -72,6 +96,13 @@ export const COMPARE_OPERATIONS = Object.freeze([
   'index_point_change',
   'cagr',
   'cross_rate',
+  'period_total',
+  'period_average',
+  'movement_period_total',
+  'movement_period_average',
+  'movement_inflation_cumulative',
+  'period_total_growth',
+  'segmented_growth',
 ]);
 
 /** Group value modes for SUM-capable metrics. */
@@ -263,6 +294,34 @@ export async function resolveEntity(db, spec) {
  *    universe exists) — enforced structurally by the compare service,
  *    which has no decomposition path for aggregates.
  */
+/**
+ * The metric registry declares which entity kinds may take part in a
+ * comparison. It is authoritative: the frontend's option list is a
+ * convenience, never the validation.
+ *
+ * The mismatch is reported separately from the capability verdict so the
+ * service can distinguish a COMPARISON refusal (the pair may be addressed,
+ * but no derived result may be computed over it) from a request refusal
+ * (the request itself is not answerable). An entity whose published series
+ * does not exist is still reported as explicitly unavailable — an aggregate
+ * is never invented — but no gap, change or growth may be derived against
+ * an entity kind the metric does not support.
+ *
+ * @param {object} metric registry entry
+ * @param {object} entityA
+ * @param {object} entityB
+ * @returns {{token:string, kind:string}|null}
+ */
+export function comparisonCapabilityMismatch(metric, entityA, entityB) {
+  const declared = Array.isArray(metric?.comparisonCapability) ? metric.comparisonCapability : [];
+  if (declared.length === 0) return null;
+  for (const entity of [entityA, entityB]) {
+    const token = CAPABILITY_TOKEN_BY_KIND[entity?.kind];
+    if (token && !declared.includes(token)) return { token, kind: entity.kind };
+  }
+  return null;
+}
+
 export function canCompare({ entityA, entityB, metric, operation }) {
   if (!COMPARE_OPERATIONS.includes(operation)) {
     return { allowed: false, reason: ENTITY_ERROR_CODES.INVALID_OPERATION };
@@ -272,6 +331,10 @@ export function canCompare({ entityA, entityB, metric, operation }) {
   }
   const kinds = [entityA.kind, entityB.kind];
   const hasGroup = kinds.includes(ENTITY_KINDS.CUSTOM_GROUP);
+
+  if (comparisonCapabilityMismatch(metric, entityA, entityB)) {
+    return { allowed: false, reason: ENTITY_ERROR_CODES.UNSUPPORTED_ENTITY_COMBINATION };
+  }
 
   if (operation === TRANSFORMS.CROSS_RATE || operation === 'cross_rate') {
     if (entityA.kind !== ENTITY_KINDS.COUNTRY || entityB.kind !== ENTITY_KINDS.COUNTRY) {
@@ -307,29 +370,16 @@ export function canCompare({ entityA, entityB, metric, operation }) {
   return checkPointOperation(metric, operation);
 }
 
+/**
+ * Point-operation capability: the analysis planner owns the metric gate for
+ * every operation (change types, period aggregation, cross-rate quotation),
+ * so this layer never re-implements the metadata rules.
+ */
 function checkPointOperation(metric, operation) {
-  const wanted =
-    operation === 'level'
-      ? null
-      : operation === 'absolute_change'
-        ? TRANSFORMS.ABSOLUTE_CHANGE
-        : operation === 'percent_change'
-          ? TRANSFORMS.PERCENT_CHANGE
-          : operation === 'pp_change'
-            ? TRANSFORMS.PERCENTAGE_POINT_CHANGE
-            : operation === 'index_point_change'
-              ? TRANSFORMS.INDEX_POINT_CHANGE
-              : operation === 'cagr'
-                ? TRANSFORMS.CAGR
-                : null;
-  if (wanted === null && operation !== 'level') {
-    return { allowed: false, reason: ENTITY_ERROR_CODES.INVALID_OPERATION };
-  }
-  if (wanted === null) return { allowed: true, reason: null };
-  const gate = canTransform(metric, wanted);
+  const gate = gateCompareAnalysis(operation, metric);
   return gate.allowed
     ? { allowed: true, reason: null }
-    : { allowed: false, reason: ENTITY_ERROR_CODES.UNSUPPORTED_TRANSFORMATION };
+    : { allowed: false, reason: gate.reason };
 }
 
 /**
@@ -372,5 +422,6 @@ export default {
   parseEntitySpec,
   resolveEntity,
   canCompare,
+  comparisonCapabilityMismatch,
   validateCrossRateLegs,
 };

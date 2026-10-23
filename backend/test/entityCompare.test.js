@@ -10,10 +10,9 @@
  *   Capability matrix refusals (NOT_AGGREGATABLE, NO_OFFICIAL_AGGREGATE, ...)
  *   RAW vs APP_DERIVED provenance, vintage coherence, legacy regression
  *
- * Production metrics only (the 8 GDP series): disabled future definitions
- * exercise the capability matrix at unit level; their HTTP paths stay 400
- * until Phase 5 promotion. No ranking/leaderboard mixing is possible — the
- * compare response carries no ranks by construction.
+ * Production metrics and promoted families use disposable databases. Level
+ * ranks use Movement's family rankers; pairwise differences remain separate
+ * from leaderboards.
  */
 
 import assert from 'node:assert/strict';
@@ -204,6 +203,13 @@ test('Phase 4.11-12: percent and absolute change operations', async () => {
     assert.ok(Math.abs(pct.body.results.comparison.b.value - expectedCHN) < 1e-9);
     assert.ok(Math.abs(pct.body.results.comparison.gap.value - (expectedIND - expectedCHN)) < 1e-9);
     assert.equal(pct.body.results.comparison.gap.unit, 'percentage points');
+    const pctInterval = pct.body.results.comparison.intervalResults.find((entry) => entry.id === 'AB');
+    assert.deepEqual(pctInterval.a.rank, {
+      position: 2, denominator: 3, attribution: 'APPLICATION_DERIVED', direction: 'DESC',
+      methodology: 'Application ranking service; ties use distinct ordinal positions with ISO3 as the deterministic tie-break.',
+    });
+    assert.equal(pctInterval.b.rank.position, 1);
+    assert.equal(pctInterval.b.rank.denominator, 3, 'IDN is excluded because its endpoint pair is incomplete');
 
     const abs = await getJSON(base, '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2004&yearB=2005&operation=absolute_change');
     assert.equal(abs.status, 200);
@@ -213,6 +219,33 @@ test('Phase 4.11-12: percent and absolute change operations', async () => {
     const cagr = await getJSON(base, '/api/compare?entityA=country:USA&entityB=country:IND&indicator=total_current&yearA=2004&yearB=2005&operation=cagr');
     assert.equal(cagr.status, 200);
     assert.ok(Math.abs(cagr.body.results.comparison.a.value - ((13036e9 / 11963e9 - 1) * 100)) < 1e-9);
+  } finally {
+    await close();
+  }
+});
+
+test('Compare transformed rankings follow the selected endpoint basis and denominator', async () => {
+  const { db, repository } = await seedSumDb();
+  const indicator = await repository.getIndicatorByMetricKey(db, 'total_current');
+  await repository.upsertObservations(db, [
+    { countryId: 'IND', indicatorId: indicator.id, year: 2004, value: 100, wbLastUpdated: '2026-07-13' },
+    { countryId: 'IND', indicatorId: indicator.id, year: 2005, value: 200, wbLastUpdated: '2026-07-13' },
+    { countryId: 'CHN', indicatorId: indicator.id, year: 2004, value: 1000, wbLastUpdated: '2026-07-13' },
+    { countryId: 'CHN', indicatorId: indicator.id, year: 2005, value: 1100, wbLastUpdated: '2026-07-13' },
+    { countryId: 'USA', indicatorId: indicator.id, year: 2004, value: 100, wbLastUpdated: '2026-07-13' },
+    { countryId: 'USA', indicatorId: indicator.id, year: 2005, value: 150, wbLastUpdated: '2026-07-13' },
+  ]);
+  const { base, close } = await startApp(db);
+  try {
+    const path = '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2004&yearC=2005';
+    const absolute = (await getJSON(base, `${path}&operation=absolute_change`)).body.results.comparison.intervalResults[0];
+    const percent = (await getJSON(base, `${path}&operation=percent_change`)).body.results.comparison.intervalResults[0];
+    assert.equal(absolute.a.rank.position, 2, 'ordinal ties use the deterministic ISO3 tie-break');
+    assert.equal(absolute.b.rank.position, 1);
+    assert.equal(percent.a.rank.position, 1);
+    assert.equal(percent.b.rank.position, 3, 'CHN ranks below IND and USA on percent change');
+    assert.equal(percent.a.rank.denominator, 3);
+    assert.equal(percent.b.rank.denominator, 3);
   } finally {
     await close();
   }
@@ -313,6 +346,20 @@ test('Phase 4.18/24: strict missing-member coverage (never zero-filled)', async 
     assert.deepEqual(group.coverage['2005'].missing, ['IDN']);
     assert.equal(group.observed['2005'].value, 2286e9, 'observed uses valid members only, IDN not zero-filled');
     assert.equal(group.observed['2005'].members, 1);
+    // The subtotal is published ONLY as an explicitly partial value.
+    assert.equal(group.observed['2005'].complete, false);
+    assert.equal(group.observed['2005'].missingCount, 1);
+    assert.deepEqual(group.observed['2005'].missingIso3, ['IDN']);
+    assert.equal(group.observed['2005'].partialReason, 'missing_member_observations');
+    // A derived result may not be built on a partial subtotal.
+    assert.equal(res.body.results.comparison.b.computable, false);
+    assert.equal(res.body.results.comparison.gap.value, null);
+    assert.equal(res.body.results.comparison.gap.reason, 'COVERAGE_INCOMPLETE');
+    assert.equal(res.body.results.comparison.available, false);
+    assert.ok(
+      res.body.diagnostics.some((d) => d.code === 'COVERAGE_INCOMPLETE'),
+      'the blocked comparison carries a structured diagnostic',
+    );
   } finally {
     await close();
   }
@@ -329,8 +376,16 @@ test('Phase 4.20-21: group vs group totals and determinism', async () => {
     assert.equal(shuffled.status, 200);
     assert.deepEqual(shuffled.body.results, first.body.results, 'member order must not affect results');
     assert.equal(first.body.results.a.observed['2005'].value, 834e9 + 2286e9);
+    // Group A is complete at both years; group B is not (IDN has no 2005),
+    // so B's derived change is blocked and the comparison is not published.
+    assert.equal(first.body.results.a.observed['2005'].complete, true);
+    assert.equal(first.body.results.b.observed['2005'].complete, false);
     assert.ok(first.body.results.comparison.a.value !== null);
-    assert.ok(first.body.results.comparison.b.value !== null);
+    assert.equal(first.body.results.comparison.b.value, null);
+    assert.equal(first.body.results.comparison.b.reason, 'COVERAGE_INCOMPLETE');
+    assert.equal(first.body.results.comparison.gap.value, null);
+    assert.equal(first.body.results.comparison.available, false);
+    assert.ok(first.body.diagnostics.some((d) => d.code === 'COVERAGE_INCOMPLETE' && d.scope === 'entity_b'));
   } finally {
     await close();
   }
@@ -360,13 +415,40 @@ test('Phase 4.22-23/25: like-for-like intersection and membership effect', async
   }
 });
 
-test('Phase 4: like-for-like without a group is rejected explicitly', async () => {
+test('Phase 4: like-for-like is available for every entity combination', async () => {
   const { db } = await seedSumDb();
   const { base, close } = await startApp(db);
   try {
+    // Country vs country: like-for-like is no longer group-only. Both sides
+    // are their own stored observations, admitted only when they are
+    // complete at every required observation year, and the peer reference
+    // universe excludes both participants.
     const res = await getJSON(base, '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2004&yearB=2005&groupMode=like_for_like');
-    assert.equal(res.status, 400);
-    assert.equal(res.body.error.code, 'LIKE_FOR_LIKE_REQUIRES_GROUP');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.mode, 'like_for_like');
+    assert.equal(res.body.groupMode, 'like_for_like');
+    assert.equal(res.body.results.comparison.available, true);
+    assert.equal(res.body.results.comparison.perYear['2005'].gap, 834e9 - 2286e9);
+    assert.equal(res.body.results.comparison.perYear['2004'].gap, 721e9 - 1955e9);
+    // ONE frozen universe, with both participants excluded from the peer set.
+    assert.ok(res.body.universe, 'the response carries the authoritative universe');
+    assert.equal(res.body.universe.requiredObservationYears.length, 2);
+    assert.ok(
+      res.body.universe.excluded.participants.some((p) => p.iso3 === 'IND'),
+      'the country participant is excluded from the reference universe',
+    );
+    assert.ok(
+      res.body.universe.excluded.participants.some((p) => p.iso3 === 'CHN'),
+      'the country participant is excluded from the reference universe',
+    );
+    assert.ok(
+      !res.body.universe.included.includes('IND') && !res.body.universe.included.includes('CHN'),
+      'no participant leaks into the reference universe',
+    );
+    // Like-for-like is a mode of the whole comparison, never a silent
+    // fallback to observed values.
+    assert.equal(res.body.results.a.likeForLike['2005'].value, 834e9);
+    assert.equal(res.body.results.a.likeForLike['2005'].complete, true);
   } finally {
     await close();
   }

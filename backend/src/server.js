@@ -1304,14 +1304,18 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     }
     const rawB = req.query.yearB;
     const yearB = rawB === undefined || rawB === null || String(rawB).trim() === '' ? undefined : parseYear(rawB, 'yearB');
+    const rawC = req.query.yearC;
+    const yearC = rawC === undefined || rawC === null || String(rawC).trim() === '' ? undefined : parseYear(rawC, 'yearC');
     const result = await buildCompareResponse(handle(), {
       entityA: req.query.entityA,
       entityB: req.query.entityB,
       ...(req.query.labelA !== undefined ? { labelA: req.query.labelA } : {}),
       ...(req.query.labelB !== undefined ? { labelB: req.query.labelB } : {}),
       metricKey,
+      ...(req.query.basis !== undefined ? { basis: String(req.query.basis) } : {}),
       yearA,
       ...(yearB !== undefined ? { yearB } : {}),
+      ...(yearC !== undefined ? { yearC } : {}),
       ...(req.query.operation !== undefined ? { operation: String(req.query.operation) } : {}),
       ...(req.query.groupMode !== undefined ? { groupMode: String(req.query.groupMode) } : {}),
     });

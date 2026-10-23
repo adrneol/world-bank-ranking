@@ -202,6 +202,27 @@ describe('compare state decoupling and URL reconstruction', () => {
     second.cleanup();
   });
 
+  it('keeps Year A/B/C in the request and preserves an explicitly cleared optional Year B', async () => {
+    stub = baseStubs();
+    const { container, cleanup } = renderApp('/?view=compare&cmpEntityA=country:USA&cmpEntityB=country:CHN&cmpMetric=total_current&cmpYearA=2004&cmpYearB=2014&cmpYearC=2024&cmpOp=level');
+    await flushReact(act);
+    const call = stub.calls.find((href) => href.includes('/api/compare'));
+    expect(call).toContain('yearA=2004');
+    expect(call).toContain('yearB=2014');
+    expect(call).toContain('yearC=2024');
+
+    act(() => container.querySelector('#cmp-year-b').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushReact(act);
+    const emptyOption = [...document.querySelectorAll('.combo-option')].find((el) => el.textContent.includes('Not selected'));
+    expect(emptyOption).toBeTruthy();
+    act(() => emptyOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    await flushReact(act);
+    expect(cmpParam('cmpYearB')).toBe('none');
+    expect(cmpParam('cmpYearA')).toBe('2004');
+    expect(cmpParam('cmpYearC')).toBe('2024');
+    cleanup();
+  });
+
   it('malformed cmp params fail safe without touching valid state', async () => {
     stub = baseStubs();
     const { container, cleanup } = renderApp('/?view=compare&cmpEntityA=garbage!!!&cmpEntityB=');
@@ -223,16 +244,13 @@ describe('compare state decoupling and URL reconstruction', () => {
     cleanup();
   });
 
-  it('trajectory fan-out stays capped for a 66-year span', async () => {
+  it('chart data comes from the compare payload, never from an observations fan-out', async () => {
     const fullYears = Array.from({ length: 66 }, (_, i) => 1960 + i);
     const calls = [];
     const original = globalThis.fetch;
     globalThis.fetch = async (url, _options) => {
       const href = String(url);
       calls.push(href);
-      if (href.includes('/api/observations')) {
-        return { ok: true, status: 200, headers: new Headers(), json: async () => ({ observation: { value: 1 } }) };
-      }
       if (href.includes('/api/compare')) {
         return { ok: true, status: 200, headers: new Headers(), json: async () => trajectoryFixture };
       }
@@ -258,6 +276,7 @@ describe('compare state decoupling and URL reconstruction', () => {
             metricKey="total_current"
             yearA={1960}
             yearB={2025}
+            yearC={null}
             operation="level"
             groupMode="observed"
             onEntityA={noop}
@@ -267,6 +286,7 @@ describe('compare state decoupling and URL reconstruction', () => {
             onMetric={noop}
             onYearA={noop}
             onYearB={noop}
+            onYearC={noop}
             onOperation={noop}
             onGroupMode={noop}
           />,
@@ -274,9 +294,11 @@ describe('compare state decoupling and URL reconstruction', () => {
       });
       await flushReact(act);
       const obsCalls = calls.filter((href) => href.includes('/api/observations'));
-      // 66-year span samples to ≤31 years per entity, fetched in parallel.
-      expect(obsCalls.length).toBeGreaterThan(0);
-      expect(obsCalls.length).toBeLessThanOrEqual(62);
+      // The chart series is part of the authoritative comparison response:
+      // no per-country, per-year observation request is ever issued.
+      expect(obsCalls.length).toBe(0);
+      const compareCalls = calls.filter((href) => href.includes('/api/compare'));
+      expect(compareCalls.length).toBe(1);
     } finally {
       globalThis.fetch = original;
       act(() => root.unmount());

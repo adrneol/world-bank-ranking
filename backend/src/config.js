@@ -571,7 +571,10 @@ const PRICES_METRICS = Object.freeze({
     observationType: 'INDEX',
     currencyBasis: NOT_APPLICABLE,
     frequency: 'ANNUAL',
-    validChangeTypes: Object.freeze(['ABSOLUTE', 'INDEX_POINT']),
+    // Compare can offer the Movement-approved endpoint CPI percentage
+    // change as well as the index-point difference. Raw CPI index levels
+    // remain neutral and are not cross-country ranked.
+    validChangeTypes: Object.freeze(['ABSOLUTE', 'PERCENT', 'INDEX_POINT']),
     aggregation: 'OFFICIAL_ONLY',
     rankingDirection: 'NEUTRAL',
     interpretation: 'NEUTRAL',
