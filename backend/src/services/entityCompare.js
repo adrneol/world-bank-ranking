@@ -1176,17 +1176,23 @@ function applyOperation({ entityA, entityB, results, modeValuesBySlot, metric, p
 
   const observationAt = (slot, year) => {
     const entry = valueAt(slot, year);
+    // entityValueAt keeps a group's raw observation nested at `entry` so its
+    // top-level value/complete pair stays uniform with countries. Carry the
+    // group's member coverage through to interval observations as well;
+    // otherwise the UI can show a partial subtotal but cannot say which
+    // selected member/year is missing.
+    const sourceEntry = entry.entry ?? entry;
     return {
       year,
       value: entry.value ?? null,
       unit: metric.unitLong ?? metric.unit,
       available: entry.value !== null && entry.value !== undefined,
       complete: entry.value !== null && entry.value !== undefined && entry.complete !== false,
-      reason: entry.reason ?? null,
-      members: entry.members ?? null,
-      missingCount: entry.missingCount ?? 0,
-      missingIso3: entry.missingIso3 ?? [],
-      coverage: entry.coverage ?? null,
+      reason: entry.reason ?? sourceEntry.reason ?? null,
+      members: sourceEntry.members ?? entry.members ?? null,
+      missingCount: sourceEntry.missingCount ?? entry.missingCount ?? 0,
+      missingIso3: sourceEntry.missingIso3 ?? entry.missingIso3 ?? [],
+      coverage: sourceEntry.coverage ?? entry.coverage ?? null,
     };
   };
 

@@ -21,7 +21,7 @@ import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
-export default function BarComparisonChart({ entries = [], series = null, unit = null, decimals = 0, height = null }) {
+export default function BarComparisonChart({ entries = [], series = null, unit = null, decimals = 0, height = null, scrollable = false }) {
   const narrow = useIsNarrowChart();
   // Two shapes: single-series entries [{name, value}] or grouped rows
   // [{x, a, b}] with series [{key, label}] for A-vs-B comparisons.
@@ -35,7 +35,8 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
     : null;
   return (
     <>
-      <div className="chart-plot" style={Number.isFinite(height) ? { height } : undefined}>
+      <div className={scrollable ? 'chart-plot-scroll' : undefined} role={scrollable ? 'region' : undefined} aria-label={scrollable ? 'Scrollable chart plot' : undefined} tabIndex={scrollable ? 0 : undefined}>
+      <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${Math.max(480, rows.length * 52 + 96)}px` } : {}) }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }} barCategoryGap="28%">
             <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
@@ -44,14 +45,14 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
               tickLine={false}
               interval={0}
-              angle={rows.length > 8 ? -28 : 0}
-              textAnchor={rows.length > 8 ? 'end' : 'middle'}
-              height={rows.length > 8 ? 52 : 30}
+              angle={scrollable ? 0 : rows.length > 8 ? -28 : 0}
+              textAnchor={scrollable ? 'middle' : rows.length > 8 ? 'end' : 'middle'}
+              height={scrollable ? 30 : rows.length > 8 ? 52 : 30}
             />
             <YAxis
               width={yAxisWidthFor(unit, narrow)}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(v) => formatTickValue(v, decimals)}
+              tickFormatter={(v) => formatTickValue(v, decimals, unit)}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip
@@ -60,13 +61,14 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
             />
             {isGrouped
               ? series.map((s, i) => (
-                <Bar key={s.key} dataKey={s.key} name={s.label ?? s.key} fill={fills[i % fills.length]} maxBarSize={44} isAnimationActive={false} />
+                <Bar key={s.key} dataKey={s.key} name={s.label ?? s.key} fill={fills[i % fills.length]} maxBarSize={scrollable ? 32 : 44} isAnimationActive={false} />
               ))
               : (
                 <Bar dataKey="value" name="Value" fill={CHART_COLORS.primary} maxBarSize={64} isAnimationActive={false} />
               )}
           </BarChart>
         </ResponsiveContainer>
+      </div>
       </div>
       <ChartLegend items={legendItems} />
     </>

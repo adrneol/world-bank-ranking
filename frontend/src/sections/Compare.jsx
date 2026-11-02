@@ -27,6 +27,7 @@ import SlopeChart from '../components/charts/SlopeChart.jsx';
 import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
 import { entityDisplayName, entityToSpec, parseEntitySpecString } from '../components/entities.js';
 import { SearchableSelect } from '../components/controls.jsx';
+import MetricPicker from '../components/MetricPicker.jsx';
 import {
   ChartDataFallback,
   EmptyState,
@@ -40,16 +41,14 @@ import {
 import {
   COMPARE_OPERATIONS,
   comparePeriodRequirements,
-  operationsForEntities,
-  METRIC_FAMILIES,
-  metricFamilyOptions,
-  basisOptionsForFamily,
   resolveCanonicalMetric,
-  defaultBasisForFamily,
-  familyForMetricKey,
-  basisLabelForMetric,
-  metricDecimals,
+  SUBJECTS,
+  metricKeysForSubject,
+  subjectOf,
+  subjectLabel,
   metricLabel,
+  compareMethodOptions,
+  metricDecimals,
   supportsGroupValues,
 } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -61,6 +60,18 @@ import { formatDecimal, readableReason } from '../utils/format.js';
  */
 function formatValuePlain(value, metricKey) {
   return formatDecimal(value, metricDecimals(metricKey));
+}
+
+/** Compact headline amounts for total GDP; raw precision remains in evidence tables. */
+function formatResultAmount(value, unit, metricKey) {
+  if (value == null) return '—';
+  if (!String(metricKey).startsWith('total_')) return formatDecimal(value, metricDecimals(metricKey));
+  const n = Number(value);
+  const abs = Math.abs(n);
+  const [scale, suffix] = abs >= 1e12 ? [1e12, 'T'] : abs >= 1e9 ? [1e9, 'B'] : abs >= 1e6 ? [1e6, 'M'] : [1, ''];
+  const symbol = /international/i.test(unit ?? '') ? 'Int$' : '$';
+  const sign = n < 0 ? '−' : '';
+  return `${sign}${symbol}${formatDecimal(abs / scale, 2)}${suffix}`;
 }
 
 /**
@@ -222,7 +233,7 @@ function ChangeBlock({ title, change, metricKey }) {
       <p className="lfl-label">{title}</p>
       <p className="result-value">
         {sign}
-        {formatDecimal(change.value, changeDecimals(change.unit, metricKey))} <span className="result-unit">{change.unit}</span>
+        {formatResultAmount(change.value, change.unit, metricKey)} {!String(metricKey).startsWith('total_') ? <span className="result-unit">{change.unit}</span> : null}
       </p>
     </div>
   );
@@ -287,7 +298,9 @@ function ComparisonResult({ data, metricKey }) {
     const involvesDerived = [results.a, results.b].some((e) => e?.kind === 'custom_group');
     return (
       <>
-        <div className="table-scroll" role="region" aria-label="Level comparison by year" tabIndex={0}>
+      <details className="compare-evidence">
+        <summary>Observations and calculations</summary>
+      <div className="table-scroll" role="region" aria-label="Level comparison by year" tabIndex={0}>
           <table className="table">
             <thead>
               <tr>
@@ -321,6 +334,7 @@ function ComparisonResult({ data, metricKey }) {
           </table>
           <p className="footnote">Gap unit: {comparison.unit ?? unit}. Missing legs stay missing.</p>
         </div>
+        </details>
         {years.length === 1 ? (
           <ChartCard
             title={`Level values — ${nameOf(results.a)} vs ${nameOf(results.b)}`}
@@ -403,8 +417,8 @@ function ComparisonResult({ data, metricKey }) {
             <UnavailableState reason={gap?.reason} hint="Both sides need a valid, complete result for a gap." />
           ) : (
             <p className="result-value">
-              {(gap.value > 0 ? '+' : '') + formatDecimal(gap.value, changeDecimals(gap.unit, metricKey))}{' '}
-              <span className="result-unit">{gap.unit}</span>
+              {(gap.value > 0 ? '+' : '') + formatResultAmount(gap.value, gap.unit, metricKey)}{' '}
+              {!String(metricKey).startsWith('total_') ? <span className="result-unit">{gap.unit}</span> : null}
             </p>
           )}
         </article>
@@ -420,14 +434,51 @@ function ComparisonResult({ data, metricKey }) {
   );
 }
 
-function intervalObservationCell(entry, metricKey) {
+function intervalObservationCell(entry, metricKey, compact = false) {
   if (!entry?.available) return 'Missing';
-  const value = formatValuePlain(entry.value, metricKey);
+  const value = compact ? formatResultAmount(entry.value, entry.unit, metricKey) : formatValuePlain(entry.value, metricKey);
   if (!entry.complete) {
     const missing = entry.missingIso3?.length ? `: ${entry.missingIso3.join(', ')}` : entry.missingCount ? `: ${entry.missingCount} member${entry.missingCount === 1 ? '' : 's'} missing` : '';
     return `${value} · Partial coverage${missing}`;
   }
   return value;
+}
+
+function intervalEntityResultAvailable(interval, slot) {
+  if (interval?.kind === 'level') {
+    const observations = interval.observations?.[slot] ?? [];
+    return observations.length > 0 && observations.every((entry) => entry.available && entry.complete !== false);
+  }
+  const result = interval?.[slot];
+  if (typeof result?.computable === 'boolean') return result.computable;
+  return result?.value !== null && result?.value !== undefined;
+}
+
+function MissingObservationSummary({ interval, allIntervals, entities, metric }) {
+  const missing = ['a', 'b'].flatMap((slot) => (interval.observations?.[slot] ?? [])
+    .filter((entry) => !entry.available)
+    .map((entry) => ({ slot, year: entry.year })));
+  if (missing.length === 0) return null;
+  const details = missing.map(({ slot, year }) => {
+    const entity = entities?.[slot];
+    const name = entity?.label ?? entity?.name ?? entity?.iso3 ?? (slot === 'a' ? 'Entity A' : 'Entity B');
+    const code = entity?.iso3 ? ` (${entity.iso3})` : '';
+    const slotLabel = slot === 'a' ? 'Entity A' : 'Entity B';
+    return `${name}${code} — ${year} — ${metric?.title ?? metric?.label ?? metric?.key ?? 'selected metric'}${metric?.indicatorCode ? ` (${metric.indicatorCode})` : ''}; ${slotLabel}’s ${interval.label} result is unavailable because the required observation is missing.`;
+  });
+  const retained = allIntervals
+    .filter((candidate) => candidate.id !== interval.id)
+    .flatMap((candidate) => ['a', 'b']
+      .filter((slot) => intervalEntityResultAvailable(candidate, slot))
+      .map((slot) => `${slot === 'a' ? 'Entity A' : 'Entity B'} ${candidate.label}`));
+  return (
+    <p className="compare-missing-note" role="status">
+      {details.join(' ')}{' '}
+      {retained.length > 0
+        ? `${retained.join(', ')} remains available from its own required observations.`
+        : 'Each other entity and interval is evaluated independently from its own required observations.'}
+    </p>
+  );
 }
 
 function IntervalObservations({ interval, metricKey, labelA, labelB }) {
@@ -464,9 +515,10 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
   const isUnavailablePeriodGrowth = interval.kind === 'unavailable' && operation === 'period_total_growth';
   const startObservation = interval.observations?.[slot]?.find((entry) => entry.year === interval.start);
   const endObservation = interval.observations?.[slot]?.find((entry) => entry.year === interval.end);
-  const showResult = (value, unit) => value === null || value === undefined
-    ? '—'
-    : `${formatDecimal(value, changeDecimals(unit, metricKey))} ${unit ?? ''}`.trim();
+  const showResult = (value, unit) => {
+    const amount = formatResultAmount(value, unit, metricKey);
+    return String(metricKey).startsWith('total_') || !unit ? amount : `${amount} ${unit}`;
+  };
   const periodInputs = isPeriodGrowth ? result : null;
   return (
     <section className="compare-interval-entity" aria-label={`${label} interval details`}>
@@ -490,9 +542,9 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
       ) : isLevel ? (
         <>
           <dl className="compare-detail-list">
-            <div><dt>{interval.start} observation</dt><dd>{intervalObservationCell(startObservation, metricKey)} {startObservation?.unit ?? ''}</dd></div>
+            <div><dt>{interval.start} observation</dt><dd>{intervalObservationCell(startObservation, metricKey, true)} {String(metricKey).startsWith('total_') ? '' : startObservation?.unit ?? ''}</dd></div>
             <div><dt>{interval.start} application-derived position</dt><dd>{rankText(startObservation, entity)}</dd></div>
-            <div><dt>{interval.end} observation</dt><dd>{intervalObservationCell(endObservation, metricKey)} {endObservation?.unit ?? ''}</dd></div>
+            <div><dt>{interval.end} observation</dt><dd>{intervalObservationCell(endObservation, metricKey, true)} {String(metricKey).startsWith('total_') ? '' : endObservation?.unit ?? ''}</dd></div>
             <div><dt>{interval.end} application-derived position</dt><dd>{rankText(endObservation, entity)}</dd></div>
           </dl>
           <p className="footnote">Level reports the selected-series observation and application-derived country position at each endpoint. These positions are not official World Bank ranks.</p>
@@ -616,9 +668,8 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
           <article className="card compare-interval-card" key={interval.id}>
             <header className="compare-interval-header">
               <div><p className="lfl-label">Interval</p><h3>{interval.label} <span className="muted">({interval.start} → {interval.end})</span></h3></div>
-              <span className="compare-interval-mode">{data.mode === 'like_for_like' ? 'Like-for-like' : 'Observed'}</span>
             </header>
-            {data.basisMethod?.label ? <p className="compare-interval-context">{data.basisMethod.label}</p> : null}
+            <MissingObservationSummary interval={interval} allIntervals={intervals} entities={data.entities} metric={metric} />
             <div className="compare-interval-entities">
               <IntervalEntityDetail slot="a" entity={data.entities?.a} result={interval.a} interval={interval} metricKey={metricKey} operation={data.operation} label={`Entity A — ${labelA}`} />
               <IntervalEntityDetail slot="b" entity={data.entities?.b} result={interval.b} interval={interval} metricKey={metricKey} operation={data.operation} label={`Entity B — ${labelB}`} />
@@ -638,7 +689,7 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
             <details className="compare-evidence">
               <summary>Methodology and source</summary>
               <div className="compare-evidence-body">
-                <p>Indicator {metric.indicatorCode ?? 'not provided'} · Source: {data.source?.label ?? data.source?.name ?? 'World Bank World Development Indicators'}.</p>
+                <p>{data.basisMethod?.label ? `Measurement basis: ${data.basisMethod.label}. ` : ''}Indicator {metric.indicatorCode ?? 'not provided'} · Source: {data.source?.label ?? data.source?.name ?? 'World Bank World Development Indicators'}.</p>
                 <p>{compareMethod}. {interval.boundary?.inclusiveStart === false
                   ? `Required annual observations exclude ${interval.start} and include ${interval.end}.`
                   : interval.boundary?.inclusiveEnd === false
@@ -659,7 +710,9 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
 }
 
 function showIntervalGap(gap, metricKey) {
-  return gap?.value == null ? 'unavailable' : `${formatDecimal(gap.value, changeDecimals(gap.unit, metricKey))} ${gap.unit ?? ''}`.trim();
+  if (gap?.value == null) return 'unavailable';
+  const amount = formatResultAmount(gap.value, gap.unit, metricKey);
+  return String(metricKey).startsWith('total_') || !gap.unit ? amount : `${amount} ${gap.unit}`;
 }
 
 function ChartTypeToggle({ value, onChange }) {
@@ -712,6 +765,7 @@ function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labe
  * refetching, no recalculation: the plotted points ARE the result.
  */
 function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) {
+  const [chartRange, setChartRange] = useState(null);
   const seriesA = data.results?.a?.series?.points ?? [];
   const seriesB = data.results?.b?.series?.points ?? [];
   if (seriesA.length < 2 && seriesB.length < 2) return null;
@@ -721,18 +775,34 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
   const mode = data.mode ?? data.groupMode ?? 'observed';
   const labelA = countryNames(data.entities?.a);
   const labelB = countryNames(data.entities?.b);
-  const first = seriesA[0]?.year ?? seriesB[0]?.year;
-  const last = seriesA[seriesA.length - 1]?.year ?? seriesB[seriesB.length - 1]?.year;
+  const observedYears = [...new Set([...seriesA, ...seriesB].map((point) => point.year))].filter(Number.isInteger).sort((a, b) => a - b);
+  const first = observedYears[0];
+  const last = observedYears[observedYears.length - 1];
+  const allYears = Number.isInteger(first) && Number.isInteger(last)
+    ? Array.from({ length: last - first + 1 }, (_, i) => first + i)
+    : observedYears;
+  const requestedYears = [data.years?.a, data.years?.b, data.years?.c].filter(Number.isInteger);
+  const defaultFrom = requestedYears.length ? Math.max(first, Math.min(...requestedYears)) : first;
+  const defaultTo = requestedYears.length ? Math.min(last, Math.max(...requestedYears)) : last;
+  const rangeKey = JSON.stringify([data.entities?.a?.id ?? data.entities?.a?.iso3, data.entities?.b?.id ?? data.entities?.b?.iso3, data.metric?.key, data.basis, data.operation, data.years]);
+  const activeRange = chartRange?.key === rangeKey ? chartRange : { key: rangeKey, from: defaultFrom, to: defaultTo };
+  const chartFrom = activeRange.from;
+  const chartTo = activeRange.to;
+  const rangeError = chartFrom > chartTo ? 'From year must be earlier than or equal to To year.' : !allYears.some((year) => year >= chartFrom && year <= chartTo) ? 'No observations are available in this chart period.' : '';
+  const setRange = (next) => setChartRange({ key: rangeKey, from: next.from, to: next.to });
+  const visibleA = seriesA.filter((point) => point.year >= chartFrom && point.year <= chartTo);
+  const visibleB = seriesB.filter((point) => point.year >= chartFrom && point.year <= chartTo);
   const title = `${labelA} vs ${labelB}`;
-  const summary = `${title} — stored observations, ${first} to ${last} (${mode === 'like_for_like' ? 'like-for-like' : 'observed'})`;
-  const toSeries = (points) => points.map((p) => ({ x: p.year, y: p.value === null || p.value === undefined ? null : p.value }));
+  const summary = `${title} — stored observations, ${chartFrom} to ${chartTo} (${mode === 'like_for_like' ? 'like-for-like' : 'observed'})`;
+  const toSeries = (points) => visibleYears.map((year) => ({ x: year, y: valueAt(points, year) }));
   const cell = (v) => (v === null || v === undefined ? '—' : formatValuePlain(v, metricKey));
-  const rows = Array.from(new Set([...seriesA, ...seriesB].map((p) => p.year)))
-    .sort((l, r) => l - r)
+  const visibleYears = allYears.filter((year) => year >= chartFrom && year <= chartTo);
+  const valueAt = (points, year) => points.find((p) => p.year === year)?.value ?? null;
+  const rows = visibleYears
     .map((year) => [
       String(year),
-      cell(seriesA.find((p) => p.year === year)?.value ?? null),
-      cell(seriesB.find((p) => p.year === year)?.value ?? null),
+      cell(valueAt(seriesA, year)),
+      cell(valueAt(seriesB, year)),
     ]);
 
   if (seriesA.length === 2 && seriesB.length === 2 && data.operation !== 'level') {
@@ -761,27 +831,34 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
     );
   }
 
-  const entries = [...new Set([...seriesA, ...seriesB].map((point) => point.year))]
-    .sort((a, b) => a - b)
-    .map((year) => ({
+  const entries = visibleYears.map((year) => ({
       x: String(year),
-      A: seriesA.find((point) => point.year === year)?.value ?? null,
-      B: seriesB.find((point) => point.year === year)?.value ?? null,
+      A: valueAt(seriesA, year),
+      B: valueAt(seriesB, year),
     }));
   return (
     <>
       <ChartCard title={title} unit={unit} summary={summary}>
+        <ChartPeriodControls
+          years={allYears}
+          from={chartFrom}
+          to={chartTo}
+          onChange={setRange}
+          error={rangeError}
+        />
+        <p className="chart-period-caption">Displayed period: {chartFrom}–{chartTo}</p>
         <ChartTypeToggle value={chartType} onChange={onChartType} />
         {chartType === 'line'
           ? <TimeSeriesChart
             series={[
-              { label: labelA, points: toSeries(seriesA) },
-              { label: labelB, points: toSeries(seriesB) },
+              { label: labelA, points: toSeries(visibleA) },
+              { label: labelB, points: toSeries(visibleB) },
             ]}
             unit={unit}
             decimals={decimals}
+            scrollable
           />
-          : <BarComparisonChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} />}
+          : <BarComparisonChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} scrollable />}
       </ChartCard>
       <ChartDataFallback
         label="trajectory values"
@@ -793,6 +870,31 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
   );
 }
 
+function ChartPeriodControls({ years, from, to, onChange, error }) {
+  return (
+    <div className="chart-period-controls" aria-label="Chart period filter">
+      <p className="chart-period-label">Chart period</p>
+      <SearchableSelect
+        id="cmp-chart-from"
+        label="From year"
+        value={String(from)}
+        options={years.filter((year) => year <= to).map((year) => ({ value: String(year), label: String(year) }))}
+        onChange={(value) => onChange({ from: Number(value), to })}
+        placeholder="From year"
+      />
+      <SearchableSelect
+        id="cmp-chart-to"
+        label="To year"
+        value={String(to)}
+        options={years.filter((year) => year >= from).map((year) => ({ value: String(year), label: String(year) }))}
+        onChange={(value) => onChange({ from, to: Number(value) })}
+        placeholder="To year"
+      />
+      {error ? <p className="chart-period-error" role="alert">{error}</p> : null}
+    </div>
+  );
+}
+
 export default function Compare({
   availableYears,
   countries = [],
@@ -800,8 +902,8 @@ export default function Compare({
   entityB,
   labelA,
   labelB,
+  analysis,
   metricFamily,
-  // Deprecated: canonical metric key, resolved to a family internally.
   metricKey,
   basisId,
   yearA,
@@ -813,6 +915,7 @@ export default function Compare({
   onEntityB,
   onLabelA,
   onLabelB,
+  onAnalysis,
   onMetric,
   onBasis = () => {},
   onYearA,
@@ -823,40 +926,47 @@ export default function Compare({
 }) {
   const entityObjA = parseEntitySpecString(entityA, labelA);
   const entityObjB = parseEntitySpecString(entityB, labelB);
-
-  // Metric is a family (economic concept); Basis is the measurement
-  // definition within that family. `metricFamily` is the canonical prop;
-  // `metricKey` is accepted as a deprecated fallback for callers that still
-  // pass a canonical series key.
-  const resolvedFamily = metricFamily ?? familyForMetricKey(metricKey ?? '');
-  const family = METRIC_FAMILIES[resolvedFamily] ?? null;
-  const defaultBasis = family ? defaultBasisForFamily(resolvedFamily) : null;
-  const basisOptions = family
-    ? basisOptionsForFamily(resolvedFamily, yearA, yearC ?? yearB)
+  const canonicalMetricKey = metricKey ?? resolveCanonicalMetric(metricFamily, basisId);
+  const selectedAnalysis = analysis ?? (SUBJECTS[metricFamily] ? metricFamily : subjectOf(canonicalMetricKey));
+  const validMetricKeys = metricKeysForSubject(selectedAnalysis);
+  const metricBelongsToAnalysis = Boolean(SUBJECTS[selectedAnalysis] && canonicalMetricKey && validMetricKeys.includes(canonicalMetricKey));
+  const basisOptions = metricBelongsToAnalysis
+    ? compareMethodOptions(canonicalMetricKey, entityObjA, entityObjB, yearA, yearC ?? yearB)
     : [];
-  const effectiveBasis = basisOptions.some((basis) => basis.id === basisId)
-    ? basisId
-    : defaultBasis ?? basisOptions[0]?.id ?? null;
-  const canonicalMetricKey = resolveCanonicalMetric(resolvedFamily, effectiveBasis);
-
-  const registeredAnalysisOptions = operationsForEntities(canonicalMetricKey, entityObjA, entityObjB)
-    .filter((option) => option.available)
-    .map((option) => ({ value: option.id, label: option.label, source: 'analysis' }));
-  const analysisOptions = registeredAnalysisOptions;
-  const effectiveOperation = analysisOptions.some((option) => option.value === operation)
-    ? operation
-    : analysisOptions[0]?.value ?? null;
-  const selectedAnalysis = analysisOptions.find((option) => option.value === effectiveOperation);
+  const selectedBasis = basisOptions.find((basis) => basis.value === basisId) ?? null;
+  const effectiveBasis = basisId;
+  const effectiveOperation = selectedBasis?.operation ?? null;
+  const requestBasis = selectedBasis?.requestBasis ?? null;
+  const selectionError = !SUBJECTS[selectedAnalysis]
+    ? 'Choose a registered Analysis family.'
+    : !metricBelongsToAnalysis
+      ? `Choose a Metric registered under ${subjectLabel(selectedAnalysis)}.`
+      : !selectedBasis
+        ? 'Choose a registered Basis for the selected Metric.'
+        : selectedBasis.disabled
+          ? selectedBasis.disabledReason ?? 'This Basis is not available for the selected entities.'
+          : '';
   const [chartTypeChoice, setChartTypeChoice] = useState(null);
   const defaultChartType = effectiveOperation === 'level' ? 'line' : 'bar';
   const chartType = chartTypeChoice ?? defaultChartType;
   const setChartType = (type) => setChartTypeChoice(type);
+  const availableBasisFor = (nextMetric, keep = basisId) => {
+    const options = compareMethodOptions(nextMetric, entityObjA, entityObjB, yearA, yearC ?? yearB);
+    const kept = options.find((entry) => entry.value === keep && !entry.disabled);
+    return kept ?? options.find((entry) => !entry.disabled) ?? null;
+  };
+  const chooseMetric = (nextMetric) => {
+    const nextBasis = availableBasisFor(nextMetric);
+    onMetric?.(nextMetric);
+    onBasis?.(nextBasis?.value ?? '');
+    onOperation?.(nextBasis?.operation ?? '');
+  };
   useEffect(() => {
-    if (effectiveBasis && basisId !== effectiveBasis) onBasis(effectiveBasis);
-  }, [effectiveBasis, basisId, onBasis]);
-  useEffect(() => {
-    if (effectiveOperation && operation !== effectiveOperation) onOperation(effectiveOperation);
-  }, [effectiveOperation, onOperation, operation]);
+    if (effectiveOperation && operation !== effectiveOperation) onOperation?.(effectiveOperation);
+    // operation is URL state derived from the selected Basis; the callback is
+    // stable in effect, and intentionally omitted to avoid identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveOperation, operation]);
   const opDef = COMPARE_OPERATIONS.find((op) => op.id === effectiveOperation) ?? COMPARE_OPERATIONS[0];
   const periods = comparePeriodRequirements(opDef.id);
   // Group offer follows backend aggregation metadata: SUM totals and
@@ -877,13 +987,13 @@ export default function Compare({
     : periods.usesEnd && yearC == null && yearB == null;
 
   const canFetch =
-    entityObjA !== null && entityObjB !== null && canonicalMetricKey != null && effectiveOperation != null && yearA != null && !missingRequiredYear &&
+    !selectionError && entityObjA !== null && entityObjB !== null && canonicalMetricKey != null && effectiveOperation != null && yearA != null && !missingRequiredYear &&
     (periods.usesEnd ? sendYearC || (!periods.requiresEnd && sendYearB) : true) &&
     // An in-progress empty group stays selectable in the builder but never
     // submits (the backend would 400 EMPTY_GROUP).
     (entityObjA.kind !== 'custom_group' || entityObjA.members.length > 0) &&
     (entityObjB.kind !== 'custom_group' || entityObjB.members.length > 0);
-  const depsKey = `compare:${entityA ?? ''}:${entityB ?? ''}:${labelA ?? ''}:${labelB ?? ''}:${resolvedFamily}:${effectiveBasis}:${yearA ?? ''}:${yearB ?? ''}:${yearC ?? ''}:${effectiveOperation}:${groupMode}`;
+  const depsKey = `compare:${entityA ?? ''}:${entityB ?? ''}:${labelA ?? ''}:${labelB ?? ''}:${selectedAnalysis}:${canonicalMetricKey}:${requestBasis}:${effectiveBasis}:${yearA ?? ''}:${yearB ?? ''}:${yearC ?? ''}:${effectiveOperation}:${groupMode}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
       api.compare(
@@ -893,7 +1003,7 @@ export default function Compare({
           labelA: entityObjA?.kind === 'custom_group' ? labelA : undefined,
           labelB: entityObjB?.kind === 'custom_group' ? labelB : undefined,
           indicator: canonicalMetricKey,
-          basis: effectiveBasis,
+          basis: requestBasis,
           yearA,
           ...(sendYearB ? { yearB } : {}),
           ...(sendYearC ? { yearC } : {}),
@@ -956,28 +1066,43 @@ export default function Compare({
         </div>
         <div className="compare-params">
           <div className="compare-param-row">
-            <OperationSelect operation={effectiveOperation} options={analysisOptions} onOperation={onOperation} />
             <SearchableSelect
+              id="cmp-analysis"
+              label="Analysis"
+              value={selectedAnalysis}
+              options={Object.values(SUBJECTS).map((subject) => ({ value: subject.key, label: subject.label }))}
+              onChange={(nextAnalysis) => {
+                const nextMetrics = metricKeysForSubject(nextAnalysis);
+                const nextMetric = nextMetrics.includes(canonicalMetricKey) ? canonicalMetricKey : nextMetrics[0];
+                const nextBasis = availableBasisFor(nextMetric);
+                onAnalysis?.(nextAnalysis);
+                onMetric?.(nextMetric);
+                onBasis?.(nextBasis?.value ?? '');
+                onOperation?.(nextBasis?.operation ?? '');
+              }}
+              placeholder="Select an analysis family…"
+              hint="Economic family registered by Movement."
+            />
+            <MetricPicker
               id="cmp-metric"
               label="Metric"
-              value={metricFamily}
-              options={metricFamilyOptions()}
-              onChange={(choice) => {
-                onMetric(choice);
-                // Reset basis to the default for the new family.
-                const nextDefault = defaultBasisForFamily(choice);
-                if (nextDefault) onBasis(nextDefault);
-              }}
-              placeholder="Select a metric…"
+              value={canonicalMetricKey}
+              subject={selectedAnalysis}
+              onChange={chooseMetric}
+              hint="Indicator registered within the selected family."
             />
             <SearchableSelect
               id="cmp-basis"
               label="Basis"
-              value={effectiveBasis}
-              options={basisOptions.map((basis) => ({ value: basis.id, label: basis.label }))}
-              disabled={basisOptions.length <= 1}
-              hint={basisOptions.length <= 1 ? 'One registry-defined basis.' : 'Registered measurement basis for this metric.'}
-              onChange={onBasis}
+              value={effectiveBasis ?? ''}
+              options={basisOptions.map((basis) => ({ value: basis.value, label: basis.label, disabled: basis.disabled, disabledReason: basis.disabledReason }))}
+              disabled={!metricBelongsToAnalysis || basisOptions.length === 0}
+              hint="Movement methods and valid Compare calculations for this metric."
+              onChange={(value) => {
+                const nextBasis = basisOptions.find((entry) => entry.value === value);
+                onBasis?.(value);
+                onOperation?.(nextBasis?.operation ?? '');
+              }}
               placeholder="Select a basis…"
             />
             <div className="field mode-selector">
@@ -1038,17 +1163,17 @@ export default function Compare({
             })}
           </div>
         </div>
-        {analysisOptions.length === 0 ? (
-          <EmptyState title="No supported analysis for this combination">
-            <p>The selected metric, measurement basis and entity types have no registered Compare method.</p>
+        {selectionError ? (
+          <EmptyState title="Review the Compare selections">
+            <p>{selectionError}</p>
           </EmptyState>
         ) : null}
-        {analysisOptions.length > 0 && missingRequiredYear ? (
+        {!selectionError && missingRequiredYear ? (
           <EmptyState title="This analysis needs Year A and Year C">
-            <p>Select an earlier year and a later year to run {selectedAnalysis?.label ?? operationLabel(opDef.id)}. The middle year is optional and adds interval results when selected.</p>
+            <p>Select an earlier year and a later year to run {selectedBasis?.label ?? 'the selected method'}. The middle year is optional and adds interval results when selected.</p>
           </EmptyState>
         ) : null}
-        {analysisOptions.length > 0 && !canFetch && !missingRequiredYear ? (
+        {!selectionError && !canFetch && !missingRequiredYear ? (
           <EmptyState title="Choose two entities, a metric and a period">
             <p>Results appear here once the builder above is complete.</p>
           </EmptyState>
@@ -1056,7 +1181,7 @@ export default function Compare({
       </Section>
 
       {canFetch ? (
-        <Section id="compare-results" title="Result" subtitle={resultSubtitle(data, effectiveOperation, canonicalMetricKey, resultMode)}>
+        <Section id="compare-results" title="Result" subtitle="Selected comparison results and supporting evidence.">
           <StatusBlock loading={loading} error={null} empty={false} sectionName="comparison" />
           {error ? (
             <CompareError error={error} onRetry={retry} />
@@ -1066,7 +1191,7 @@ export default function Compare({
             ) : (
               <>
                 <div className="compare-analysis-note">
-                  <p><strong>{data.entities?.a?.name ?? data.entities?.a?.label ?? 'Entity A'} vs {data.entities?.b?.name ?? data.entities?.b?.label ?? 'Entity B'}</strong> · Analysis: {selectedAnalysis?.label ?? data.analysis?.label ?? operationLabel(effectiveOperation)} · Metric: {family ? family.label : metricFamily} · Basis: {data.basisMethod?.label ?? basisLabelForMetric(canonicalMetricKey)} · {resultMode === 'like_for_like' ? 'Like-for-like' : 'Observed'} · Years: {[data.years?.a, data.years?.b, data.years?.c].filter(Number.isInteger).join(' → ')}</p>
+                  <p><strong>{data.entities?.a?.name ?? data.entities?.a?.label ?? 'Entity A'} vs {data.entities?.b?.name ?? data.entities?.b?.label ?? 'Entity B'}</strong> · Analysis: {subjectLabel(selectedAnalysis)} · Metric: {metricLabel(canonicalMetricKey)} · Basis: {selectedBasis?.label ?? data.basisMethod?.label ?? effectiveBasis} · {resultMode === 'like_for_like' ? 'Like-for-like' : 'Observed'} · Years: {[data.years?.a, data.years?.b, data.years?.c].filter(Number.isInteger).join(' → ')}</p>
                   <details className="compare-evidence">
                     <summary>Analysis inputs and coverage rules</summary>
                     <div className="compare-evidence-body">
@@ -1086,7 +1211,7 @@ export default function Compare({
                     </div>
                     <ComparisonResult data={data} metricKey={canonicalMetricKey} />
                   </>
-                ) : <IntervalAnalysis data={data} metricKey={canonicalMetricKey} countryNames={countryNames} analysisLabel={selectedAnalysis?.label} chartType={chartType} onChartType={setChartType} />}
+                ) : <IntervalAnalysis data={data} metricKey={canonicalMetricKey} countryNames={countryNames} analysisLabel={selectedBasis?.label} chartType={chartType} onChartType={setChartType} />}
                 {effectiveOperation === 'level' ? <ResultChart data={data} metricKey={canonicalMetricKey} countryNames={countryNames} chartType={chartType} onChartType={setChartType} /> : null}
                 {data.vintage?.warning ? (
                   <p className="status status-empty" role="status">
@@ -1095,7 +1220,7 @@ export default function Compare({
                 ) : null}
                 <MethodologyPanel
                   indicatorCode={data.metric?.indicatorCode}
-                  derived={data.results.a?.kind === 'custom_group' || data.results.b?.kind === 'custom_group' ? 'Group values APP-derived from member observations' : effectiveOperation === 'level' ? null : `Change via approved ${selectedAnalysis?.label ?? effectiveOperation} method`}
+                  derived={data.results.a?.kind === 'custom_group' || data.results.b?.kind === 'custom_group' ? 'Group values APP-derived from member observations' : effectiveOperation === 'level' ? null : `Change via approved ${selectedBasis?.label ?? effectiveOperation} method`}
                   formula={data.results.comparison?.provenance?.formula ?? data.results.comparison?.a?.provenance?.formula ?? data.analysis?.formula ?? null}
                 >
                   <p className="footnote">
@@ -1112,30 +1237,6 @@ export default function Compare({
       ) : null}
     </div>
   );
-}
-
-function OperationSelect({ operation, options, onOperation }) {
-  return (
-    <SearchableSelect
-      id="cmp-operation"
-      label="Analysis"
-      value={operation}
-      options={options}
-      onChange={onOperation}
-      placeholder={options.length ? 'Select analysis…' : 'No supported analysis'}
-      hint="Choose the calculation to apply to the selected metric and basis."
-    />
-  );
-}
-
-function resultSubtitle(data, operation, metricKey, groupMode) {
-  const modeLabel = groupMode === 'like_for_like' ? 'like-for-like' : 'observed';
-  if (!data || data.available === false) return `${metricLabel(metricKey)} · ${operationLabel(operation)} · ${modeLabel}`;
-  const a = data.entities?.a;
-  const b = data.entities?.b;
-  const name = (e) => (e?.kind === 'custom_group' ? (e.label ?? 'group') : (e?.name ?? e?.iso3 ?? ''));
-  const years = [data.years?.a, data.years?.b, data.years?.c].filter(Number.isInteger).join(' → ');
-  return `${name(a)} vs ${name(b)} · ${years || operationLabel(operation)} · ${modeLabel}`;
 }
 
 function CompareError({ error, onRetry }) {

@@ -12,7 +12,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { flushReact, stubFetch } from './test-utils.js';
+import { flushReact, setInputValue, stubFetch } from './test-utils.js';
 import App from './App.jsx';
 import Compare from './sections/Compare.jsx';
 import trajectoryFixture from './compareTrajectoryFixture.json';
@@ -202,6 +202,36 @@ describe('compare state decoupling and URL reconstruction', () => {
     second.cleanup();
   });
 
+  it('URL family keys retain GDP per capita and resolve its selected canonical basis', async () => {
+    stub = baseStubs();
+    const { container, cleanup } = renderApp('/?view=compare&cmpEntityA=country:USA&cmpEntityB=country:CHN&cmpMetric=gdp_per_capita&cmpBasis=nominal_current&cmpYearA=2004&cmpOp=level');
+    await flushReact(act);
+    expect(cmpParam('cmpAnalysis')).toBe('gdp_per_capita');
+    expect(cmpParam('cmpMetric')).toBe('nominal_current');
+    expect(cmpParam('cmpBasis')).toBe('level');
+    expect(container.querySelector('#cmp-analysis')?.textContent).toContain('GDP per capita');
+    const call = stub.calls.find((href) => href.includes('/api/compare'));
+    expect(call).toContain('indicator=nominal_current');
+    expect(call).toContain('basis=nominal_current');
+    expect(call).toContain('operation=level');
+    cleanup();
+  });
+
+  it('restores a Compare-only CAGR Basis through URL state and the backend operation', async () => {
+    stub = baseStubs();
+    const { cleanup } = renderApp('/?view=compare&cmpEntityA=country:USA&cmpEntityB=country:CHN&cmpAnalysis=gdp_per_capita&cmpMetric=nominal_current&cmpBasis=compare:cagr&cmpOp=cagr&cmpYearA=2004&cmpYearB=2014');
+    await flushReact(act);
+    expect(cmpParam('cmpAnalysis')).toBe('gdp_per_capita');
+    expect(cmpParam('cmpMetric')).toBe('nominal_current');
+    expect(cmpParam('cmpBasis')).toBe('compare:cagr');
+    expect(cmpParam('cmpOp')).toBe('cagr');
+    const call = stub.calls.find((href) => href.includes('/api/compare'));
+    expect(call).toContain('indicator=nominal_current');
+    expect(call).toContain('basis=nominal_current');
+    expect(call).toContain('operation=cagr');
+    cleanup();
+  });
+
   it('keeps Year A/B/C in the request and preserves an explicitly cleared optional Year B', async () => {
     stub = baseStubs();
     const { container, cleanup } = renderApp('/?view=compare&cmpEntityA=country:USA&cmpEntityB=country:CHN&cmpMetric=total_current&cmpYearA=2004&cmpYearB=2014&cmpYearC=2024&cmpOp=level');
@@ -273,7 +303,9 @@ describe('compare state decoupling and URL reconstruction', () => {
             entityB="country:CHN"
             labelA=""
             labelB=""
+            analysis="gdp_per_capita"
             metricKey="total_current"
+            basisId="level"
             yearA={1960}
             yearB={2025}
             yearC={null}
@@ -299,6 +331,39 @@ describe('compare state decoupling and URL reconstruction', () => {
       expect(obsCalls.length).toBe(0);
       const compareCalls = calls.filter((href) => href.includes('/api/compare'));
       expect(compareCalls.length).toBe(1);
+      const compareUrl = new URL(compareCalls[0], window.location.origin);
+      expect(compareUrl.searchParams.get('indicator')).toBe('total_current');
+      expect(compareUrl.searchParams.get('basis')).toBe('total_current');
+      expect(compareUrl.searchParams.get('operation')).toBe('level');
+      expect(container.querySelector('#cmp-chart-from')).toBeTruthy();
+      expect(container.querySelector('#cmp-chart-to')).toBeTruthy();
+      expect(container.textContent).toContain('Displayed period: 1960–2025');
+
+      // Narrow only the visualization to 2000–2024. The 25 displayed annual
+      // rows change, while the analytical /api/compare request remains the
+      // same single request with its 1960 and 2025 endpoints.
+      act(() => container.querySelector('#cmp-chart-from').click());
+      await flushReact(act);
+      let filter = document.querySelector('.combo-filter[aria-label="Filter From year"]');
+      act(() => setInputValue(filter, '2000'));
+      await flushReact(act);
+      act(() => document.querySelector('[role="option"]')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+      await flushReact(act);
+
+      act(() => container.querySelector('#cmp-chart-to').click());
+      await flushReact(act);
+      filter = document.querySelector('.combo-filter[aria-label="Filter To year"]');
+      act(() => setInputValue(filter, '2024'));
+      await flushReact(act);
+      act(() => document.querySelector('[role="option"]')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+      await flushReact(act);
+
+      expect(container.textContent).toContain('Displayed period: 2000–2024');
+      const table = container.querySelector('[aria-label="Trajectory stored observations by year"] tbody');
+      expect(table?.querySelectorAll('tr')).toHaveLength(25);
+      expect(table?.querySelector('tr th')?.textContent).toBe('2000');
+      expect(table?.querySelector('tr:last-child th')?.textContent).toBe('2024');
+      expect(calls.filter((href) => href.includes('/api/compare'))).toHaveLength(1);
     } finally {
       globalThis.fetch = original;
       act(() => root.unmount());

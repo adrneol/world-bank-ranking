@@ -13,12 +13,11 @@ import { api } from './api/client.js';
 import { fingerprintOf, isNewerGeneration } from './utils/refreshGeneration.js';
 import {
   COMPARE_OPERATIONS,
+  METRIC_FAMILIES,
   SUBJECTS,
   hydrateRegistry,
   metricKeysForSubject,
   resolveMetricKey,
-  familyForMetricKey,
-  defaultBasisForFamily,
   subjectLabel,
   subjectOf,
 } from './config/metrics.js';
@@ -48,7 +47,7 @@ import Coverage from './sections/Coverage.jsx';
 import AuditSource from './sections/AuditSource.jsx';
 import DataStatus from './sections/DataStatus.jsx';
 
-const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country', 'cmpEntityA', 'cmpEntityB', 'cmpLabelA', 'cmpLabelB', 'cmpMetric', 'cmpBasis', 'cmpYearA', 'cmpYearB', 'cmpYearC', 'cmpOp', 'cmpMode', 'rankSub', 'yoySub'];
+const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country', 'cmpEntityA', 'cmpEntityB', 'cmpLabelA', 'cmpLabelB', 'cmpAnalysis', 'cmpMetric', 'cmpBasis', 'cmpYearA', 'cmpYearB', 'cmpYearC', 'cmpOp', 'cmpMode', 'rankSub', 'yoySub'];
 
 function readUrlState() {
   const query = new URLSearchParams(window.location.search);
@@ -83,6 +82,8 @@ function navKey(effective, rankSub, yoySub) {
     yoySub,
     effective.cmpEntityA,
     effective.cmpEntityB,
+    effective.cmpAnalysis,
+    effective.cmpMetric,
   ].join('|');
 }
 
@@ -464,14 +465,26 @@ export default function App() {
     const cmpEntityB = filters.cmpEntityB != null ? String(filters.cmpEntityB).trim() : '';
     const cmpLabelA = filters.cmpLabelA != null ? String(filters.cmpLabelA) : '';
     const cmpLabelB = filters.cmpLabelB != null ? String(filters.cmpLabelB) : '';
-    const cmpMetricRaw = resolveMetricKey(filters.cmpMetric) ?? 'total_current';
-    // cmpMetric is a metric-family key (economic concept). Backward-compat:
-    // accept a canonical metric key and resolve to its family.
-    const cmpMetric = familyForMetricKey(cmpMetricRaw) ?? 'total_gdp';
-    const defaultBasis = defaultBasisForFamily(cmpMetric);
-    const cmpBasis = typeof filters.cmpBasis === 'string' && filters.cmpBasis !== ''
-      ? filters.cmpBasis
-      : defaultBasis;
+    const cmpMetricInput = typeof filters.cmpMetric === 'string' ? filters.cmpMetric : '';
+    const legacyBasis = typeof filters.cmpBasis === 'string' ? filters.cmpBasis : '';
+    const legacyFamily = METRIC_FAMILIES[cmpMetricInput] ?? null;
+    const rawMetric = resolveMetricKey(cmpMetricInput);
+    const legacyMetric = legacyFamily
+      ? legacyFamily.metricKeys.includes(legacyBasis) ? legacyBasis : legacyFamily.metricKeys[0]
+      : null;
+    const explicitAnalysis = typeof filters.cmpAnalysis === 'string' ? filters.cmpAnalysis : '';
+    const cmpAnalysis = explicitAnalysis
+      ? explicitAnalysis
+      : legacyMetric
+        ? subjectOf(legacyMetric)
+        : rawMetric
+          ? subjectOf(rawMetric)
+          : 'gdp_total';
+    const metricKeys = metricKeysForSubject(cmpAnalysis);
+    const cmpMetric = legacyMetric ?? rawMetric ?? (cmpMetricInput ? cmpMetricInput : metricKeys[0] ?? null);
+    const cmpBasis = legacyFamily
+      ? (legacyFamily.metricKeys.includes(legacyBasis) ? 'level' : legacyBasis || 'level')
+      : legacyBasis || 'level';
     // An omitted URL value retains the historical latest-year default.
     // The explicit 'none' sentinel lets optional Compare periods be cleared
     // and survive URL sharing/reload without changing Movement year state.
@@ -485,7 +498,7 @@ export default function App() {
     const cmpYearA = pick(filters.cmpYearA, cmpDecade);
     const cmpOp = COMPARE_OPERATIONS.some((op) => op.id === filters.cmpOp) ? filters.cmpOp : 'level';
     const cmpMode = filters.cmpMode === 'like_for_like' ? 'like_for_like' : 'observed';
-    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName, cmpEntityA, cmpEntityB, cmpLabelA, cmpLabelB, cmpMetric, cmpBasis, cmpYearA, cmpYearB, cmpYearC, cmpOp, cmpMode };
+    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName, cmpEntityA, cmpEntityB, cmpLabelA, cmpLabelB, cmpAnalysis, cmpMetric, cmpBasis, cmpYearA, cmpYearB, cmpYearC, cmpOp, cmpMode };
   }, [filters, availableYears, maxYear, minYear, defaultStart, eligibleCountries, registryVersion]);
 
   const rankSubs = useMemo(
@@ -562,6 +575,7 @@ export default function App() {
     if (effective.cmpEntityB !== '') query.set('cmpEntityB', effective.cmpEntityB);
     if (effective.cmpLabelA !== '') query.set('cmpLabelA', effective.cmpLabelA);
     if (effective.cmpLabelB !== '') query.set('cmpLabelB', effective.cmpLabelB);
+    query.set('cmpAnalysis', effective.cmpAnalysis);
     query.set('cmpMetric', effective.cmpMetric);
     query.set('cmpBasis', effective.cmpBasis);
     if (effective.cmpYearA != null) query.set('cmpYearA', effective.cmpYearA);
@@ -1001,7 +1015,8 @@ export default function App() {
               entityB={effective.cmpEntityB}
               labelA={effective.cmpLabelA}
               labelB={effective.cmpLabelB}
-              metricFamily={effective.cmpMetric}
+              analysis={effective.cmpAnalysis}
+              metricKey={effective.cmpMetric}
               basisId={effective.cmpBasis}
               yearA={effective.cmpYearA}
               yearB={effective.cmpYearB}
@@ -1012,6 +1027,7 @@ export default function App() {
               onEntityB={(v) => setFilter('cmpEntityB', v)}
               onLabelA={(v) => setFilter('cmpLabelA', v)}
               onLabelB={(v) => setFilter('cmpLabelB', v)}
+              onAnalysis={(v) => setFilter('cmpAnalysis', v)}
               onMetric={(v) => setFilter('cmpMetric', v)}
               onBasis={(v) => setFilter('cmpBasis', v)}
               onYearA={(v) => setFilter('cmpYearA', v)}

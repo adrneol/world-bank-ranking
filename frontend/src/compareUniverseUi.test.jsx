@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import Compare from './sections/Compare.jsx';
 import EntityPicker from './components/EntityPicker.jsx';
 import { flushReact, setInputValue, stubFetch } from './test-utils.js';
-import { compareAnalysisOptions, hydrateRegistry, METRICS, SUBJECTS, COMPARE_OPERATIONS, METRIC_FAMILY_KEYS, metricFamilyOptions, basisOptionsForFamily, resolveCanonicalMetric, defaultBasisForFamily } from './config/metrics.js';
+import { compareAnalysisOptions, compareMethodOptions, compareOperationForMovementBasis, hydrateRegistry, METRICS, SUBJECTS, metricKeysForSubject, movementBasisOptions } from './config/metrics.js';
 
 const DEFAULT_REGISTRY = {
   subjects: Object.values(SUBJECTS).map(({ key, label }) => ({ key, label })),
@@ -47,6 +47,30 @@ const METRIC = {
   unitLong: 'current US$',
   indicatorCode: 'NY.GDP.MKTP.CD',
   displayDecimals: 2,
+};
+
+const PRICES_REGISTRY = {
+  subjects: [
+    { key: 'gdp_total', label: 'Total GDP' },
+    { key: 'prices', label: 'Prices' },
+  ],
+  production: [
+    {
+      key: 'total_current', subject: 'gdp_total', label: 'Total GDP — current US$', shortLabel: 'Total GDP — current US$',
+      unit: 'current US$', indicatorCode: 'NY.GDP.MKTP.CD', observationType: 'FLOW', aggregation: 'SUM',
+      validChangeTypes: ['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR'], periodAggregation: ['SUM', 'AVG'],
+      comparisonCapability: ['COUNTRY', 'CUSTOM_GROUP'], rankingDirection: 'DESC',
+    },
+    ...[
+      ['inflation_cpi', 'CPI inflation', 'RATE', ['ABSOLUTE', 'PERCENT', 'PP', 'CAGR']],
+      ['inflation_cpi_index', 'CPI index', 'INDEX', ['ABSOLUTE', 'PERCENT', 'INDEX_POINT', 'CAGR']],
+      ['inflation_deflator', 'GDP-deflator inflation', 'RATE', ['ABSOLUTE', 'PERCENT', 'PP', 'CAGR']],
+    ].map(([key, label, observationType, validChangeTypes]) => ({
+      key, subject: 'prices', label, shortLabel: label, unit: observationType === 'INDEX' ? 'index' : 'annual %',
+      indicatorCode: key, observationType, validChangeTypes, periodAggregation: [],
+      comparisonCapability: ['COUNTRY'], rankingDirection: 'DESC',
+    })),
+  ],
 };
 
 /** A comparison payload whose group subtotal at 2005 is PARTIAL. */
@@ -233,6 +257,8 @@ function renderCompare(props = {}) {
   document.body.appendChild(container);
   const root = createRoot(container);
   const noop = () => {};
+  const operation = props.operation ?? 'absolute_change';
+  const basisId = props.basisId ?? (operation === 'level' ? 'level' : `compare:${operation}`);
   act(() => {
     root.render(
       <Compare
@@ -242,11 +268,13 @@ function renderCompare(props = {}) {
         entityB="group:CHN,IDN"
         labelA=""
         labelB="Big two"
+        analysis="gdp_total"
         metricKey="total_current"
+        basisId={basisId}
         yearA={2004}
         yearB={2005}
         yearC={null}
-        operation="absolute_change"
+        operation={operation}
         groupMode="observed"
         onEntityA={noop}
         onEntityB={noop}
@@ -290,13 +318,13 @@ describe('compare UI: observed and like-for-like', () => {
     ctx = { stub, cleanup: view.cleanup };
     await flushReact(act);
 
-    for (const id of ['cmp-metric', 'cmp-basis', 'cmp-operation', 'cmp-year-a', 'cmp-year-b', 'cmp-year-c']) {
+    for (const id of ['cmp-analysis', 'cmp-metric', 'cmp-basis', 'cmp-year-a', 'cmp-year-b', 'cmp-year-c']) {
       expect(view.container.querySelector(`#${id}`), `${id} remains visible for Level`).toBeTruthy();
     }
     const selectorIds = [...view.container.querySelector('.compare-param-row').querySelectorAll('[id^="cmp-"]')]
       .map((node) => node.id)
-      .filter((id) => ['cmp-operation', 'cmp-metric', 'cmp-basis'].includes(id));
-    expect(selectorIds).toEqual(['cmp-operation', 'cmp-metric', 'cmp-basis']);
+      .filter((id) => ['cmp-analysis', 'cmp-metric', 'cmp-basis'].includes(id));
+    expect(selectorIds).toEqual(['cmp-analysis', 'cmp-metric', 'cmp-basis']);
     expect(view.container.textContent).toContain('Metric');
     expect(view.container.textContent).toContain('Basis');
     expect(view.container.textContent).toContain('Analysis');
@@ -308,7 +336,7 @@ describe('compare UI: observed and like-for-like', () => {
     expect(view.container.querySelector('#mv-country')).toBeNull();
   });
 
-  it('offers only registry-approved GDP measurement bases in the Basis control', async () => {
+  it('offers GDP measurement variants as Metrics and Movement methods as Bases', async () => {
     hydrateRegistry({
       subjects: [{ key: 'gdp_total', label: 'Total GDP' }],
       production: [
@@ -327,22 +355,36 @@ describe('compare UI: observed and like-for-like', () => {
         currencyBasis,
         baseYear,
         aggregation: 'SUM',
+        observationType: 'FLOW',
+        validChangeTypes: ['ABSOLUTE', 'PERCENT', 'YOY', 'CAGR'],
+        periodAggregation: ['SUM', 'AVG'],
+        comparisonCapability: ['COUNTRY', 'OFFICIAL_AGGREGATE', 'CUSTOM_GROUP'],
+        rankingDirection: 'DESC',
       })),
     });
     const stub = stubFetch([
       ['/api/entities', { entities: [] }],
       ['/api/compare', payload({ mode: 'observed', partial: false })],
     ]);
-    const view = renderCompare({ metricKey: 'total_current', operation: 'level', yearA: 2004, yearB: null, yearC: null });
+    const view = renderCompare({ analysis: 'gdp_total', metricKey: 'total_current', basisId: 'level', operation: 'level', yearA: 2004, yearB: null, yearC: null });
     ctx = { stub, cleanup: view.cleanup };
     await flushReact(act);
 
+    act(() => view.container.querySelector('#cmp-metric').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushReact(act);
+    const metricOptions = [...document.querySelectorAll('.combo-option')].map((node) => node.textContent);
+    for (const key of ['total_current', 'total_constant', 'total_ppp_current', 'total_ppp_constant']) {
+      expect(metricOptions.some((label) => label.startsWith(key))).toBe(true);
+    }
+
+    act(() => view.container.querySelector('#cmp-metric').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushReact(act);
     act(() => view.container.querySelector('#cmp-basis').dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await flushReact(act);
     const options = [...document.querySelectorAll('.combo-option')].map((node) => node.textContent);
-    expect(options.some((label) => label.includes('Current prices') && label.includes('US dollars'))).toBe(true);
-    expect(options.some((label) => label.includes('Constant prices (2015)'))).toBe(true);
-    expect(options.some((label) => label.includes('PPP international dollars'))).toBe(true);
+    expect(options.some((label) => label.includes('Total GDP level (value)'))).toBe(true);
+    expect(options.some((label) => label.includes('Annual flow (endpoint B vs A)'))).toBe(true);
+    expect(options).not.toContain('total_constant');
   });
 
   it('filters Analysis through Movement methods and backend entity applicability', () => {
@@ -456,11 +498,49 @@ describe('compare UI: observed and like-for-like', () => {
     // The partial subtotal is unmistakably labelled.
     expect(view.container.textContent).toContain('Partial coverage');
     expect(view.container.textContent).toContain('IDN');
+    expect(view.container.textContent).toContain('Partial coverage: IDN');
     // The blocked comparison explains itself.
     expect(view.container.textContent).toContain('Why this result is not complete');
     expect(view.container.textContent).toContain('The change depends on a partial coverage value');
     // No gap value is shown for the blocked comparison.
     expect(view.container.textContent).not.toContain('52,000,000,000');
+  });
+
+  it('names a missing country, ISO3, year and selected source while keeping independent results visible', async () => {
+    const res = payload({ mode: 'observed', partial: false });
+    res.years = { a: 2004, b: 2005, c: 2006 };
+    res.analysis.requiredObservationYears = [2004, 2005, 2006];
+    const ab = res.results.comparison.intervalResults[0];
+    ab.observations.a[1] = { year: 2005, value: null, unit: 'current US$', available: false, complete: false, reason: 'MISSING_REQUIRED_DATA' };
+    ab.a = { computable: false, value: null, reason: 'MISSING_REQUIRED_DATA', unit: 'current US$' };
+    ab.available = false;
+    const ac = structuredClone(ab);
+    ac.id = 'AC';
+    ac.label = 'A → C';
+    ac.start = 2004;
+    ac.end = 2006;
+    ac.observations.a = [
+      { year: 2004, value: 721e9, unit: 'current US$', available: true, complete: true },
+      { year: 2006, value: 940e9, unit: 'current US$', available: true, complete: true },
+    ];
+    ac.observations.b = [
+      { year: 2004, value: 2212e9, unit: 'current US$', available: true, complete: true },
+      { year: 2006, value: 2566e9, unit: 'current US$', available: true, complete: true },
+    ];
+    ac.a = { computable: true, value: 219e9, unit: 'current US$' };
+    ac.b = { computable: true, value: 354e9, unit: 'current US$' };
+    ac.gap = { value: -135e9, unit: 'current US$' };
+    ac.available = true;
+    res.results.comparison.intervalResults = [ab, ac];
+    const stub = stubFetch([['/api/entities', { entities: [] }], ['/api/compare', res]]);
+    const view = renderCompare({ yearB: 2005, yearC: 2006, operation: 'absolute_change' });
+    ctx = { stub, cleanup: view.cleanup };
+    await flushReact(act);
+
+    const note = view.container.querySelector('.compare-missing-note');
+    expect(note?.textContent).toContain('India (IND) — 2005');
+    expect(note?.textContent).toContain('Total GDP — Nominal — Current US$ (NY.GDP.MKTP.CD)');
+    expect(note?.textContent).toContain('Entity A A → C, Entity B A → C remains available');
   });
 
   it('shows the universe only in like-for-like mode', async () => {
@@ -642,87 +722,146 @@ describe('compare UI: observed and like-for-like', () => {
     expect(stub.calls.filter((href) => href.includes('/api/observations')).length).toBe(0);
   });
 
+  it('sends the selected CPI Basis, canonical metric and mapped calculation to Compare', async () => {
+    hydrateRegistry(PRICES_REGISTRY);
+    const stub = stubFetch([
+      ['/api/entities', { entities: [] }],
+      ['/api/compare', payload({ mode: 'observed', partial: false })],
+    ]);
+    const view = renderCompare({
+      analysis: 'prices', metricKey: 'inflation_cpi', basisId: 'cpi_inflation_cumulative',
+      entityA: 'country:IND', entityB: 'country:CHN', labelB: '',
+      yearA: 2004, yearB: 2005, yearC: 2006, operation: 'level',
+    });
+    ctx = { stub, cleanup: view.cleanup };
+    await flushReact(act);
+
+    const call = stub.calls.find((href) => href.includes('/api/compare'));
+    expect(call).toContain('indicator=inflation_cpi');
+    expect(call).toContain('basis=cpi_inflation_cumulative');
+    expect(call).toContain('operation=movement_inflation_cumulative');
+  });
+
+  it('changing Analysis and Metric recomputes only dependent Metric and Basis selections', async () => {
+    hydrateRegistry(PRICES_REGISTRY);
+    const stub = stubFetch([
+      ['/api/entities', { entities: [] }],
+      ['/api/compare', payload({ mode: 'observed', partial: false })],
+    ]);
+    const changes = {};
+    const view = renderCompare({
+      analysis: 'gdp_total', metricKey: 'total_current', basisId: 'level', operation: 'level',
+      entityA: 'country:IND', entityB: 'country:CHN', labelB: '',
+      onAnalysis: (value) => { changes.analysis = value; },
+      onMetric: (value) => { changes.metric = value; },
+      onBasis: (value) => { changes.basis = value; },
+      onOperation: (value) => { changes.operation = value; },
+    });
+    ctx = { stub, cleanup: view.cleanup };
+    await flushReact(act);
+    act(() => view.container.querySelector('#cmp-analysis').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushReact(act);
+    const prices = [...document.querySelectorAll('.combo-option')].find((node) => node.textContent.trim() === 'Prices');
+    expect(prices).toBeTruthy();
+    act(() => prices.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    await flushReact(act);
+    expect(changes).toMatchObject({ analysis: 'prices', metric: 'inflation_cpi', basis: 'cpi_inflation_annual', operation: 'level' });
+
+    // With Prices selected, Metric is scoped to the three registered Prices
+    // indicators. Changing to CPI index picks its first registered Basis.
+    const metricChanges = {};
+    const metricView = renderCompare({
+      analysis: 'prices', metricKey: 'inflation_cpi', basisId: 'cpi_inflation_annual', operation: 'level',
+      entityA: 'country:IND', entityB: 'country:CHN', labelB: '',
+      onMetric: (value) => { metricChanges.metric = value; },
+      onBasis: (value) => { metricChanges.basis = value; },
+      onOperation: (value) => { metricChanges.operation = value; },
+    });
+    ctx.cleanup();
+    ctx = { stub, cleanup: metricView.cleanup };
+    await flushReact(act);
+    act(() => metricView.container.querySelector('#cmp-metric').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushReact(act);
+    const metricOptions = [...document.querySelectorAll('.combo-option')].map((node) => node.textContent.trim());
+    expect(metricOptions.some((label) => label.startsWith('CPI inflation'))).toBe(true);
+    expect(metricOptions.some((label) => label.startsWith('CPI index'))).toBe(true);
+    expect(metricOptions.some((label) => label.startsWith('Total GDP'))).toBe(false);
+    const cpiIndex = [...document.querySelectorAll('.combo-option')].find((node) => node.textContent.trim().startsWith('CPI index'));
+    act(() => cpiIndex.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    await flushReact(act);
+    expect(metricChanges).toMatchObject({ metric: 'inflation_cpi_index', basis: 'cpi_index_annual', operation: 'level' });
+  });
+
   // ---------- Selector contract tests ----------
 
-  it('Analysis selector offers operations only, never indicators', () => {
-    hydrateRegistry(DEFAULT_REGISTRY);
-    const options = compareAnalysisOptions('total_current', { kind: 'country', iso3: 'IND' }, { kind: 'country', iso3: 'CHN' }, 2004, 2005);
-    const values = options.map((o) => o.value);
-    // All offered values must be analytical operations.
-    for (const v of values) {
-      expect(COMPARE_OPERATIONS.some((op) => op.id === v)).toBe(true);
-    }
-    // No indicator keys may appear as operations.
-    expect(values).not.toContain('total_current');
-    expect(values).not.toContain('nominal_current');
-    expect(values).not.toContain('inflation_cpi');
-    // Level and change operations are present for GDP.
-    expect(values).toContain('level');
-    expect(values).toContain('percent_change');
-    expect(values).toContain('absolute_change');
+  it('Analysis and Metric options are the exact subject registry and its members', () => {
+    hydrateRegistry({
+      subjects: [
+        { key: 'prices', label: 'Prices' },
+        { key: 'trade', label: 'Trade' },
+        { key: 'gdp_total', label: 'Total GDP' },
+      ],
+      production: [
+        ...['inflation_cpi', 'inflation_cpi_index', 'inflation_deflator'].map((key) => ({
+          key, subject: 'prices', label: key, shortLabel: key, unit: '%', indicatorCode: key,
+          observationType: key === 'inflation_cpi_index' ? 'INDEX' : 'RATE',
+          validChangeTypes: ['ABSOLUTE', 'PERCENT', 'PP', 'CAGR'], comparisonCapability: ['COUNTRY'],
+        })),
+        ...['exports_current', 'imports_current'].map((key) => ({
+          key, subject: 'trade', label: key, shortLabel: key, unit: 'current US$', indicatorCode: key,
+          observationType: 'FLOW', validChangeTypes: ['ABSOLUTE', 'PERCENT', 'CAGR'], periodAggregation: ['SUM', 'AVG'], comparisonCapability: ['COUNTRY'],
+        })),
+        ...['total_current', 'total_constant'].map((key) => ({
+          key, subject: 'gdp_total', label: key, shortLabel: key, unit: 'current US$', indicatorCode: key,
+          observationType: 'FLOW', validChangeTypes: ['ABSOLUTE', 'PERCENT', 'CAGR'], periodAggregation: ['SUM', 'AVG'], comparisonCapability: ['COUNTRY'], aggregation: 'SUM',
+        })),
+      ],
+    });
+    expect(Object.values(SUBJECTS).map(({ key, label }) => [key, label])).toEqual([
+      ['prices', 'Prices'], ['trade', 'Trade'], ['gdp_total', 'Total GDP'],
+    ]);
+    expect(metricKeysForSubject('prices')).toEqual(['inflation_cpi', 'inflation_cpi_index', 'inflation_deflator']);
+    expect(metricKeysForSubject('trade')).toEqual(['exports_current', 'imports_current']);
+    expect(metricKeysForSubject('gdp_total')).toEqual(['total_current', 'total_constant']);
   });
 
-  it('Metric selector offers metric families only', () => {
-    hydrateRegistry(DEFAULT_REGISTRY);
-    const families = metricFamilyOptions();
-    for (const f of families) {
-      expect(METRIC_FAMILY_KEYS).toContain(f.value);
-      // Family labels are economic concepts, not analytical operations.
-      expect(['Level', 'Absolute change', 'Percent change', 'CAGR']).not.toContain(f.label);
-    }
-    // GDP family exists.
-    expect(families.map((f) => f.value)).toContain('total_gdp');
-    expect(families.map((f) => f.value)).toContain('gdp_per_capita');
+  it('Basis options follow Movement for CPI, and map to distinct Compare calculations', () => {
+    hydrateRegistry({
+      subjects: [{ key: 'prices', label: 'Prices' }],
+      production: ['inflation_cpi', 'inflation_cpi_index'].map((key) => ({
+        key, subject: 'prices', label: key, shortLabel: key, unit: '%', indicatorCode: key,
+        observationType: key === 'inflation_cpi_index' ? 'INDEX' : 'RATE',
+        validChangeTypes: ['ABSOLUTE', 'PERCENT', 'PP', 'CAGR'], comparisonCapability: ['COUNTRY'],
+      })),
+    });
+    const annualCpi = movementBasisOptions('inflation_cpi');
+    expect(annualCpi.map(({ id, label }) => [id, label])).toEqual([
+      ['cpi_inflation_annual', 'Annual CPI inflation (%)'],
+      ['cpi_inflation_average', 'Average annual CPI inflation (%)'],
+      ['cpi_inflation_cumulative', 'Cumulative CPI inflation (%)'],
+    ]);
+    expect(annualCpi.map(({ id }) => compareOperationForMovementBasis(id))).toEqual([
+      'level', 'movement_period_average', 'movement_inflation_cumulative',
+    ]);
+    expect(movementBasisOptions('inflation_cpi_index').map(({ id }) => id)).toEqual([
+      'cpi_index_annual', 'cpi_index_period_change',
+    ]);
   });
 
-  it('Basis selector offers only compatible definitions for the selected family', () => {
+  it('Compare Basis retains valid CAGR and Segmented growth without placing operations in Analysis', () => {
     hydrateRegistry(DEFAULT_REGISTRY);
-    // GDP family: 4 price/currency variants.
-    const gdpBases = basisOptionsForFamily('total_gdp');
-    expect(gdpBases.map((b) => b.id)).toEqual(['total_current', 'total_constant', 'total_ppp_current', 'total_ppp_constant']);
-    // Each basis id is a canonical metric key.
-    for (const b of gdpBases) {
-      expect(METRICS[b.id]).toBeTruthy();
-      expect(METRICS[b.id].subject).toBe('gdp_total');
-    }
-    // Single-key family: one movement basis set.
-    const cpiBases = basisOptionsForFamily('inflation_cpi');
-    expect(cpiBases.length).toBeGreaterThan(0);
-    for (const b of cpiBases) {
-      expect(b.metricKey).toBe('inflation_cpi');
-    }
-  });
-
-  it('resolveCanonicalMetric maps family + basis to the correct series', () => {
-    hydrateRegistry(DEFAULT_REGISTRY);
-    // GDP: basis IS the canonical metric key.
-    expect(resolveCanonicalMetric('total_gdp', 'total_constant')).toBe('total_constant');
-    expect(resolveCanonicalMetric('total_gdp', 'total_ppp_constant')).toBe('total_ppp_constant');
-    // GDP per capita.
-    expect(resolveCanonicalMetric('gdp_per_capita', 'nominal_constant')).toBe('nominal_constant');
-    // Single-key family: canonical key regardless of basis.
-    expect(resolveCanonicalMetric('inflation_cpi', 'inflation_cpi')).toBe('inflation_cpi');
-    // Unknown family returns null.
-    expect(resolveCanonicalMetric('unknown_family', 'anything')).toBeNull();
-  });
-
-  it('defaultBasisForFamily returns a valid basis for every family', () => {
-    hydrateRegistry(DEFAULT_REGISTRY);
-    for (const familyKey of METRIC_FAMILY_KEYS) {
-      const defaultBasis = defaultBasisForFamily(familyKey);
-      expect(defaultBasis).toBeTruthy();
-      const options = basisOptionsForFamily(familyKey);
-      expect(options.some((b) => b.id === defaultBasis)).toBe(true);
-    }
-  });
-
-  it('Analysis options update when canonical metric key changes via basis', () => {
-    hydrateRegistry(DEFAULT_REGISTRY);
-    const entity = { kind: 'country', iso3: 'IND' };
-    // Same analysis options should result when canonical key is the same.
-    const optsCurrent = compareAnalysisOptions('total_current', entity, entity, 2004, 2005);
-    const optsConstant = compareAnalysisOptions('total_constant', entity, entity, 2004, 2005);
-    expect(optsCurrent.map((o) => o.value)).toEqual(optsConstant.map((o) => o.value));
+    const entityA = { kind: 'country', iso3: 'IND' };
+    const entityB = { kind: 'country', iso3: 'CHN' };
+    const basis = compareMethodOptions('total_current', entityA, entityB, 2004, 2006);
+    const options = Object.values(SUBJECTS).map(({ key, label }) => ({ value: key, label }));
+    expect(options.map(({ value }) => value)).toEqual(Object.keys(SUBJECTS));
+    expect(options.map(({ label }) => label)).not.toContain('CAGR');
+    expect(options.map(({ label }) => label)).not.toContain('Segmented growth');
+    expect(basis.map(({ value }) => value)).toContain('level');
+    expect(basis.map(({ value }) => value)).toContain('compare:cagr');
+    expect(basis.map(({ value }) => value)).toContain('compare:segmented_growth');
+    expect(basis.find(({ value }) => value === 'compare:cagr')).toMatchObject({ operation: 'cagr', requestBasis: 'total_current' });
+    expect(basis.find(({ value }) => value === 'compare:segmented_growth')).toMatchObject({ operation: 'segmented_growth', requestBasis: 'total_current' });
   });
 
 });

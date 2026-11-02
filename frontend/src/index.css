@@ -2172,6 +2172,64 @@ hr.ddivider {
   margin-bottom: 1rem;
 }
 
+/* Long annual histories scroll inside the chart card. The page itself keeps
+   its viewport width while each observation retains room for its label. */
+.chart-plot-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  border-radius: 0.35rem;
+}
+
+.chart-plot-scroll:focus-visible {
+  outline: 3px solid var(--focus, #1769aa);
+  outline-offset: 2px;
+}
+
+.chart-plot.chart-plot-wide {
+  width: max(100%, var(--chart-min-width, 480px));
+}
+
+.chart-period-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(8rem, 12rem));
+  gap: 0.65rem 1rem;
+  align-items: end;
+  margin: 0 0 0.45rem;
+}
+
+.chart-period-label {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.chart-period-caption {
+  margin: 0.15rem 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.chart-period-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #a52020;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 40rem) {
+  .chart-period-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .compare-results {
   display: grid;
   gap: 1rem;
@@ -2204,6 +2262,18 @@ hr.ddivider {
 
 .compare-interval-header h3 {
   margin: 0.1rem 0 0.25rem;
+}
+
+.compare-missing-note {
+  margin: 0.65rem 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #f0d48a;
+  border-radius: 0.55rem;
+  background: #fff8e6;
+  color: #5f4a15;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .compare-interval-mode {

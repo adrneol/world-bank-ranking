@@ -863,11 +863,19 @@ const MOVEMENT_BASIS_COMPARE_OPERATION = Object.freeze({
   exp_period_cagr: 'cagr',
   imp_period_cagr: 'cagr',
   fdi_annual_value: 'level',
+  fdigdp_annual_value: 'level',
+  fdigdp_period_cumulative_share: 'level',
   fx_annual_rate: 'level',
   fx_annual_change: 'percent_change',
   fx_period_change: 'percent_change',
   res_annual_stock: 'level',
   res_period_change: 'absolute_change',
+  res_import_coverage: 'level',
+  ca_annual_gdp: 'level',
+  ca_average_gdp: 'level',
+  ca_cumulative_share: 'level',
+  remit_annual_value: 'level',
+  remit_cumulative_intensity: 'level',
   fdi_period_cumulative: 'movement_period_total',
   fdi_period_average: 'movement_period_average',
   fdigdp_period_average: 'movement_period_average',
@@ -885,6 +893,11 @@ const MOVEMENT_BASIS_COMPARE_OPERATION = Object.freeze({
   pop_period_change: 'absolute_change',
   pop_period_growth: 'percent_change',
 });
+
+/** Operation selected internally for a registered Movement Basis choice. */
+export function compareOperationForMovementBasis(basisId) {
+  return MOVEMENT_BASIS_COMPARE_OPERATION[basisId] ?? null;
+}
 
 /** Available, method-aligned analyses for one Compare request. */
 export function compareAnalysisOptions(metricKey, entityA, entityB, yearA = null, yearEnd = null) {
@@ -916,6 +929,15 @@ export function compareAnalysisOptions(metricKey, entityA, entityB, yearA = null
     options.push({ value: 'absolute_change', label: 'Absolute change', source: 'compare' });
     used.add('absolute_change');
   }
+  for (const [operation, label] of [
+    ['cagr', 'CAGR'],
+    ['segmented_growth', 'Segmented growth'],
+  ]) {
+    if (byId.has(operation) && !used.has(operation)) {
+      options.push({ value: operation, label, source: 'compare' });
+      used.add(operation);
+    }
+  }
   if (byId.has('period_total_growth') && !used.has('period_total_growth')) {
     options.push({ value: 'period_total_growth', label: 'Growth in adjacent period totals', source: 'compare' });
     used.add('period_total_growth');
@@ -938,6 +960,63 @@ export function compareAnalysisOptions(metricKey, entityA, entityB, yearA = null
     used.add('cross_rate');
   }
   return options;
+}
+
+/**
+ * Basis choices for Compare: every available Movement method for this metric,
+ * plus capability-approved Compare-only operations. Movement choices keep
+ * their registered ids; Compare-only choices use a namespaced id so their
+ * UI selection cannot be confused with a source series or Movement method.
+ */
+export function compareMethodOptions(metricKey, entityA, entityB, yearA = null, yearEnd = null) {
+  if (!metricKey) return [];
+  const caps = metricCapabilities(metricKey);
+  const entities = [entityA, entityB].filter(Boolean);
+  const capabilityToken = (kind) => kind === 'country' ? 'COUNTRY' : kind === 'wb_aggregate' ? 'OFFICIAL_AGGREGATE' : 'CUSTOM_GROUP';
+  const entitiesCompatible = (!caps?.comparisonCapability?.length || entities.every((entity) => caps.comparisonCapability.includes(capabilityToken(entity.kind))))
+    && (!entities.some((entity) => entity.kind === 'custom_group') || supportsGroupValues(metricKey));
+  const available = new Set(
+    operationsForEntities(metricKey, entityA, entityB)
+      .filter((option) => option.available)
+      .map((option) => option.id),
+  );
+  const movement = movementBasisOptions(metricKey, yearA, yearEnd).map((basis) => {
+    const operation = compareOperationForMovementBasis(basis.id);
+    const movementOnlyOperation = ['movement_period_total', 'movement_period_average', 'movement_inflation_cumulative'].includes(operation);
+    // Generic Movement methods (level, growth, period total/average) describe
+    // the calculation, not a source-series basis. GDP Compare validates its
+    // `basis` request field against canonical metric keys, so keep the chosen
+    // metric as the series identity while passing the method as `operation`.
+    // Specialized Movement bases remain their own registered IDs because
+    // they resolve one or more source legs in the backend.
+    const genericMethod = ['level', 'growth', 'period_total', 'period_average'].includes(basis.id);
+    return {
+      value: basis.id,
+      label: basis.label,
+      operation,
+      requestBasis: genericMethod ? metricKey : basis.id,
+      source: 'movement',
+      disabled: !operation || !entitiesCompatible || (!available.has(operation) && !movementOnlyOperation),
+      disabledReason: !operation
+        ? 'No Compare calculation is registered for this Movement method.'
+        : !entitiesCompatible
+          ? 'This metric does not support the selected entity types.'
+          : null,
+    };
+  });
+  const coveredOperations = new Set(movement.filter((entry) => !entry.disabled).map((entry) => entry.operation));
+  const extras = compareAnalysisOptions(metricKey, entityA, entityB, yearA, yearEnd)
+    .filter((option) => option.source === 'compare' && !coveredOperations.has(option.value))
+    .map((option) => ({
+      value: `compare:${option.value}`,
+      label: option.label,
+      operation: option.value,
+      requestBasis: metricKey,
+      source: 'compare',
+      disabled: false,
+      disabledReason: null,
+    }));
+  return [...movement, ...extras];
 }
 
 /** Human-readable observation-type label for metric headers. */

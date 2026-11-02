@@ -37,7 +37,7 @@ async function seedCompareDb() {
     { id: 'WLD', iso2Code: '1W', name: 'World', region: { id: 'NA', value: 'Aggregates' } },
   ]);
   await repository.upsertCountries(db, universe.countries);
-  for (const key of ['total_current', 'exports_current', 'fx_official', 'inflation_cpi', 'current_account', 'fdi_inflows', 'reserves_ex_gold', 'remittances_received', 'imports_current']) {
+  for (const key of ['total_current', 'total_constant', 'total_ppp_current', 'total_ppp_constant', 'nominal_current', 'nominal_constant', 'ppp_current', 'ppp_constant', 'exports_current', 'fx_official', 'inflation_cpi', 'current_account', 'fdi_inflows', 'reserves_ex_gold', 'remittances_received', 'imports_current']) {
     await repository.upsertIndicator(db, {
       ...METRICS[key],
       name: key,
@@ -46,6 +46,12 @@ async function seedCompareDb() {
     });
   }
   const total = await repository.getIndicatorByMetricKey(db, 'total_current');
+  const totalVariants = Object.fromEntries(await Promise.all(
+    ['total_constant', 'total_ppp_current', 'total_ppp_constant'].map(async (key) => [key, await repository.getIndicatorByMetricKey(db, key)]),
+  ));
+  const perCapitaVariants = Object.fromEntries(await Promise.all(
+    ['nominal_current', 'nominal_constant', 'ppp_current', 'ppp_constant'].map(async (key) => [key, await repository.getIndicatorByMetricKey(db, key)]),
+  ));
   const exportsIndicator = await repository.getIndicatorByMetricKey(db, 'exports_current');
   const fx = await repository.getIndicatorByMetricKey(db, 'fx_official');
   const inflation = await repository.getIndicatorByMetricKey(db, 'inflation_cpi');
@@ -66,6 +72,14 @@ async function seedCompareDb() {
   for (const [iso3, years] of Object.entries(totals)) {
     for (const [year, value] of Object.entries(years)) {
       rows.push({ countryId: iso3, indicatorId: total.id, year: Number(year), value, wbLastUpdated: '2026-07-13' });
+      for (const [index, key] of ['total_constant', 'total_ppp_current', 'total_ppp_constant'].entries()) {
+        const scale = [0.7, 1.1, 0.9][index];
+        const offset = [101, 202, 303][index];
+        rows.push({ countryId: iso3, indicatorId: totalVariants[key].id, year: Number(year), value: value * scale + offset, wbLastUpdated: '2026-07-13' });
+      }
+      for (const [index, key] of ['nominal_current', 'nominal_constant', 'ppp_current', 'ppp_constant'].entries()) {
+        rows.push({ countryId: iso3, indicatorId: perCapitaVariants[key].id, year: Number(year), value: value / 1e9 * (index + 1) + 17 * (index + 1), wbLastUpdated: '2026-07-13' });
+      }
     }
   }
   // IDN has no 2005 export observation: a genuine missing observation inside
@@ -291,6 +305,28 @@ test('compare API: a selected Year B produces independent A→B, B→C and A→C
   }
 });
 
+test('compare API: one country missing Year B preserves its A→C result and the other entity intervals', async () => {
+  const { db, repository } = await seedCompareDb();
+  const indicator = await repository.getIndicatorByMetricKey(db, 'total_current');
+  await queryRun(db, 'DELETE FROM observations WHERE country_id = ? AND indicator_id = ? AND year = ?', ['IND', indicator.id, YEAR_B]);
+  const { base, close } = await startApp(db);
+  try {
+    const res = await getJSON(base, '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&basis=total_current&yearA=2004&yearB=2005&yearC=2006&operation=percent_change&groupMode=observed');
+    assert.equal(res.status, 200);
+    const intervals = res.body.results.comparison.intervalResults;
+    assert.deepEqual(intervals.map(({ id }) => id), ['AB', 'BC', 'AC']);
+    assert.equal(intervals[0].a.value, null);
+    assert.equal(intervals[1].a.value, null);
+    assert.ok(Math.abs(intervals[2].a.value - ((940e9 / 721e9) - 1) * 100) < 1e-10);
+    assert.ok(intervals.every(({ b }) => b.value !== null), 'Entity B retains every independently calculable interval');
+    assert.deepEqual(intervals[0].observations.a.map(({ year, available }) => [year, available]), [[2004, true], [2005, false]]);
+    assert.deepEqual(intervals[1].observations.a.map(({ year, available }) => [year, available]), [[2005, false], [2006, true]]);
+    assert.deepEqual(intervals[2].observations.a.map(({ year, available }) => [year, available]), [[2004, true], [2006, true]]);
+  } finally {
+    await close();
+  }
+});
+
 test('compare API: clearing the middle year leaves only the A→C interval', async () => {
   const { db } = await seedCompareDb();
   const { base, close } = await startApp(db);
@@ -363,13 +399,15 @@ test('compare API: Movement trade totals use inclusive S..E years in all three i
   }
 });
 
-test('compare API: Movement inflation uses S+1..E and compounds each interval independently', async () => {
+test('compare API: selected CPI cumulative Basis uses S+1..E and compounds each interval independently', async () => {
   const { db } = await seedCompareDb();
   const { base, close } = await startApp(db);
   try {
     for (const groupMode of ['observed', 'like_for_like']) {
-      const res = await getJSON(base, `/api/compare?entityA=country:IND&entityB=country:CHN&indicator=inflation_cpi&yearA=2004&yearB=2005&yearC=2006&operation=movement_inflation_cumulative&groupMode=${groupMode}`);
+      const res = await getJSON(base, `/api/compare?entityA=country:IND&entityB=country:CHN&indicator=inflation_cpi&basis=cpi_inflation_cumulative&yearA=2004&yearB=2005&yearC=2006&operation=movement_inflation_cumulative&groupMode=${groupMode}`);
       assert.equal(res.status, 200);
+      assert.equal(res.body.basis, 'cpi_inflation_cumulative');
+      assert.equal(res.body.operation, 'movement_inflation_cumulative');
       assert.deepEqual(res.body.analysis.requiredObservationYears, [2005, 2006]);
       const intervals = res.body.results.comparison.intervalResults;
       assert.deepEqual(intervals.map(({ id }) => id), ['AB', 'BC', 'AC']);
@@ -384,6 +422,25 @@ test('compare API: Movement inflation uses S+1..E and compounds each interval in
       assert.deepEqual(intervals[0].observations.a.map(({ year }) => year), [2005]);
       assert.deepEqual(intervals[2].observations.a.map(({ year }) => year), [2005, 2006]);
     }
+  } finally {
+    await close();
+  }
+});
+
+test('compare API: selected average-CPI Basis uses the registered annual-rate mean', async () => {
+  const { db } = await seedCompareDb();
+  const { base, close } = await startApp(db);
+  try {
+    const res = await getJSON(base, '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=inflation_cpi&basis=cpi_inflation_average&yearA=2004&yearC=2006&operation=movement_period_average');
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.basis, 'cpi_inflation_average');
+    assert.equal(res.body.operation, 'movement_period_average');
+    assert.deepEqual(res.body.analysis.requiredObservationYears, [2005, 2006]);
+    const interval = res.body.results.comparison.intervalResults[0];
+    assert.equal(interval.a.value, 5);
+    assert.equal(interval.b.value, 12.5);
+    assert.equal(interval.gap.value, -7.5);
+    assert.equal(interval.gap.unit, 'percentage points');
   } finally {
     await close();
   }
@@ -531,6 +588,10 @@ test('compare API: a missing observation blocks the affected derived result and 
     assert.equal(res.body.results.b.observed['2005'].complete, false);
     assert.deepEqual(res.body.results.b.observed['2005'].missingIso3, ['BRA']);
     assert.equal(res.body.results.b.observed['2005'].missingCount, 1);
+    const intervalObservation = res.body.results.comparison.intervalResults[0].observations.b.find((entry) => entry.year === 2005);
+    assert.equal(intervalObservation.complete, false);
+    assert.equal(intervalObservation.missingCount, 1);
+    assert.deepEqual(intervalObservation.missingIso3, ['BRA']);
     // The derived result is blocked.
     assert.equal(res.body.results.comparison.b.value, null);
     assert.equal(res.body.results.comparison.gap.value, null);
@@ -631,6 +692,54 @@ test('compare API: the chart series is built from the stored observations of the
     assert.equal(groupSeries.points[0].value, 1955e9 + 800e9);
     assert.equal(groupSeries.points[1].value, null, 'an incomplete year is a gap, never a partial number');
     assert.deepEqual(groupSeries.partialYears, [2005]);
+  } finally {
+    await close();
+  }
+});
+
+test('compare API: Total GDP Level uses the canonical Current US$ series with A, B and C independently', async () => {
+  const { db, repository } = await seedCompareDb();
+  const indicator = await repository.getIndicatorByMetricKey(db, 'total_current');
+  await repository.upsertObservations(db, [
+    { countryId: 'IND', indicatorId: indicator.id, year: 2014, value: 2.039e12, wbLastUpdated: '2026-07-13' },
+    { countryId: 'IND', indicatorId: indicator.id, year: 2024, value: 3.91e12, wbLastUpdated: '2026-07-13' },
+    { countryId: 'USA', indicatorId: indicator.id, year: 2014, value: 17.608e12, wbLastUpdated: '2026-07-13' },
+    { countryId: 'USA', indicatorId: indicator.id, year: 2024, value: 28.75e12, wbLastUpdated: '2026-07-13' },
+  ]);
+  const { base, close } = await startApp(db);
+  try {
+    const res = await getJSON(base, '/api/compare?entityA=country:IND&entityB=country:USA&indicator=total_current&basis=total_current&yearA=2004&yearB=2014&yearC=2024&operation=level&groupMode=observed');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.metric.key, 'total_current');
+    assert.equal(res.body.metric.indicatorCode, 'NY.GDP.MKTP.CD');
+    assert.equal(res.body.operation, 'level');
+    assert.equal(res.body.basis, 'total_current');
+    const selectedYears = (slot) => slot.series.points
+      .filter(({ year }) => [2004, 2014, 2024].includes(year))
+      .map(({ year, value }) => [year, value]);
+    assert.deepEqual(selectedYears(res.body.results.a), [
+      [2004, 721e9], [2014, 2.039e12], [2024, 3.91e12],
+    ]);
+    assert.deepEqual(selectedYears(res.body.results.b), [
+      [2004, 11963e9], [2014, 17.608e12], [2024, 28.75e12],
+    ]);
+    for (const [index, metricKey] of ['total_constant', 'total_ppp_current', 'total_ppp_constant'].entries()) {
+      const variant = await getJSON(base, `/api/compare?entityA=country:IND&entityB=country:USA&indicator=${metricKey}&basis=${metricKey}&yearA=2004&yearC=2006&operation=level`);
+      assert.equal(variant.status, 200, `${metricKey} is a valid Total GDP source series`);
+      assert.equal(variant.body.metric.key, metricKey);
+      assert.equal(variant.body.metric.indicatorCode, METRICS[metricKey].indicatorCode);
+      const expected = 721e9 * [0.7, 1.1, 0.9][index] + [101, 202, 303][index];
+      assert.equal(variant.body.results.a.series.points[0].value, expected);
+      assert.equal(variant.body.operation, 'level');
+    }
+    for (const [index, metricKey] of ['nominal_current', 'nominal_constant', 'ppp_current', 'ppp_constant'].entries()) {
+      const variant = await getJSON(base, `/api/compare?entityA=country:IND&entityB=country:USA&indicator=${metricKey}&basis=${metricKey}&yearA=2004&yearC=2006&operation=level`);
+      assert.equal(variant.status, 200, `${metricKey} is a valid GDP per-capita source series`);
+      assert.equal(variant.body.metric.key, metricKey);
+      assert.equal(variant.body.metric.indicatorCode, METRICS[metricKey].indicatorCode);
+      assert.equal(variant.body.results.a.series.points[0].value, 721 * (index + 1) + 17 * (index + 1));
+      assert.equal(variant.body.operation, 'level');
+    }
   } finally {
     await close();
   }

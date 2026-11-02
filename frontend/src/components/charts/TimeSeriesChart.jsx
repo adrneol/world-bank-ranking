@@ -29,14 +29,16 @@ const DASHES = [undefined, '6 3', '2 2'];
 // subtle fades, prefers-reduced-motion must be trivially honored, and
 // analytical charts must render deterministically.
 
-export default function TimeSeriesChart({ series = [], unit = null, decimals = 0, zeroLine = false, height = null }) {
+export default function TimeSeriesChart({ series = [], unit = null, decimals = 0, zeroLine = false, height = null, scrollable = false }) {
   const narrow = useIsNarrowChart();
   const { keys, rows, labels } = alignSeries(series);
   if (rows.length === 0) return null;
   // Adaptive tick count: enough year labels to be readable without crowding,
   // never thinning the plotted data points (tick-label thinning is separate
   // from data-point filtering).
-  const tickCount = narrow
+  const tickCount = scrollable
+    ? Math.min(Math.max(6, Math.ceil(rows.length / 5)), rows.length)
+    : narrow
     ? Math.min(4, rows.length)
     : Math.min(Math.max(6, Math.ceil(rows.length / 6)), rows.length);
   const legendItems =
@@ -49,7 +51,8 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
       : null;
   return (
     <>
-      <div className="chart-plot" style={Number.isFinite(height) ? { height } : undefined}>
+      <div className={scrollable ? 'chart-plot-scroll' : undefined} role={scrollable ? 'region' : undefined} aria-label={scrollable ? 'Scrollable chart plot' : undefined} tabIndex={scrollable ? 0 : undefined}>
+      <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${Math.max(480, rows.length * 52 + 96)}px` } : {}) }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
             <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
@@ -64,7 +67,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
             <YAxis
               width={yAxisWidthFor(unit, narrow)}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(v) => formatTickValue(v, decimals)}
+              tickFormatter={(v) => formatTickValue(v, decimals, unit)}
               domain={['auto', 'auto']}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
@@ -91,6 +94,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
             ))}
           </LineChart>
         </ResponsiveContainer>
+      </div>
       </div>
       <ChartLegend items={legendItems} />
     </>

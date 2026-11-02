@@ -10,15 +10,18 @@
 import { formatDecimal } from '../../utils/format.js';
 
 /** Compact axis tick: 1.2T / 3.4B / 5.6M / 7.8k, else registry precision. */
-export function formatTickValue(value, decimals = 0) {
+export function formatTickValue(value, decimals = 0, unit = null) {
   if (value === null || value === undefined) return '';
   const n = Number(value);
   if (!Number.isFinite(n)) return '';
   const abs = Math.abs(n);
-  if (abs >= 1e12) return `${(n / 1e12).toFixed(1)}T`;
-  if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  const prefix = typeof unit === 'string' && /international/i.test(unit)
+    ? 'Int$'
+    : typeof unit === 'string' && /(?:\$|USD|dollar)/i.test(unit) ? '$' : '';
+  if (abs >= 1e12) return `${prefix}${(n / 1e12).toFixed(1)}T`;
+  if (abs >= 1e9) return `${prefix}${(n / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${prefix}${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1000) return `${prefix}${(n / 1000).toFixed(1)}k`;
   return formatDecimal(n, decimals);
 }
 
