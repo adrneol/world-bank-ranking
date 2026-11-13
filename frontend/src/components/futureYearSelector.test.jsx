@@ -97,7 +97,7 @@ function optionTexts() {
 describe('frontend year selection follows the available years', () => {
   let stub = null;
   beforeEach(() => {
-    window.history.replaceState(null, '', '/?view=rank');
+    window.history.replaceState(null, '', '/?view=rank&country=IND&rankSub=verify');
   });
   afterEach(() => {
     stub?.restore();

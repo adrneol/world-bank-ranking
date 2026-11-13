@@ -11,6 +11,7 @@ import { useApi } from '../hooks/useApi.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { Section, StatusBlock, Pagination, UnavailableState } from '../components/ui.jsx';
 import SearchField from '../components/SearchField.jsx';
+import { RankedObservation, RankingSummary, RankingTable } from '../components/RankingEvidence.jsx';
 
 // Must stay identical to backend parseRankQuery (domain/ranking.js).
 // Message-only use: the backend performs the actual rank lookup.
@@ -23,7 +24,7 @@ function parseRankQuery(input) {
 
 const PAGE_SIZE_DEFAULT = 50;
 
-export default function FullRanking({ year, metricKey, country = 'IND' }) {
+export default function FullRanking({ year, metricKey, country, focusName }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
   const [searchInput, setSearchInput] = useState('');
@@ -33,7 +34,7 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
   // out-of-range pages anyway, but resetting avoids showing a stale page).
   useEffect(() => {
     setPage(1);
-  }, [year, metricKey, country]);
+  }, [year, metricKey]);
 
   // Search-as-you-type for the backend-powered search (debounced: the list
   // is remote, so keystrokes must not fire a request each). The Search
@@ -92,6 +93,8 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
       title="Full country ranking"
       subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by the backend: ${orderText}.`}
     >
+      {data && !loading && !error && !unavailable ? <RankingSummary country={data.focus?.country ?? focusName}
+        rank={data.focus?.rank} denominator={data.total} denominatorLabel="Eligible economies" value={data.focus?.displayValue} /> : null}
       <div className="toolbar">
         <SearchField
           id="fullrank-search"
@@ -101,7 +104,7 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
           onSubmit={submitSearch}
           appliedQuery={search}
           onClear={clearSearch}
-          placeholder="e.g. India, IND, or 12"
+          placeholder="Country name, ISO3, or rank"
         />
       </div>
 
@@ -126,7 +129,7 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
 
       {!loading && !error && data && (search ? data.search.matches.length > 0 : data.rows.length > 0) ? (
         <>
-          <div className="table-scroll" role="region" aria-label="Full ranking table" tabIndex={0}>
+          <RankingTable label="Full ranking table">
             <table className="table">
               <caption className="sr-only">
                 Full ranking {year} {metricTitle(metricKey)}
@@ -139,10 +142,7 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
                   <th scope="col">Country</th>
                   <th scope="col">ISO3</th>
                   <th scope="col" className="num">
-                    Raw value
-                  </th>
-                  <th scope="col" className="num">
-                    Display
+                    Observed value
                   </th>
                 </tr>
               </thead>
@@ -151,17 +151,15 @@ export default function FullRanking({ year, metricKey, country = 'IND' }) {
                   <tr key={`${r.rank}-${r.iso3}`} className={r.isFocus ? 'row-focus' : undefined}>
                     <th scope="row" className="num">
                       {r.rank}
-                      {r.isFocus ? <span className="focus-tag">{r.country}</span> : null}
                     </th>
-                    <td>{r.country}</td>
+                    <td>{r.country}{r.isFocus ? <span className="sr-only"> (selected economy)</span> : null}</td>
                     <td className="mono">{r.iso3}</td>
-                    <td className="num mono">{r.rawValueText ?? String(r.rawValue)}</td>
-                    <td className="num">{r.displayValue}</td>
+                    <td className="num"><RankedObservation display={r.displayValue} exact={r.rawValueText ?? r.rawValue} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </RankingTable>
           {!search ? (
             <Pagination page={data.page} pages={data.pages} total={data.total} pageSize={data.pageSize} onPage={handlePage} />
           ) : null}

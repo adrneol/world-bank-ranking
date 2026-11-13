@@ -15,7 +15,7 @@
  */
 
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
+import { chartTooltipStyle, CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
 import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
@@ -57,7 +57,7 @@ export default function SlopeChart({ items = [], startLabel = 'A', endLabel = 'B
             />
             <Tooltip
               formatter={(value, name) => [formatChartValue(value, decimals), name]}
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={chartTooltipStyle}
             />
             {keys.map((key, i) => (
               <Line

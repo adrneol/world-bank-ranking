@@ -55,6 +55,15 @@ test('J. manual refresh without a token is rejected', async () => {
   assert.equal(res.body.error.code, 'REFRESH_UNAUTHORIZED');
 });
 
+test('public catalog aliases preserve the read contract and exclude mutation routes', async () => {
+  const original = await get('/api/ranking?indicator=total_current&year=2025&pageSize=2');
+  const read = await get('/api/public/ranking?indicator=total_current&year=2025&pageSize=2');
+  assert.equal(read.status, original.status);
+  assert.deepEqual(read.body, original.body);
+  assert.equal(read.headers.get('X-Auto-Refresh'), null);
+  assert.equal((await post('/api/public/data/refresh', {})).status, 404);
+});
+
 test('J. manual refresh with a wrong token is rejected', async () => {
   const res = await post(
     '/api/data/refresh',

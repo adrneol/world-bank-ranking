@@ -3,20 +3,21 @@
  *
  * Resolves the requester's ISO3 country ONCE per lookup through a keyless
  * external IP geolocation provider, validated against the stored World Bank
- * country metadata (unknown codes and aggregates resolve to null, and the
- * frontend keeps its India fallback). Privacy properties:
+ * country metadata. Unknown codes and aggregates resolve to null.
  *
  * - the client IP is used transiently for the single provider call only;
  * - it is never logged, never persisted, and only an ISO3 (or null) is
  *   returned — no IP, city, coordinates or other location ever leaves;
  * - loopback/private/reserved addresses are never sent to the provider;
- * - results are cached briefly in memory (per IP, bounded) so repeated
+ * - results are cached briefly in memory (salted digest, bounded) so repeated
  *   loads do not hammer the provider;
  * - every failure mode (timeout, provider error, malformed payload,
  *   unknown/aggregate country, disabled provider) resolves to null —
  *   geolocation can never break normal application functionality.
  */
 
+import { createHash, randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import config from '../config.js';
 import { getDb } from '../db/index.js';
 import { getCountryByIso2 } from '../db/repository.js';
@@ -25,6 +26,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 500;
 
 const cache = new Map();
+const cacheSalt = randomBytes(32);
 
 /** Test seam: drop all cached lookups. */
 export function resetGeoCache() {
@@ -50,23 +52,20 @@ function cacheSet(ip, iso3) {
 }
 
 /**
- * Client IP for geolocation: first X-Forwarded-For entry (Render and other
- * proxies) falling back to the direct socket address. Returns null when no
- * usable address exists. No trust-proxy semantics are changed: this reads a
- * header value transiently without altering Express routing or rate-limit
- * identity.
+ * Accept a direct peer, or Express's resolved client address when the
+ * application has explicitly configured a trusted proxy boundary.
  */
 export function clientIpFromRequest(req) {
-  const header = req?.headers?.['x-forwarded-for'];
-  const first = String(Array.isArray(header) ? header[0] : (header ?? '')).split(',')[0].trim();
-  let raw = first !== '' ? first : (req?.ip ?? req?.socket?.remoteAddress ?? '');
+  const trusted = req?.app?.get('trust proxy');
+  if (req?.headers?.['x-forwarded-for'] && !trusted) return null;
+  let raw = trusted ? req?.ip : req?.socket?.remoteAddress;
   raw = String(raw ?? '').trim();
   if (raw === '' || raw.toLowerCase() === 'unknown') return null;
   // Normalize: strip brackets, zone ids and IPv4-mapped IPv6 prefixes.
   let ip = raw.replace(/^\[(.*)\]$/, '$1').split('%')[0];
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
   if (mapped) ip = mapped[1];
-  return ip === '' ? null : ip;
+  return isIP(ip) ? ip : null;
 }
 
 function v4Octets(ip) {
@@ -83,7 +82,7 @@ function v4Octets(ip) {
  * the geolocation provider — development/CI traffic included.
  */
 export function isRoutableIp(ip) {
-  if (typeof ip !== 'string' || ip === '') return false;
+  if (typeof ip !== 'string' || !isIP(ip)) return false;
   const v4 = v4Octets(ip);
   if (v4) {
     const [a, b] = v4;
@@ -92,15 +91,16 @@ export function isRoutableIp(ip) {
     if (a === 172 && b >= 16 && b <= 31) return false;
     if (a === 192 && b === 168) return false;
     if (a === 169 && b === 254) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    if (a === 198 && (b === 18 || b === 19 || (b === 51 && v4[2] === 100))) return false;
+    if ((a === 192 && b === 0 && (v4[2] === 0 || v4[2] === 2)) || (a === 203 && b === 0 && v4[2] === 113)) return false;
     return true;
   }
   const lower = ip.toLowerCase();
   if (lower === '::1' || lower === '::') return false;
   if (lower.startsWith('fe80:')) return false;
   if (lower === 'fc00::' || lower.startsWith('fc') || lower.startsWith('fd')) return false;
-  // Anything else shaped like IPv6 (contains a colon) is treated as
-  // routable; non-IP strings are not.
-  return lower.includes(':');
+  return /^[23][0-9a-f]{3}:/.test(lower) && !/^2001:db8:/.test(lower);
 }
 
 /**
@@ -109,9 +109,9 @@ export function isRoutableIp(ip) {
  * with a bounded timeout — no retries: slowness fails fast to the fallback.
  */
 export async function lookupCountryForIp(db, ip, options = {}) {
-  const handle = db ?? getDb();
-  if (typeof ip !== 'string' || ip === '') return null;
-  const cached = cacheGet(ip);
+  if (!isRoutableIp(ip)) return null;
+  const cacheKey = createHash('sha256').update(cacheSalt).update(ip).digest('hex');
+  const cached = cacheGet(cacheKey);
   if (cached !== undefined) return cached;
 
   const providerUrl = options.providerUrl ?? config.geo.providerUrl;
@@ -119,19 +119,19 @@ export async function lookupCountryForIp(db, ip, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   let iso3 = null;
 
-  if (isRoutableIp(ip) && typeof providerUrl === 'string' && providerUrl !== '') {
+  if (typeof providerUrl === 'string' && providerUrl !== '') {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const url = providerUrl.includes('{ip}')
         ? providerUrl.replace('{ip}', encodeURIComponent(ip))
         : `${providerUrl.replace(/\/+$/, '')}/${encodeURIComponent(ip)}`;
-      const response = await fetchImpl(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
+      const response = await fetchImpl(url, { signal: controller.signal, redirect: 'error', headers: { Accept: 'application/json' } });
       if (response?.ok) {
         const body = await response.json().catch(() => null);
         const alpha2 = body?.country_code ?? body?.countryCode ?? null;
         if (typeof alpha2 === 'string' && /^[A-Za-z]{2}$/.test(alpha2.trim())) {
-          const row = await getCountryByIso2(handle, alpha2);
+          const row = await getCountryByIso2(db ?? getDb(), alpha2);
           if (row && Number(row.is_aggregate) === 0 && typeof row.iso3 === 'string' && row.iso3 !== '') {
             iso3 = row.iso3;
           }
@@ -144,7 +144,7 @@ export async function lookupCountryForIp(db, ip, options = {}) {
     }
   }
 
-  cacheSet(ip, iso3);
+  cacheSet(cacheKey, iso3);
   return iso3;
 }
 

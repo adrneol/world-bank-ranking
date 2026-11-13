@@ -13,6 +13,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock, Pagination, UnavailableState } from '../components/ui.jsx';
 import SearchField from '../components/SearchField.jsx';
+import { RankedObservation, RankingSummary, RankingTable } from '../components/RankingEvidence.jsx';
 
 // Must stay identical to backend parseRankQuery (domain/ranking.js).
 // Message-only use: the backend performs the actual rank lookup.
@@ -23,7 +24,7 @@ function parseRankQuery(input) {
   return Number.isSafeInteger(n) && n >= 1 ? n : null;
 }
 
-export default function YoyRanking({ year, metricKey, country = 'IND', focusName = 'India' }) {
+export default function YoyRanking({ year, metricKey, country, focusName }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState('');
@@ -31,7 +32,7 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
 
   useEffect(() => {
     setPage(1);
-  }, [year, metricKey, country]);
+  }, [year, metricKey]);
 
   // Search-as-you-type for the backend-powered search (debounced: the list
   // is remote, so keystrokes must not fire a request each). Matching
@@ -76,20 +77,14 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
   return (
     <Section
       id="yoy-ranking"
-      title="YoY ranking (separate from level ranking)"
-      subtitle={`${year ?? '—'} · ${metricTitle(metricKey)}. Ordered by percentage change — not by value.`}
+      title="Year-over-year ranking"
+      subtitle={`${year ?? '—'} · ${metricTitle(metricKey)} · Ranked by annual percentage change`}
     >
       {!loading && !error && data ? (
-        <p className="denominators" role="status">
-          YoY denominator: <strong>{data.total}</strong> valid pairs
-          {data.focus ? (
-            <>
-              {' '}· {displayName} YoY rank: <strong>{data.focus.rank}</strong>
-            </>
-          ) : (
-            ` · ${displayName} has no calculable YoY for this year`
-          )}
-        </p>
+        <RankingSummary country={displayName} rank={data.focus?.rank} denominator={data.total} denominatorLabel="Valid year pairs"
+          value={data.focus ? formatYoy(data.focus.yoyPercent, data.focus.yoyDisplay) : 'No calculable YoY'}
+          previous={data.focus?.previousValueDisplay ?? data.focus?.previousValueText}
+          current={data.focus?.currentValueDisplay ?? data.focus?.currentValueText} />
       ) : null}
 
       <div className="toolbar">
@@ -101,7 +96,7 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
           onSubmit={submitSearch}
           appliedQuery={search}
           onClear={clearSearch}
-          placeholder="e.g. India, IND, or 134"
+          placeholder="Country name, ISO3, or YoY rank"
         />
       </div>
 
@@ -123,7 +118,7 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
 
       {!loading && !error && data && (search ? data.search.matches.length > 0 : data.rows.length > 0) ? (
         <>
-          <div className="table-scroll" role="region" aria-label="YoY ranking table" tabIndex={0}>
+          <RankingTable label="YoY ranking table">
             <table className="table">
               <caption className="sr-only">
                 YoY ranking {year} {metricTitle(metricKey)}
@@ -136,10 +131,10 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
                   <th scope="col">Country</th>
                   <th scope="col">ISO3</th>
                   <th scope="col" className="num">
-                    Previous raw
+                    Previous observation
                   </th>
                   <th scope="col" className="num">
-                    Current raw
+                    Current observation
                   </th>
                   <th scope="col" className="num">
                     {METRICS[metricKey]?.observationType === 'QUOTED_RATE' ? 'Annual movement' : 'YoY %'}
@@ -151,22 +146,21 @@ export default function YoyRanking({ year, metricKey, country = 'IND', focusName
                   <tr key={`${r.rank}-${r.iso3}`} className={r.isFocus ? 'row-focus' : undefined}>
                     <th scope="row" className="num">
                       {r.rank}
-                      {r.isFocus ? <span className="focus-tag">{r.country}</span> : null}
                     </th>
-                    <td>{r.country}</td>
+                    <td>{r.country}{r.isFocus ? <span className="sr-only"> (selected economy)</span> : null}</td>
                     <td className="mono">{r.iso3}</td>
-                    <td className="num mono" title={`Display: ${r.previousValueDisplay}`}>
-                      {r.previousValueText}
+                    <td className="num">
+                      <RankedObservation display={r.previousValueDisplay} exact={r.previousValueText} />
                     </td>
-                    <td className="num mono" title={`Display: ${r.currentValueDisplay}`}>
-                      {r.currentValueText}
+                    <td className="num">
+                      <RankedObservation display={r.currentValueDisplay} exact={r.currentValueText} />
                     </td>
                     <td className="num">{formatYoy(r.yoyPercent, r.yoyDisplay)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
+          </RankingTable>
           {!search ? (
             <Pagination page={data.page} pages={data.pages} total={data.total} pageSize={data.pageSize} onPage={handlePage} />
           ) : null}

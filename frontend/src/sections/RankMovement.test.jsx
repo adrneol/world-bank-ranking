@@ -130,7 +130,13 @@ describe('RankMovement legacy position-graph removal', () => {
     assertNoLegacyPositionGraph(ctx.container);
     expect(levelCards(ctx.container)).toHaveLength(1);
     // Tables and analytical cards remain.
+    const mode = ctx.container.querySelector('[aria-label="Comparison universe"] button:last-child');
+    const requests = ctx.stub.calls.length;
+    expect(mode.getAttribute('aria-pressed')).toBe('false');
+    act(() => mode.click());
+    expect(mode.getAttribute('aria-pressed')).toBe('true');
     expect(ctx.container.textContent).toContain('Like-for-like comparison');
+    expect(ctx.stub.calls.length).toBe(requests);
   });
 
   it('GDP per capita level + no middle: no position graph, level-value graph remains', async () => {

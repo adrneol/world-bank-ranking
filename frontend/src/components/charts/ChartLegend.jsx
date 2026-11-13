@@ -24,7 +24,7 @@ export default function ChartLegend({ items, type }) {
             className="chart-legend-swatch"
             aria-hidden="true"
             style={{
-              borderTopColor: item?.color ?? '#101828',
+              borderTopColor: item?.color ?? 'var(--chart-series-0)',
               borderTopStyle: item?.dashed ? 'dashed' : 'solid',
             }}
           />}

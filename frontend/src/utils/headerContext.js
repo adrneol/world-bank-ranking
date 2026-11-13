@@ -34,7 +34,7 @@ export function getHeaderContext({ view, country, focusName, year, yearA, yearB 
   // Movement is a period/range analysis: the header communicates the
   // compared endpoints only. The middle year (when present) and the
   // unrelated global single-year filter stay out of the header.
-  if (view === 'movement') {
+  if (view === 'movement' && country) {
     const primary = `World Bank WDI · ${country}`;
     if (yearA == null || yearB == null) {
       return { primary, secondary: `${name} — Select period` };
@@ -50,6 +50,7 @@ export function getHeaderContext({ view, country, focusName, year, yearA, yearB 
   if (view === 'status') {
     return { primary: 'World Bank WDI', secondary: 'Data status & refresh' };
   }
+  if (!country) return { primary: 'World Bank WDI', secondary: 'Select a focus economy' };
   // Single-year analytical views (overview, data, rank, yoy, coverage,
   // audit …): focus country plus its meaningful analytical year.
   return {

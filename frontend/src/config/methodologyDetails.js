@@ -106,8 +106,8 @@ export const METRIC_SOURCES = Object.freeze({
 export const BASIS_GUIDE = Object.freeze({
   // ---------------- Prices: CPI index ----------------
   cpi_index_annual: Object.freeze({
-    how: 'Reports the raw CPI index level (2010 = 100) for the selected year, with descriptive index-point changes between selected years. No transformation, no cross-country rank.',
-    period: 'Single selected year; Start/Middle/End years display as separate raw values (e.g. 63.4 → 139.9 → 227.6).',
+    how: 'The published CPI index uses 2010 as the reference value of 100. The level compares the economy’s consumer prices with its own reference period. An index-point difference describes the change in the index, while annual inflation is a percentage rate.',
+    period: 'Each selected year displays its own published index observation.',
     eligibility: 'Valid CPI observation in the selected year. No cross-country universe required.',
     distinct: 'The only Prices basis with no rank: pure level description, while the period-change basis converts levels into ranked change.',
     caveats: Object.freeze([
@@ -141,7 +141,7 @@ export const BASIS_GUIDE = Object.freeze({
     how: 'Compounds the annual inflation rates over the interval: Π(1+r/100)−1. Inflation compounds — annual rates are never summed.',
     period: 'Full sequence S+1 through E; every transition is required for the compounding.',
     eligibility: 'Every year S+1..E valid.',
-    distinct: 'Total price-level increase (e.g. ~120.88% for India 2004→2014), vs the average basis which reports the typical annual rate.',
+    distinct: 'Cumulative inflation measures the total price-level change. Average inflation measures the typical annual rate.',
     caveats: Object.freeze([
       'Do not compute cumulative inflation by adding annual rates.',
       'Calculated from the inflation series itself, not by substituting the CPI index series.',
@@ -403,7 +403,7 @@ export const BASIS_GUIDE = Object.freeze({
     caveats: Object.freeze([]),
   }),
   period_total: Object.freeze({
-    how: 'Backend SUM operation over the half-open span [A, B): adds the annual values. Flow semantics only.',
+    how: 'The backend adds annual flows from the start year up to, and excluding, the end year.',
     period: 'Every year A..B−1 must be present.',
     eligibility: 'Complete span required; gaps exclude the economy.',
     distinct: 'Cumulative span total vs typical-year average; ordered under the registry direction.',

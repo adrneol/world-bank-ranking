@@ -97,19 +97,26 @@ function YearSelect({ id, label, years, value, onChange, hint, optional = false,
 }
 
 function yearControlInfo(operation, role, yearC = null) {
+  const periods = comparePeriodRequirements(operation);
   if (operation === 'cross_rate') {
-    return { optional: true, disabled: role !== 'a', hint: role === 'a' ? 'Required by this analysis.' : 'Cross-rate uses Year A only; this period is not used.' };
+    return { optional: role !== 'a', disabled: role !== 'a', hint: role === 'a' ? 'Required by this analysis.' : 'Cross-rate uses the start year only.' };
   }
   if (operation === 'level') {
     return { optional: role !== 'a', disabled: false, hint: role === 'a' ? 'Required. Additional selected years are compared in chronological order.' : 'Optional. Selected periods appear in the level table and trajectory.' };
   }
-  if (['segmented_growth', 'period_total_growth'].includes(operation)) {
-    return { optional: true, disabled: false, hint: 'Optional partition point. With Year C selected, this enables A → B, B → C and A → C results.' };
-  }
-  if (role === 'a') return { optional: false, disabled: false, hint: 'Required start period.' };
-  if (role === 'b') return { optional: true, disabled: false, hint: yearC != null ? 'With Year C selected, Year B is the middle year and adds A → B, B → C and A → C interval results.' : 'Optional end-period fallback when Year C is not selected.' };
-  return { optional: true, disabled: false, hint: 'Optional end period. If selected, this is the endpoint used by the analysis.' };
+  if (role === 'a') return { optional: false, disabled: false, hint: 'Required start year.' };
+  if (role === 'c') return { optional: !periods.requiresEnd, disabled: false, hint: 'Endpoint used by the analysis.' };
+  const hint = operation === 'period_total_growth'
+    ? 'Splits the full span into adjacent periods. Growth compares the two period totals.'
+    : periods.usesMid || periods.showOptionalMid
+      ? yearC == null && !periods.requiresEnd ? 'Used as the end year until an explicit end year is selected.' : 'Adds first-period and second-period results where supported.'
+      : 'This method uses the start and end years.';
+  return { optional: true, disabled: false, hint };
 }
+
+const intervalPeriod = ({ start, end }) => start === end ? String(start) : `${start}–${end}`;
+const yearTerms = { a: 'Start year', b: 'Middle year', c: 'End year' };
+const chronology = (text) => typeof text === 'string' ? text.replace(/Year ([ABC])\b/g, (_, slot) => yearTerms[slot.toLowerCase()]) : text;
 
 function operationLabel(id) {
   return COMPARE_OPERATIONS.find((op) => op.id === id)?.label ?? id;
@@ -249,7 +256,7 @@ function DiagnosticsPanel({ diagnostics }) {
               {d.entity ? ` — ${d.entity}` : ''}
               {d.years?.length ? ` — ${d.years.join(', ')}` : ''}
             </span>
-            {d.detail ? <p className="footnote">{d.detail}</p> : null}
+            {d.detail ? <p className="footnote">{chronology(d.detail)}</p> : null}
           </li>
         ))}
       </ul>
@@ -454,14 +461,13 @@ function MissingObservationSummary({ interval, allIntervals, entities, metric })
     const entity = entities?.[slot];
     const name = entity?.label ?? entity?.name ?? entity?.iso3 ?? (slot === 'a' ? 'Entity A' : 'Entity B');
     const code = entity?.iso3 ? ` (${entity.iso3})` : '';
-    const slotLabel = slot === 'a' ? 'Entity A' : 'Entity B';
-    return `${name}${code} — ${year} — ${metric?.title ?? metric?.label ?? metric?.key ?? 'selected metric'}${metric?.indicatorCode ? ` (${metric.indicatorCode})` : ''}; ${slotLabel}’s ${interval.label} result is unavailable because the required observation is missing.`;
+    return `${name}${code} — ${year} — ${metric?.title ?? metric?.label ?? metric?.key ?? 'selected metric'}${metric?.indicatorCode ? ` (${metric.indicatorCode})` : ''}. The ${intervalPeriod(interval)} result is unavailable because the required observation is missing.`;
   });
   const retained = allIntervals
     .filter((candidate) => candidate.id !== interval.id)
     .flatMap((candidate) => ['a', 'b']
       .filter((slot) => intervalEntityResultAvailable(candidate, slot))
-      .map((slot) => `${slot === 'a' ? 'Entity A' : 'Entity B'} ${candidate.label}`));
+      .map((slot) => `${entities?.[slot]?.label ?? entities?.[slot]?.name ?? entities?.[slot]?.iso3 ?? `Entity ${slot.toUpperCase()}`} ${intervalPeriod(candidate)}`));
   return (
     <p className="compare-missing-note" role="status">
       {details.join(' ')}{' '}
@@ -481,7 +487,7 @@ function IntervalObservations({ interval, metricKey, labelA, labelB }) {
   return (
     <details className="compare-interval-inputs">
       <summary>Show {years.length} required annual observation{years.length === 1 ? '' : 's'} and coverage</summary>
-      <AnalyticalTable className="compare-interval-table" label={`${interval.label} annual observations`}>
+      <AnalyticalTable className="compare-interval-table" label={`${intervalPeriod(interval)} annual observations`}>
         <table className="table">
           <thead><tr><th scope="col">Year</th><th scope="col"><MeasurementHeading label={labelA} unit={aByYear.values().next().value?.unit} /></th><th scope="col"><MeasurementHeading label={labelB} unit={bByYear.values().next().value?.unit} /></th></tr></thead>
           <tbody>{years.map((year) => (
@@ -546,7 +552,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
           </dl>
           {!result?.computable ? <UnavailableState reason={result?.reason} hint={result?.description ?? 'A valid split-period total is required.'} /> : null}
           {result?.computable ? <p className="footnote">{describeIntervalResult(result, interval, operation, metricKey)}</p> : null}
-          <p className="footnote">This method compares the total in [A, B) with the total in [B, C); it is a growth rate of period totals, not annual GDP growth.</p>
+          <p className="footnote">This method compares the first and second period totals. Each total excludes its end year. The result is growth between the totals.</p>
         </>
       ) : isUnavailablePeriodGrowth ? (
         <>
@@ -554,7 +560,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
             <div><dt>Period-total growth</dt><dd>Unavailable — a middle year is needed to define the two periods.</dd></div>
             <div><dt>Selected range</dt><dd>{interval.start} to {interval.end}</dd></div>
           </dl>
-          <UnavailableState reason={result?.reason} hint={result?.description ?? 'Select a middle year to define [A, B) and [B, C).' } />
+          <UnavailableState reason={result?.reason} hint={chronology(result?.description) ?? 'Select a middle year to define the first and second periods. Each period excludes its end year.'} />
         </>
       ) : isPeriodStatistic ? (
         <>
@@ -577,7 +583,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
           </dl>
           {!result?.computable ? <UnavailableState reason={result?.reason} hint={result?.description ?? 'The required observations are incomplete or the formula is not valid for these values.'} /> : null}
           {result?.computable ? <p className="footnote">{describeIntervalResult(result, interval, operation, metricKey)}</p> : null}
-          {isPeriodComponent ? <p className="footnote">This is one period-total input to the selected period-total-growth analysis. Growth is reported for A → C when both half-open periods are defined.</p> : null}
+          {isPeriodComponent ? <p className="footnote">This is one input to period-total growth. The full-period result compares two adjacent totals, each excluding its end year.</p> : null}
         </>
       )}
     </section>
@@ -656,14 +662,14 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
         return (
           <article className="card compare-interval-card" key={interval.id}>
             <header className="compare-interval-header">
-              <div><p className="lfl-label">Interval</p><h3>{interval.label} <span className="muted">({interval.start} → {interval.end})</span></h3></div>
+              <div><p className="lfl-label">{interval.kind === 'period_component' ? 'Period total' : 'Selected period'}</p><h3>{intervalPeriod(interval)}</h3></div>
             </header>
             <MissingObservationSummary interval={interval} allIntervals={intervals} entities={data.entities} metric={metric} />
             <div className="compare-interval-entities">
               <IntervalEntityDetail slot="a" entity={data.entities?.a} result={interval.a} interval={interval} metricKey={metricKey} operation={data.operation} label={`Entity A — ${labelA}`} />
               <IntervalEntityDetail slot="b" entity={data.entities?.b} result={interval.b} interval={interval} metricKey={metricKey} operation={data.operation} label={`Entity B — ${labelB}`} />
             </div>
-            <section className="compare-interval-gap" aria-label={`${interval.label} comparison`}>
+            <section className="compare-interval-gap" aria-label={`${intervalPeriod(interval)} comparison`}>
               <h4>Entity comparison</h4>
               {interval.kind === 'level' ? (
                 <p>{gapText}</p>
@@ -717,7 +723,7 @@ function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labe
   const formatTooltip = (value) => formatAnnualReadout(value, unit, decimals);
   const title = analysisLabel ?? operationLabel(operation);
   const entries = chartIntervals.map((interval) => ({
-    x: interval.label,
+    x: intervalPeriod(interval),
     A: interval.a?.computable ? interval.a.value : null,
     B: interval.b?.computable ? interval.b.value : null,
   }));
@@ -1064,9 +1070,9 @@ export default function Compare({
           </div>
           <div className="compare-period-row">
             {[
-              { id: 'cmp-year-a', label: 'Year A (earlier)', role: 'a', value: yearA, onChange: onYearA },
+              { id: 'cmp-year-a', label: 'Start year', role: 'a', value: yearA, onChange: onYearA },
               { id: 'cmp-year-b', label: 'Middle year', role: 'b', value: yearB, onChange: onYearB },
-              { id: 'cmp-year-c', label: 'Year C (later)', role: 'c', value: yearC, onChange: onYearC },
+              { id: 'cmp-year-c', label: 'End year', role: 'c', value: yearC, onChange: onYearC },
             ].map((control) => {
               const info = yearControlInfo(opDef.id, control.role, yearC);
               return (
@@ -1091,7 +1097,7 @@ export default function Compare({
           </EmptyState>
         ) : null}
         {!selectionError && missingRequiredYear ? (
-          <EmptyState title="This analysis needs Year A and Year C">
+          <EmptyState title="This analysis needs a start and end year">
             <p>Select an earlier year and a later year to run {selectedBasis?.label ?? 'the selected method'}. The middle year is optional and adds interval results when selected.</p>
           </EmptyState>
         ) : null}
@@ -1119,7 +1125,7 @@ export default function Compare({
                     <div className="compare-evidence-body">
                       <p>Required observation years: {data.analysis?.requiredObservationYears?.join(', ') ?? 'as selected'}{data.analysis?.boundary?.kind === 'period_half_open' ? ` · period [${data.analysis.boundary.start}, ${data.analysis.boundary.end})` : ''}.</p>
                       {data.analysis?.formula ? <p>Formula: {data.analysis.formula}</p> : null}
-                      {ignoredPeriods.length > 0 ? <p>{ignoredPeriods.map((entry) => `Year ${entry.period.toUpperCase()} (${entry.year}) is not used — ${entry.detail}`).join(' ')}</p> : null}
+                      {ignoredPeriods.length > 0 ? <p>{ignoredPeriods.map((entry) => `${yearTerms[entry.period] ?? 'Selected year'} (${entry.year}) is not used. ${chronology(entry.detail)}`).join(' ')}</p> : null}
                     </div>
                   </details>
                 </div>
@@ -1167,7 +1173,7 @@ function CompareError({ error, onRetry }) {
   return (
     <>
       <UnavailableState
-        reason={error?.message ?? 'Comparison failed.'}
+        reason={chronology(error?.message ?? 'Comparison failed.')}
         code={code}
         hint={
           unsupported

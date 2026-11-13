@@ -26,6 +26,7 @@ const COUNTRIES = {
     { iso3: 'IND', name: 'India' },
     { iso3: 'USA', name: 'United States' },
     { iso3: 'DEU', name: 'Germany' },
+    { iso3: 'GBR', name: 'United Kingdom' },
     { iso3: 'JPN', name: 'Japan' },
     { iso3: 'CHN', name: 'China' },
   ],
@@ -101,6 +102,36 @@ describe('default-country geolocation precedence', () => {
     stub = null;
     document.body.innerHTML = '';
     window.history.replaceState(null, '', '/');
+  });
+
+  it.each(['USA', 'IND', 'GBR', 'JPN', 'DEU', 'ZZZ', 'BAD!', null])('uses only a registered geographic result for Compare A (%s)', async (iso3) => {
+    stub = stubFetch([['/api/geo/country', { iso3, source: iso3 ? 'geoip' : 'fallback' }],
+      ['/api/years', YEARS], ['/api/countries', COUNTRIES], ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
+    const { cleanup } = renderApp('/compare/');
+    await flushReact(act);
+    const query = new URLSearchParams(window.location.search);
+    expect(query.get('cmpEntityA')).toBe(COUNTRIES.countries.some(row => row.iso3 === iso3) ? `country:${iso3}` : null);
+    expect(query.get('cmpEntityB')).toBeNull();
+    expect(geoCalls(stub)).toHaveLength(1);
+    expect(stub.calls.some(url => url.includes('/api/compare?'))).toBe(false);
+    cleanup();
+  });
+
+  it('keeps a manual Compare selection when geolocation resolves later', async () => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    stub = stubFetch([['/api/geo/country', () => pending], ['/api/years', YEARS], ['/api/countries', COUNTRIES],
+      ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
+    const { container, cleanup } = renderApp('/compare/');
+    await flushReact(act);
+    act(() => container.querySelector('#cmp-a').click());
+    const japan = [...document.querySelectorAll('.combo-option')].find(option => option.textContent.includes('Japan'));
+    act(() => japan.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    release({ ok: true, status: 200, headers: new Headers(), json: async () => ({ iso3: 'USA', source: 'geoip' }) });
+    await flushReact(act);
+    expect(new URLSearchParams(window.location.search).get('cmpEntityA')).toBe('country:JPN');
+    expect(new URLSearchParams(window.location.search).get('cmpEntityB')).toBeNull();
+    cleanup();
   });
 
   it('geo USA becomes the initial default', async () => {

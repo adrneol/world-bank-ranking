@@ -418,6 +418,12 @@ npm run build   # production build
 
 ## Production Deployment
 
+The frontend build emits a static page for each research workspace, a public JSON data catalog and a PNG social preview. On Vercel, the build uses the platform-provided `VERCEL_PROJECT_PRODUCTION_URL` for absolute canonical and social URLs and the sitemap. Without a verified production hostname, local builds omit those absolute URLs and the sitemap. The public documentation uses the same `VITE_API_BASE_URL` as the frontend when available.
+
+The catalog documents `/api/public/` GET routes. They use the existing analytical handlers and validation without scheduling the UI routes’ automatic refresh checks. The public namespace is limited to 60 requests per minute per server-resolved client address. Manual refresh remains on its separate authorization path.
+
+Geolocation uses the existing provider and economy registry. Forwarded addresses are ignored unless Express already has a verified proxy trust boundary. A deployment that cannot verify its client address leaves the initial country choice empty.
+
 Deploy the backend first, then point the frontend at it. The frontend
 receives the API base URL through `VITE_API_BASE_URL` in deployed
 environments:

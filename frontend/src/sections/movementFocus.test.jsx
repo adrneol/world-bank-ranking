@@ -81,6 +81,26 @@ describe.each(FAMILIES)('movement family focus ($id)', ({ Component, endpoint, g
     // The focus name renders even before tables are opened.
     expect(ctx.container.textContent).toContain('United States');
 
+    // The mode switch presents the corresponding backend focus results for
+    // every period without making a second analytical request.
+    const region = ctx.container.querySelector('.movement-periods');
+    const mode = ctx.container.querySelector('[aria-label="Comparison universe"] button:last-child');
+    expect(mode).toBeTruthy();
+    const requestCount = ctx.stub.calls.length;
+    expect(region.querySelectorAll('.movement-period')).toHaveLength(fixtures[id].observed.length);
+    act(() => mode.click());
+    expect(mode.getAttribute('aria-pressed')).toBe('true');
+    const active = [...region.querySelectorAll('.movement-period')];
+    for (const [index, observed] of fixtures[id].observed.entries()) {
+      const key = observed.period ?? observed.year;
+      const common = fixtures[id].likeForLike.find((entry) => (entry.period ?? entry.year) === key);
+      expect(active[index].textContent).toContain(String(key));
+      if (common?.focus?.rank != null) {
+        expect(active[index].textContent).toContain(`#${common.focus.rank} / ${common.focus.denominator}`);
+      }
+    }
+    expect(ctx.stub.calls.length).toBe(requestCount);
+
     // Open collapsed tables (re-query per click: toggles detach old nodes).
     for (let i = 0; i < 6; i += 1) {
       const btn = [...ctx.container.querySelectorAll('button')].find((el) => /^Show /.test(el.textContent));

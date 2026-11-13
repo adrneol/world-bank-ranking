@@ -1,5 +1,5 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
+import { chartTooltipStyle, CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
 import { formatChartValue, formatTickValue, isPercentageUnit } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
@@ -24,7 +24,7 @@ export default function IntervalLineChart({ entries = [], series = [], unit = nu
             />
             <Tooltip
               formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={chartTooltipStyle}
             />
             {series.map((item, index) => (
               <Line

@@ -1,6 +1,6 @@
 ---
 name: economic-research-ui-design
-description: Design or review the World Bank research application's economic charts, evidence tables, rankings, comparison flows, Movement layouts, and mobile or desktop interfaces. Use for visual or interaction work on analytical surfaces, including chart modes, dual-axis encoding, legends, tooltips, custom selectors and responsive evidence.
+description: Design or review the World Bank research application's economic charts, evidence tables, rankings, comparison flows, Movement layouts, and mobile or desktop interfaces. Use for visual or interaction work on analytical surfaces, including chart modes, dual-axis encoding, legends, tooltips, custom selectors responsive evidence, dual themes, Movement presentation and mobile selectors.
 ---
 
 # Economic research UI design
@@ -14,6 +14,13 @@ Before moving a control, chart, or table, map its current information, behavior 
 - Use [Interaction and acceptance](references/interaction-and-acceptance.md) for controls, responsive behavior, accessibility and before/after verification.
 
 ## Project requirements
+
+- Use the selected registry economy for titles, highlights, verification and labels. When no valid economy is selected, offer a neutral prompt. Geolocation may initialize Compare Entity A after explicit choices are resolved. Keep Entity B empty until chosen.
+- Provide neutral, crawlable research pages with unique metadata, independently branded social previews and discoverable documentation for bounded public reads. Keep machine discovery separate from privileged authorization and preserve WDI source identity.
+- Organize Movement into period comparison, universe and coverage, decomposition where applicable, and evidence. Use a ledger for indicator monitoring and one staged editor for country groups. Rank and YoY place their complete ranking first and country verification second.
+
+- Preserve the light theme’s neutral surfaces and navy masthead. Use low-glare slate for dark mode, centralized semantic tokens, and a compact icon button in the header. Persist preference before first paint and respect reduced motion. Theme switching leaves charts, data and navigation state mounted.
+- Lead Movement with the active universe and comparable periods. Offer Observed and Like-for-like only where both exist, with the original values and evidence accessible in their corresponding mode. Use Start year, Middle year and End year, plus actual dates for results and tables. Check information parity before signing off on a redesigned view.
 
 - Use the shared application-owned selection controls for dropdowns. Native browser select popups are prohibited. Preserve keyboard, touch and screen-reader operation. Prefer segmented controls for binary modes.
 - Draw enabled annual series in one compact plot with one timeline, fixed-position value axes, and viewport-aware Auto scaling alongside Fixed selected-period scaling. Use bars for every applicable numeric series in Bar mode, including annual growth and inflation, and lines for every series in Line mode. Show subtle primary-axis gridlines and a clear zero reference when zero is in use.

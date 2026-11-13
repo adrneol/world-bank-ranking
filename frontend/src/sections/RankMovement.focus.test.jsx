@@ -355,8 +355,8 @@ describe('RankMovement focus-country correctness', () => {
     const row = focusRow(ctx.container);
     expect(row).toBeTruthy();
     expect(row.textContent).toContain('Japan');
-    for (const text of ["Japan's change", 'Relation to Japan', 'Outside-common growth economies above Japan']) {
-      expect(ctx.container.textContent).toContain(text);
+    for (const text of [ 'Japan growth by interval', 'Relation to Japan', 'Outside-common growth economies above Japan']) {
+      expect(ctx.container.textContent + (ctx.container.querySelector('[aria-label="Japan growth by interval"]')?.getAttribute('aria-label') ?? '')).toContain(text);
     }
     expect(ctx.container.querySelector('#mv-gq')?.placeholder).toBe('e.g. Japan, JPN, or #12');
     expect(await relationOptionLabels(ctx.container, 'mv-gcrel')).toEqual(
@@ -366,6 +366,15 @@ describe('RankMovement focus-country correctness', () => {
       expect(ctx.container.textContent).not.toContain(text);
     }
     expect(ctx.container.textContent).not.toContain('India');
+    const panel = ctx.container.querySelector('[aria-label="Japan growth by interval"]');
+    expect(panel.textContent).toContain('#12 / 150');
+    expect(panel.textContent).toContain('+2.50 percentage points');
+    const calls = ctx.stub.calls.length;
+    act(() => ctx.container.querySelector('[aria-label="Comparison universe"] button:last-child').click());
+    expect(panel.textContent).toContain('#10 / 140');
+    expect(panel.textContent).toContain('+2.40 percentage points');
+    expect(panel.textContent).not.toContain('#12 / 150');
+    expect(ctx.stub.calls.length).toBe(calls);
   });
 
   it('IDN two-year: Indonesia is the focus with no India narrative', async () => {

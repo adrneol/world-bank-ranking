@@ -5,10 +5,8 @@
  * unit-testable. The single SearchableSelect consumes these; no page owns
  * its own positioning math.
  *
- * Coordinate system: CSS pixels relative to the *visual* viewport
- * (window.visualViewport when present, else window.innerWidth/Height), which
- * is what `position: fixed` popovers are laid out against. Callers pass the
- * trigger's bounding rect in the same system (getBoundingClientRect).
+ * Compute bounds in visual-viewport pixels, then translate them back into
+ * the fixed-position coordinate system used by the portalled element.
  */
 
 export const POPOVER_EDGE_MARGIN = 8;
@@ -49,7 +47,22 @@ export function viewportSize() {
   return {
     width: Math.round(vv?.width ?? window.innerWidth),
     height: Math.round(vv?.height ?? window.innerHeight),
+    offsetLeft: vv?.offsetLeft ?? 0,
+    offsetTop: vv?.offsetTop ?? 0,
   };
+}
+
+export function anchoredPlacement(rect, contentHeight) {
+  const viewport = viewportSize();
+  const x = viewport.offsetLeft ?? 0;
+  const y = viewport.offsetTop ?? 0;
+  const placement = computePopoverPlacement({
+    trigger: { top: rect.top - y, bottom: rect.bottom - y, left: rect.left - x, width: rect.width },
+    viewportW: viewport.width, viewportH: viewport.height, contentHeight,
+  });
+  return { ...placement, left: placement.left + x,
+    top: placement.top == null ? null : placement.top + y,
+    bottom: placement.bottom == null ? null : window.innerHeight - y - viewport.height + placement.bottom };
 }
 
 /**
@@ -101,8 +114,8 @@ export function computePopoverPlacement({
   const width = Math.round(Math.min(Math.max(t.width, POPOVER_MIN_WIDTH), Math.min(POPOVER_MAX_WIDTH, usableWidth)));
   const left = Math.round(clamp(t.left, margin, Math.max(margin, viewW - margin - width)));
 
-  const below = viewH - t.bottom - margin;
-  const above = t.top - margin;
+  const below = viewH - t.bottom - margin - POPOVER_GAP;
+  const above = t.top - margin - POPOVER_GAP;
   let dir = 'down';
   if (below >= need) {
     dir = 'down';
@@ -112,12 +125,15 @@ export function computePopoverPlacement({
     dir = below >= above ? 'down' : 'up';
   }
   const space = dir === 'down' ? below : above;
-  const maxHeight = Math.round(clamp(Math.min(space, POPOVER_MAX_HEIGHT), POPOVER_MIN_HEIGHT, POPOVER_MAX_HEIGHT));
+  const usableHeight = Math.max(1, viewH - margin * 2);
+  const maxHeight = Math.round(Math.min(usableHeight, POPOVER_MAX_HEIGHT, Math.max(space, POPOVER_MIN_HEIGHT)));
+  const edge = dir === 'down' ? t.bottom + POPOVER_GAP : viewH - t.top + POPOVER_GAP;
+  const inset = Math.round(clamp(edge, Math.min(margin, viewH - maxHeight), Math.max(0, viewH - maxHeight - margin)));
 
   if (dir === 'down') {
-    return { dir, top: Math.round(t.bottom + POPOVER_GAP), bottom: null, left, width, maxHeight };
+    return { dir, top: inset, bottom: null, left, width, maxHeight };
   }
-  return { dir, top: null, bottom: Math.round(viewH - t.top + POPOVER_GAP), left, width, maxHeight };
+  return { dir, top: null, bottom: inset, left, width, maxHeight };
 }
 
 export default {

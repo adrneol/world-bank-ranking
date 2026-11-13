@@ -11,15 +11,16 @@
  * its own legend label.
  */
 export const CHART_COLORS = Object.freeze({
-  primary: '#101828',
-  secondary: '#2a7f6f',
-  tertiary: '#D55E00',
-  grid: '#e2e2df',
-  zero: '#9aa0a6',
-  muted: '#5f6368',
+  primary: 'var(--chart-series-0)',
+  secondary: 'var(--chart-secondary)',
+  tertiary: 'var(--chart-tertiary)',
+  grid: 'var(--chart-grid)',
+  zero: 'var(--chart-zero)',
+  muted: 'var(--muted)',
 });
 
 export const CHART_HEIGHT = 260;
+export const chartTooltipStyle = { fontSize: 12, backgroundColor: 'var(--surface)', borderColor: 'var(--line)', color: 'var(--ink)' };
 
 /**
  * Responsive Y-axis width (presentation only, Phase 2 R-05/Phase 11).

@@ -10,7 +10,7 @@ import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function Coverage({ year, metricKey, fromYear, toYear, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
+export default function Coverage({ year, metricKey, fromYear, toYear, subject = 'gdp_per_capita', country, focusName = country ?? 'Selected economy' }) {
   // The backend requires fromYear AND toYear together for an explanation;
   // omit both when no comparison year is selected.
   const compare = fromYear != null && toYear != null ? { fromYear, toYear } : {};

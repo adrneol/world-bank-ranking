@@ -143,7 +143,7 @@ describe('application focus-country behavior', () => {
     window.history.replaceState(null, '', '/');
   });
 
-  it('TEST 7 — omitted focus props resolve to the India product default', async () => {
+  it('does not request a Movement result when the focus prop is omitted', async () => {
     stub = stubFetch([[`/api/comparison/level`, movementPayload({ iso3: 'IND', name: 'India' }, 'USA', 'United States')]]);
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -167,18 +167,12 @@ describe('application focus-country behavior', () => {
       );
     });
     await flushReact(act);
-    // No country/focusName props: the documented default contract is India,
-    // requested as IND — never a different country.
-    expect(stub.calls.some((href) => href.includes('country=IND'))).toBe(true);
-    expect(container.textContent).toContain('Above India');
-    openCollapsibleLists(container);
-    await flushReact(act);
-    expect(container.querySelector('tr.row-focus')?.textContent).toContain('India');
+    expect(stub.calls.some((href) => href.includes('/api/comparison/level'))).toBe(false);
     act(() => root.unmount());
     container.remove();
   });
 
-  it('TEST 8 — default movement view (no ?country=) is India', async () => {
+  it('prompts for an economy when Movement has no focus', async () => {
     stub = stubFetch([
       ['/api/years', YEARS],
       ['/api/countries', COUNTRIES],
@@ -188,11 +182,9 @@ describe('application focus-country behavior', () => {
     const { container, cleanup } = renderApp('/?view=movement');
     await flushReact(act);
     const header = container.querySelector('.app-header');
-    expect(header.querySelector('h1').textContent).toBe('India — 2004 → 2014');
-    expect(container.textContent).toContain('Above India');
-    openCollapsibleLists(container);
-    await flushReact(act);
-    expect(container.querySelector('tr.row-focus')?.textContent).toContain('India');
+    expect(header.querySelector('h1').textContent).toBe('Select a focus economy');
+    expect(container.querySelector('#f-country')).toBeTruthy();
+    expect(stub.calls.some(url => url.includes('/api/comparison/level'))).toBe(false);
     cleanup();
   });
 

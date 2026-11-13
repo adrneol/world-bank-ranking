@@ -30,6 +30,7 @@ import {
   formatUtcDateTimeSeconds,
   formatVintageDate,
 } from '../utils/format.js';
+import IndicatorMonitor from '../components/IndicatorMonitor.jsx';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 /** Full refreshes stream dozens of indicator payloads; bound the POST at 10 min. */
@@ -190,7 +191,7 @@ export default function DataStatus({ onRefreshed }) {
     ]),
   );
   const labelOf = (metricKey) =>
-    activeStepByKey.get(metricKey)?.label ?? activeLabels[metricKey] ?? metricKey;
+    activeStepByKey.get(metricKey)?.label ?? activeLabels[metricKey];
   const runningKey = (() => {
     if (!polling || !useLive) return null;
     return typeof liveStage === 'string' && liveStage.startsWith('indicator:')
@@ -410,7 +411,7 @@ export default function DataStatus({ onRefreshed }) {
       ) : null}
       {hasData ? (
         <>
-          <h3>Data status</h3>
+          <h3>Dataset and freshness</h3>
           <dl className="facts facts-grid">
             <div>
               <dt>Dataset</dt>
@@ -478,7 +479,7 @@ export default function DataStatus({ onRefreshed }) {
               </dd>
             </div>
             <div>
-              <dt>Database</dt>
+              <dt>Serving database</dt>
               <dd>{databaseLabel(data.database)}</dd>
             </div>
           </dl>
@@ -544,13 +545,13 @@ export default function DataStatus({ onRefreshed }) {
                   <p className="refresh-count">
                     Indicators checked: {doneCount} / {activeKeys.length}
                   </p>
-                  <progress value={doneCount} max={Math.max(activeKeys.length, 1)}>
+                  {polling && activeKeys.length ? <progress aria-label="Indicator checks completed" value={doneCount} max={activeKeys.length}>
                     {doneCount} / {activeKeys.length}
-                  </progress>
+                  </progress> : null}
                   {refreshOutcomeText ? (
                     <p className="refresh-count">Last run: {refreshOutcomeText}</p>
                   ) : null}
-                  {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey)}</p> : null}
+                  {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey) ?? runningKey}</p> : null}
                 </>
               ) : null}
               {!showRecoveryCalm ? (
@@ -560,67 +561,7 @@ export default function DataStatus({ onRefreshed }) {
                 onToggle={(event) => setDetailsOpen(event.target.open)}
               >
                 <summary>{detailsOpen ? 'Hide refresh details ▲' : 'Show refresh details ▼'}</summary>
-                {activeKeys.length > 0 ? (
-                  <ul className="checklist">
-                    {activeKeys.map((metricKey) => {
-                      const step = activeStepByKey.get(metricKey);
-                      const label = labelOf(metricKey);
-                      if (step?.status === 'published') {
-                        return (
-                          <li key={metricKey} className="step step-done">
-                            <span className="step-icon" aria-hidden="true">
-                              ✓
-                            </span>
-                            <span className="step-label">{label}</span>
-                            <span className="step-state">updated</span>
-                          </li>
-                        );
-                      }
-                      if (step?.status === 'unchanged') {
-                        return (
-                          <li key={metricKey} className="step step-done">
-                            <span className="step-icon" aria-hidden="true">
-                              ✓
-                            </span>
-                            <span className="step-label">{label}</span>
-                            <span className="step-state">up to date</span>
-                          </li>
-                        );
-                      }
-                      if (step?.status === 'failed') {
-                        return (
-                          <li key={metricKey} className="step step-failed">
-                            <span className="step-icon" aria-hidden="true">
-                              ✗
-                            </span>
-                            <span className="step-label">{label}</span>
-                            <span className="step-state">failed{step.error ? `: ${step.error}` : ''}</span>
-                          </li>
-                        );
-                      }
-                      if (polling && runningKey === metricKey) {
-                        return (
-                          <li key={metricKey} className="step step-active">
-                            <span className="step-icon" aria-hidden="true">
-                              →
-                            </span>
-                            <span className="step-label">{label}</span>
-                            <span className="step-state">refreshing</span>
-                          </li>
-                        );
-                      }
-                      return (
-                        <li key={metricKey} className="step step-waiting">
-                          <span className="step-icon" aria-hidden="true">
-                            □
-                          </span>
-                          <span className="step-label">{label}</span>
-                          <span className="step-state">waiting</span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
+                <IndicatorMonitor keys={activeKeys} steps={activeStepByKey} labelOf={labelOf} polling={polling} runningKey={runningKey} />
                 {!polling && (refreshTerminalLive || refreshTerminalPersisted) ? (
                   <dl className="facts facts-grid refresh-times">
                     <div>

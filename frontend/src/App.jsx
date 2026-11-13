@@ -18,7 +18,6 @@ import {
   hydrateRegistry,
   metricKeysForSubject,
   resolveMetricKey,
-  subjectLabel,
   subjectOf,
 } from './config/metrics.js';
 import { entityToSpec } from './components/entities.js';
@@ -28,8 +27,10 @@ import { Field } from './components/ui.jsx';
 import FocusPicker from './components/FocusPicker.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
 import NavDrawer, { NavDrawerTrigger } from './components/NavDrawer.jsx';
+import ThemeToggle from './components/ThemeToggle.jsx';
 import { BootstrapError, BootstrapStillConnecting, BootstrapWarmup } from './components/BootstrapStatus.jsx';
 import { siteMetadata } from './config/site.js';
+import { pagePath, publicPages, viewAtPath } from './config/publicPages.js';
 import { getHeaderContext } from './utils/headerContext.js';
 import Home from './sections/Home.jsx';
 import About from './sections/About.jsx';
@@ -63,7 +64,7 @@ function readUrlState() {
 // Unknown values fall back to the existing defaults.
 function readRankSub() {
   const value = new URLSearchParams(window.location.search).get('rankSub');
-  return value === 'table' ? 'table' : 'verify';
+  return value === 'verify' ? 'verify' : 'table';
 }
 
 function readYoySub() {
@@ -99,8 +100,8 @@ function defaultFilters() {
     metric: 'nominal_current',
     neighbors: 5,
     fromYear: '',
-    view: 'home',
-    country: 'IND',
+    view: viewAtPath(window.location.pathname),
+    country: '',
     cmpEntityA: '',
     cmpEntityB: '',
     cmpLabelA: '',
@@ -223,10 +224,11 @@ export default function App() {
   const [yoySub, setYoySub] = useState(readYoySub);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTriggerRef = useRef(null);
-  // Default-country precedence (Phase 3, Part B): explicit URL country >
-  // in-session user choice > IP-derived default > India fallback. The ref
-  // records the first two; geolocation may only fill the gap before either
-  // exists. popstate-driven URL countries count as explicit.
+  const compareChoiceRef = useRef(false);
+  const compareHasSelectionRef = useRef(Boolean(readUrlState().cmpEntityA));
+  const geoRequestedRef = useRef(false);
+  const [geoCountry, setGeoCountry] = useState(null);
+  // Addressable focus and in-session choices take priority over location.
   const countryExplicitRef = useRef(
     new URLSearchParams(window.location.search).get('country') != null &&
       new URLSearchParams(window.location.search).get('country') !== '',
@@ -445,13 +447,11 @@ export default function App() {
     const basis = ['growth', 'period_total', 'period_average', ...PRICES_BASIS_IDS, ...TRADE_BASIS_IDS, ...CAPITAL_BASIS_IDS, ...FX_BASIS_IDS, ...EXTERNAL_BASIS_IDS, ...POPULATION_BASIS_IDS].includes(filters.basis)
       ? filters.basis
       : 'level';
-    // Focus country (Phase 1: generic focus abstraction, IND default).
-    // Omitted/invalid URL values resolve to IND; only a valid explicit ISO3
-    // selects another country. The display name comes from backend metadata.
-    const rawCountry = String(filters.country ?? 'IND').trim().toUpperCase();
-    const country = /^[A-Z]{3}$/.test(rawCountry) ? rawCountry : 'IND';
-    const focusName =
-      eligibleCountries.find((c) => c.iso3 === country)?.name ?? (country === 'IND' ? 'India' : country);
+    // Resolve the focus and its display name from the economy registry.
+    const rawCountry = String(filters.country ?? '').trim().toUpperCase();
+    const selectedCountry = eligibleCountries.find((c) => c.iso3 === rawCountry);
+    const country = selectedCountry?.iso3 ?? '';
+    const focusName = selectedCountry?.name ?? '';
     // The analysis subject is derived from the metric key (single source of
     // truth): nominal_* metrics imply GDP per capita, total_* imply Total GDP.
     const subject = subjectOf(metric);
@@ -503,42 +503,31 @@ export default function App() {
 
   const rankSubs = useMemo(
     () => [
+      { id: 'table', label: 'Full ranking' },
       { id: 'verify', label: `Verify ${effective.focusName}` },
-      { id: 'table', label: 'Full table' },
     ],
     [effective.focusName],
   );
   const yoySubs = useMemo(
     () => [
-      { id: 'ranking', label: 'Ranking' },
+      { id: 'ranking', label: 'YoY ranking' },
       { id: 'verify', label: `Verify ${effective.focusName}` },
     ],
     [effective.focusName],
   );
 
-  // Compare defaults lazy-init (Phase 3, Part C): exactly one canonical
-  // rule. When the Compare workspace becomes active with an empty entity
-  // slot, that slot initializes from the CURRENT focus country
-  // (A = focus, B = USA unless focus is USA, then CHN). Non-empty slots —
-  // user selections, explicit URL params, deep-link prefills — are never
-  // touched, so focus changes elsewhere never rewrite Compare.
   useEffect(() => {
-    if (effective.view !== 'compare') return;
-    setFilters((prev) => {
-      const a = prev.cmpEntityA != null ? String(prev.cmpEntityA).trim() : '';
-      const b = prev.cmpEntityB != null ? String(prev.cmpEntityB).trim() : '';
-      if (a !== '' && b !== '') return prev;
-      const focus = String(effective.country ?? 'IND').trim().toUpperCase() || 'IND';
-      return {
-        ...prev,
-        cmpEntityA: a !== '' ? prev.cmpEntityA : `country:${focus}`,
-        cmpEntityB: b !== '' ? prev.cmpEntityB : `country:${focus === 'USA' ? 'CHN' : 'USA'}`,
-      };
-    });
-    // Runs when Compare activates or when its slots/focus change while
-    // active; filling one slot never clears the other.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effective.view, filters.cmpEntityA, filters.cmpEntityB, effective.country]);
+    if (effective.view !== 'compare' || compareChoiceRef.current || effective.cmpEntityA || !geoCountry ||
+      !eligibleCountries.some(({ iso3 }) => iso3 === geoCountry)) return;
+    compareChoiceRef.current = true;
+    setFilters(prev => prev.cmpEntityA ? prev : { ...prev, cmpEntityA: `country:${geoCountry}` });
+  }, [effective.view, effective.cmpEntityA, geoCountry, eligibleCountries]);
+
+  useEffect(() => {
+    const [title, description] = publicPages[effective.view] ?? publicPages.home;
+    document.title = `${title} | WDI Research Explorer`;
+    document.querySelector('meta[name="description"]')?.setAttribute('content', description);
+  }, [effective.view]);
 
   // Mirror effective state to the URL (UI state only, never business logic).
   // History model (Phase 3, Part D): the first sync replaces (normalizing
@@ -567,9 +556,7 @@ export default function App() {
     if (effective.yearB != null) query.set('yearB', effective.yearB);
     if (effective.yearMid != null) query.set('yearMid', effective.yearMid);
     if (effective.basis !== 'level') query.set('basis', effective.basis);
-    // Country is addressable but omitted for the IND default, so existing
-    // India links keep working unchanged and stay clean.
-    if (effective.country !== 'IND') query.set('country', effective.country);
+    if (effective.country) query.set('country', effective.country);
     query.set('view', effective.view);
     if (effective.cmpEntityA !== '') query.set('cmpEntityA', effective.cmpEntityA);
     if (effective.cmpEntityB !== '') query.set('cmpEntityB', effective.cmpEntityB);
@@ -586,7 +573,7 @@ export default function App() {
     if (effective.cmpMode !== 'observed') query.set('cmpMode', effective.cmpMode);
     if (effective.view === 'rank') query.set('rankSub', rankSub);
     if (effective.view === 'yoy') query.set('yoySub', yoySub);
-    const next = `?${query.toString()}`;
+    const next = `${pagePath(effective.view)}?${query.toString()}`;
     if (window.location.search === next) {
       lastUrlRef.current = next;
       lastNavRef.current = navKey(effective, rankSub, yoySub);
@@ -617,14 +604,11 @@ export default function App() {
     [setFilter],
   );
 
-  // IP-derived initial default (mount-only): when the URL carries no
-  // explicit country, ask the backend once for a validated ISO3. Applied
-  // only if the user has not chosen explicitly in the meantime; any
-  // failure, invalid value or unknown country keeps the India fallback.
-  // Runs in parallel with the years bootstrap (which gates first paint),
-  // so no India→detected flash is visible in the normal case.
+  // One initial location lookup. Compare uses its own entity state, and a
+  // direct Compare visit leaves the separate focus selection untouched.
+  const inCompare = effective.view === 'compare';
   useEffect(() => {
-    if (countryExplicitRef.current) return undefined;
+    if (geoRequestedRef.current || (inCompare && compareHasSelectionRef.current) || (countryExplicitRef.current && !inCompare)) return undefined;
     const controller = new AbortController();
     let settled = false;
     api
@@ -632,23 +616,25 @@ export default function App() {
       .then((result) => {
         if (settled || controller.signal.aborted) return;
         settled = true;
+        geoRequestedRef.current = true;
         const iso3 = String(result?.iso3 ?? '').trim().toUpperCase();
-        if (!/^[A-Z]{3}$/.test(iso3)) return;
+        if (result?.source !== 'geoip' || !/^[A-Z]{3}$/.test(iso3)) return;
+        setGeoCountry(iso3);
+        if ((new URLSearchParams(window.location.search).get('view') ?? viewAtPath(window.location.pathname)) === 'compare') return;
         if (countryExplicitRef.current) return;
         setFilters((prev) => {
-          const current = String(prev.country ?? 'IND').trim().toUpperCase();
-          if (current !== 'IND') return prev;
+          if (prev.country) return prev;
           return { ...prev, country: iso3 };
         });
       })
       .catch(() => {
-        // Silent: fallback country stays active.
+        if (!controller.signal.aborted) geoRequestedRef.current = true;
       });
     return () => {
       settled = true;
       controller.abort();
     };
-  }, []);
+  }, [inCompare]);
 
   // Browser history restore: popstate (Back/Forward) replaces the whole
   // filter state from the URL, including sub-tabs. The mirror effect skips
@@ -658,6 +644,7 @@ export default function App() {
   useEffect(() => {
     const onPopState = () => {
       const query = new URLSearchParams(window.location.search);
+      compareHasSelectionRef.current = Boolean(query.get('cmpEntityA'));
       if (query.get('country') !== null && query.get('country') !== '') {
         countryExplicitRef.current = true;
       }
@@ -829,19 +816,22 @@ export default function App() {
               yearB={effective.yearB}
             />
           </div>
-          <nav className="mainnav" aria-label="Site navigation">
-            <Tabs views={INFO_VIEWS} active={view} onChange={(v) => setFilter('view', v)} />
-            <NavDrawerTrigger
-              buttonRef={drawerTriggerRef}
-              label={
-                isAnalyticalView(view)
-                  ? (ANALYTICAL_VIEWS.find((v) => v.id === view)?.label ?? 'Analysis')
-                  : 'Explore analysis'
-              }
-              expanded={drawerOpen}
-              onClick={() => setDrawerOpen(true)}
-            />
-          </nav>
+          <div className="header-actions">
+            <nav className="mainnav" aria-label="Site navigation">
+              <Tabs views={INFO_VIEWS} active={view} onChange={(v) => setFilter('view', v)} />
+              <NavDrawerTrigger
+                buttonRef={drawerTriggerRef}
+                label={
+                  isAnalyticalView(view)
+                    ? (ANALYTICAL_VIEWS.find((v) => v.id === view)?.label ?? 'Analysis')
+                    : 'Explore analysis'
+                }
+                expanded={drawerOpen}
+                onClick={() => setDrawerOpen(true)}
+              />
+            </nav>
+            <ThemeToggle />
+          </div>
           <NavDrawer
             open={drawerOpen}
             destinations={ANALYTICAL_VIEWS}
@@ -948,7 +938,11 @@ export default function App() {
           </p>
         ) : null}
 
-        <main id="main" key={`${dataVersion}:${view}:${effective.country}`}>
+        <main id="main" key={`${dataVersion}:${view}`}>
+          {filtersReady && !effective.country && ['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit'].includes(view) ?
+            <p className="status" role="status">Select a focus economy to open this research view.</p> : null}
+          {filtersReady && !effective.country && view === 'movement' ?
+            <FocusPicker countries={eligibleCountries} value={effective.country} onChange={setCountry} /> : null}
           {view === 'home' ? (
             <Home
               sourceName={site.sourceName}
@@ -960,26 +954,26 @@ export default function App() {
           {view === 'about' ? (
             <About site={site} onOpenView={(v) => setFilter('view', v)} />
           ) : null}
-          {filtersReady && view === 'overview' ? (
+          {filtersReady && effective.country && view === 'overview' ? (
             <>
               <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={availableYears} metricYears={yearsData?.perMetric} onCompareEntities={openCompareWith} />
               <YearComparison year={effective.year} subject={effective.subject} country={effective.country} />
             </>
           ) : null}
-          {filtersReady && view === 'data' ? (
+          {filtersReady && effective.country && view === 'data' ? (
             <YearlyTable startYear={effective.startYear} endYear={effective.endYear} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
-          {filtersReady && view === 'rank' ? (
+          {filtersReady && effective.country && view === 'rank' ? (
             <div role="tabpanel" id="panel-rank" aria-labelledby="tab-rank">
               <SubTabs options={rankSubs} active={rankSub} onChange={setRankSub} label="Rank workspace views" />
               {rankSub === 'verify' ? (
                 <LevelVerification year={effective.year} metricKey={effective.metric} neighbors={effective.neighbors} country={effective.country} focusName={effective.focusName} />
               ) : (
-                <FullRanking year={effective.year} metricKey={effective.metric} country={effective.country} />
+                <FullRanking year={effective.year} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} />
               )}
             </div>
           ) : null}
-          {filtersReady && view === 'movement' ? (
+          {filtersReady && effective.country && view === 'movement' ? (
             <RankMovement
               availableYears={availableYears}
               yearA={effective.yearA}
@@ -998,11 +992,8 @@ export default function App() {
               onCountry={(v) => setCountry(v)}
             />
           ) : null}
-          {filtersReady && view === 'yoy' ? (
+          {filtersReady && effective.country && view === 'yoy' ? (
             <div role="tabpanel" id="panel-yoy" aria-labelledby="tab-yoy">
-              <p className="denominators">
-                YoY ranking orders countries by <strong>percentage change</strong>, not {subjectLabel(effective.subject)} level.
-              </p>
               <SubTabs options={yoySubs} active={yoySub} onChange={setYoySub} label="YoY workspace views" />
               {yoySub === 'ranking' ? (
                 <YoyRanking year={effective.year} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} />
@@ -1027,7 +1018,7 @@ export default function App() {
               yearC={effective.cmpYearC}
               operation={effective.cmpOp}
               groupMode={effective.cmpMode}
-              onEntityA={(v) => setFilter('cmpEntityA', v)}
+              onEntityA={(v) => { compareChoiceRef.current = true; compareHasSelectionRef.current = Boolean(v); setFilter('cmpEntityA', v); }}
               onEntityB={(v) => setFilter('cmpEntityB', v)}
               onLabelA={(v) => setFilter('cmpLabelA', v)}
               onLabelB={(v) => setFilter('cmpLabelB', v)}
@@ -1041,10 +1032,10 @@ export default function App() {
               onGroupMode={(v) => setFilter('cmpMode', v)}
             />
           ) : null}
-          {filtersReady && view === 'coverage' ? (
+          {filtersReady && effective.country && view === 'coverage' ? (
             <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
-          {filtersReady && view === 'audit' ? (
+          {filtersReady && effective.country && view === 'audit' ? (
             <AuditSource year={effective.year} metricKey={effective.metric} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
           {filtersReady && view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
@@ -1055,6 +1046,7 @@ export default function App() {
             Source data: World Bank World Development Indicators. All ranks shown here are calculated by this
             application — the World Bank does not publish them.
           </p>
+          <a href="/public-data/">Public economic data API</a>
         </footer>
       </div>
     </div>

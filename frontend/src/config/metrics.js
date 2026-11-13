@@ -746,7 +746,7 @@ export function movementBases(metricKey, yearA = null, yearB = null) {
   const period = Array.isArray(caps?.periodAggregation) ? caps.periodAggregation : [];
   const consecutive = yearA != null && yearB != null && Math.abs(Number(yearB) - Number(yearA)) === 1;
   const growthLabel = isFlow
-    ? 'Annual flow (endpoint B vs A)'
+    ? 'Annual flow (end year vs start year)'
     : consecutive
       ? 'Annual YoY'
       : 'Period endpoint change';

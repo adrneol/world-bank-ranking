@@ -69,7 +69,9 @@ export default function OverviewHistory({ country, displayName, historyKey, avai
             </li>;
           })}
         </ul>
-        <HistoryResults key={requestKey} country={country} ids={ids} range={range} visible={visible} chartType={chartType} domainMode={domainMode} />
+        <div className="history-results">
+          <HistoryResults key={requestKey} country={country} ids={ids} range={range} visible={visible} chartType={chartType} domainMode={domainMode} />
+        </div>
       </ChartCard>
     </section>
   );

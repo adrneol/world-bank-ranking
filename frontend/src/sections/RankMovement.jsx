@@ -11,6 +11,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExte
 import { api } from '../api/client.js';
 import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
+import { MovementModeControl, MovementResearch, MovementResearchPanel } from '../components/MovementComparison.jsx';
 import { METRICS, SUBJECTS, activeRegistryVersion, isCapitalMetricKey, isExternalMetricKey, isFxMetricKey, isPopulationMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBasisOptions, subjectOf } from '../config/metrics.js';
 import PricesMovement from './PricesMovement.jsx';
 import TradeMovement from './TradeMovement.jsx';
@@ -48,7 +49,7 @@ function signMeaning(n) {
 
 const RANKING_BASIS = Object.freeze({ LEVEL: 'level', GROWTH: 'growth', PERIOD_TOTAL: 'period_total', PERIOD_AVERAGE: 'period_average' });
 
-function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, basis = 'level', country = 'IND', countries = [], onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry, onSwap }) {
+function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, basis = 'level', country, countries = [], onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry, onSwap }) {
   const validMidYears = (availableYears ?? []).filter(
     (y) => yearA != null && yearB != null && y > Math.min(yearA, yearB) && y < Math.max(yearA, yearB),
   );
@@ -97,7 +98,7 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
       />
       <SearchableSelect
         id="mv-yearA"
-        label="Year A (earlier)"
+        label="Start year"
         value={yearA != null ? String(yearA) : ''}
         placeholder="Select year…"
         options={(availableYears ?? []).map((y) => ({ value: String(y), label: String(y) }))}
@@ -113,7 +114,7 @@ function MovementControls({ availableYears, yearA, yearB, yearMid, metricKey, ba
       />
       <SearchableSelect
         id="mv-yearB"
-        label="Year B (later)"
+        label="End year"
         value={yearB != null ? String(yearB) : ''}
         placeholder="Select year…"
         options={(availableYears ?? []).map((y) => ({ value: String(y), label: String(y) }))}
@@ -138,7 +139,7 @@ function SummaryCards({ data, focusName }) {
     <div className="cards" role="region" aria-label={`${focusName} ranking movement summary`}>
       <div className="card">
         <h3>
-          Earlier · {years.a} <span className="card-unit">observed ranking</span>
+          Start year · {years.a} <span className="card-unit">observed ranking</span>
         </h3>
         <p className="card-rank">
           {fm.fullRankA != null ? `#${fm.fullRankA} / ${fm.denominatorA}` : 'n/a'}
@@ -154,7 +155,7 @@ function SummaryCards({ data, focusName }) {
       </div>
       <div className="card">
         <h3>
-          Later · {years.b} <span className="card-unit">observed ranking</span>
+          End year · {years.b} <span className="card-unit">observed ranking</span>
         </h3>
         <p className="card-rank">
           {fm.fullRankB != null ? `#${fm.fullRankB} / ${fm.denominatorB}` : 'n/a'}
@@ -458,7 +459,7 @@ function RankEmptyNotice({ query, hasRows }) {
  * display and raw values kept together per year, never concatenated across
  * years), then World Bank metadata. Renders inside a full-width detail row.
  */
-export function EconomyDetails({ r, yearA, yearB, yearMid = null, focusName = 'India' }) {
+export function EconomyDetails({ r, yearA, yearB, yearMid = null, focusName = 'Selected economy' }) {
   const isThreeYear = yearMid != null && (r.rankMid !== undefined || r.presentInMid !== undefined);
   const years = isThreeYear
     ? [
@@ -528,7 +529,7 @@ export function EconomyDetails({ r, yearA, yearB, yearMid = null, focusName = 'I
  * shows the full outside dataset with combined per-year rank/value cells and
  * the backend overall relation/effect fields.
  */
-export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption, focusIso = 'IND', focusName = 'India' }) {
+export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = null, showStatus = true, caption, focusIso, focusName = focusIso ?? 'Selected economy' }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -711,7 +712,7 @@ function yearColumnKeys(years, year) {
  * the original two-year table; [yearA, yearMid, yearB] extends it with the
  * middle-year rank, value and vs-focus columns.
  */
-export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, focusIso = 'IND', focusName = 'India' }) {
+export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, focusIso, focusName = focusIso ?? 'Selected economy' }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -985,7 +986,8 @@ function sortCommonRows(rows, sort) {
   }
 }
 
-function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
+function ThreeYearResults({ data, focusIso, focusName = focusIso ?? 'Selected economy' }) {
+  const [rankMode, setRankMode] = useState('observed');
   const fm = data.focusMovement;
   const u = data.universe;
   const y = data.years;
@@ -1086,30 +1088,13 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
 
   return (
     <>
+      <MovementResearch sections={['overview', 'coverage', 'decomposition', 'evidence']}>
+      <MovementResearchPanel section="overview">
       <h3 className="subhead">What happened to {focusName}&apos;s position number?</h3>
-      <SummaryCards3 data={data} focusName={focusName} />
-      {focusValues3.length === 3 ? (
-        <ChartCard
-          title={`${data.focus?.name ?? 'Focus'} level value, ${y.a} to ${y.mid} to ${y.b}`}
-          unit={data.metric?.unit}
-          summary={`${data.focus?.name ?? 'Focus'} level values ${focusValues3.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
-        >
-          <AnnualOrCategoricalChart
-            entries={focusValues3.map((p) => ({ name: String(p.year), value: p.value }))}
-            unit={data.metric?.unit}
-            decimals={decimals3}
-          />
-        </ChartCard>
-      ) : null}
-      {focusValues3.length === 3 ? (
-        <ChartDataFallback
-          label="focus level values"
-          regionName="Focus level values by year"
-          columns={[{ header: 'Year' }, { header: `${data.focus?.name ?? 'Focus'} value${data.metric?.unit ? ` (${data.metric.unit})` : ''}` }]}
-          rows={focusValues3.map((p) => [String(p.year), formatDecimal(p.value, decimals3)])}
-        />
-      ) : null}
-      <div className="explanation" role="note" aria-label="Result in words">
+      <MovementModeControl mode={rankMode} onChange={setRankMode} scope="year" />
+      {rankMode === 'observed' ? <>
+        <SummaryCards3 data={data} focusName={focusName} />
+        <div className="explanation" role="note" aria-label="Result in words">
         <StorySentence3 data={data} focusName={focusName} />
       </div>
       <p className="footnote">
@@ -1117,8 +1102,8 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
         {fm.fullRankA}/{fm.denominatorA} in {y.a}, #{fm.fullRankMid}/{fm.denominatorMid} in {y.mid} and #
         {fm.fullRankB}/{fm.denominatorB} in {y.b}.
       </p>
-
-      <h3 className="subhead">Like-for-like comparison</h3>
+      </> : <>
+        <h3 className="subhead">Like-for-like comparison</h3>
       <p className="section-sub">
         {u.common} economies have valid observations in {y.a}, {y.mid} and {y.b}.
       </p>
@@ -1184,7 +1169,30 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
         neither official ranks nor observed-year ranks.
       </p>
       <p className="footnote">The other economies shown below are outside this three-year common comparison set.</p>
-
+      </>}
+      {focusValues3.length === 3 ? (
+        <ChartCard
+          title={`${data.focus?.name ?? 'Focus'} level value, ${y.a} to ${y.mid} to ${y.b}`}
+          unit={data.metric?.unit}
+          summary={`${data.focus?.name ?? 'Focus'} level values ${focusValues3.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
+        >
+          <AnnualOrCategoricalChart
+            entries={focusValues3.map((p) => ({ name: String(p.year), value: p.value }))}
+            unit={data.metric?.unit}
+            decimals={decimals3}
+          />
+        </ChartCard>
+      ) : null}
+      {focusValues3.length === 3 ? (
+        <ChartDataFallback
+          label="focus level values"
+          regionName="Focus level values by year"
+          columns={[{ header: 'Year' }, { header: `${data.focus?.name ?? 'Focus'} value${data.metric?.unit ? ` (${data.metric.unit})` : ''}` }]}
+          rows={focusValues3.map((p) => [String(p.year), formatDecimal(p.value, decimals3)])}
+        />
+      ) : null}
+      </MovementResearchPanel>
+      <MovementResearchPanel section="coverage">
       <h3 className="subhead">What changed outside the common comparison set?</h3>
       <p>
         Economies outside the three-year common set are missing in at least one of {y.a}, {y.mid} or {y.b}.
@@ -1248,42 +1256,6 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
           </dd>
         </div>
       </dl>
-
-      <h3 className="subhead">Rank-movement decomposition (same universe throughout)</h3>
-      <dl className="facts">
-        <div>
-          <dt>
-            {y.a}→{y.mid}: full = common + outside
-          </dt>
-          <dd className="num mono">
-            {formatSigned(fm.positionNumberChangeAM)} = {formatSigned(fm.commonEffectAM)} + {formatSigned(fm.observedSetEffectAM)}
-          </dd>
-        </div>
-        <div>
-          <dt>
-            {y.mid}→{y.b}: full = common + outside
-          </dt>
-          <dd className="num mono">
-            {formatSigned(fm.positionNumberChangeMB)} = {formatSigned(fm.commonEffectMB)} + {formatSigned(fm.observedSetEffectMB)}
-          </dd>
-        </div>
-        <div>
-          <dt>
-            {y.a}→{y.b}: full = common + outside
-          </dt>
-          <dd className="num mono">
-            {formatSigned(fm.positionNumberChange)} = {formatSigned(fm.commonEffect)} + {formatSigned(fm.observedSetEffect)}
-          </dd>
-        </div>
-      </dl>
-      <div className="explanation" role="note" aria-label={fm.identityText ?? 'Decomposition'}>
-        <p className="mono footnote">Backend verification: {fm.identityText}</p>
-        <p>
-          Each segment uses the same {u.common}-economy universe. Common-set movement is change among the
-          same economies; outside-common-set effect is the effect of economies outside Common entering or
-          exiting each full observed set above {focusName}.
-        </p>
-      </div>
 
       <h3 className="subhead">Economies outside the common comparison set</h3>
       <p>
@@ -1487,6 +1459,45 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
         </>
       ) : null}
 
+      </MovementResearchPanel>
+      <MovementResearchPanel section="decomposition">
+<h3 className="subhead">Rank-movement decomposition (same universe throughout)</h3>
+      <dl className="facts">
+        <div>
+          <dt>
+            {y.a}→{y.mid}: full = common + outside
+          </dt>
+          <dd className="num mono">
+            {formatSigned(fm.positionNumberChangeAM)} = {formatSigned(fm.commonEffectAM)} + {formatSigned(fm.observedSetEffectAM)}
+          </dd>
+        </div>
+        <div>
+          <dt>
+            {y.mid}→{y.b}: full = common + outside
+          </dt>
+          <dd className="num mono">
+            {formatSigned(fm.positionNumberChangeMB)} = {formatSigned(fm.commonEffectMB)} + {formatSigned(fm.observedSetEffectMB)}
+          </dd>
+        </div>
+        <div>
+          <dt>
+            {y.a}→{y.b}: full = common + outside
+          </dt>
+          <dd className="num mono">
+            {formatSigned(fm.positionNumberChange)} = {formatSigned(fm.commonEffect)} + {formatSigned(fm.observedSetEffect)}
+          </dd>
+        </div>
+      </dl>
+      <div className="explanation" role="note" aria-label={fm.identityText ?? 'Decomposition'}>
+        <p className="mono footnote">Backend verification: {fm.identityText}</p>
+        <p>
+          Each segment uses the same {u.common}-economy universe. Common-set movement is change among the
+          same economies; outside-common-set effect is the effect of economies outside Common entering or
+          exiting each full observed set above {focusName}.
+        </p>
+      </div>
+</MovementResearchPanel>
+<MovementResearchPanel section="evidence">
       <h3 className="subhead">Evidence &amp; provenance</h3>
       <details className="details">
         <summary>Evidence &amp; provenance (vintage, runs, counters, limits)</summary>
@@ -1528,7 +1539,9 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
           this application from World Bank observations.
         </p>
       </details>
-    </>
+    </MovementResearchPanel>
+      </MovementResearch>
+      </>
   );
 }
 
@@ -1565,7 +1578,7 @@ function growthIntervalsOf(data) {
  * and an exact-value raw audit group. Renders inside a full-width detail
  * row. Interval data is keyed by backend interval key, never by position.
  */
-export function GrowthDetails({ r, intervals, yearA, yearB, yearMid = null, focusName = 'India' }) {
+export function GrowthDetails({ r, intervals, yearA, yearB, yearMid = null, focusName = 'Selected economy' }) {
   const effect = effectText(r.positionEffect);
   const endpointYears = (key) => {
     if (key === 'AM') return [yearA, yearMid];
@@ -1665,7 +1678,7 @@ export function GrowthDetails({ r, intervals, yearA, yearB, yearMid = null, focu
  * growth %, absolute change, observed growth rank, relation and effect.
  * Level values live in Details; ranks come only from growthPercent.
  */
-export function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, yearA, yearB, yearMid = null, focusIso = 'IND', focusName = 'India' }) {
+export function GrowthEconomyTable({ rows, intervals, activeInterval = null, caption, yearA, yearB, yearMid = null, focusIso, focusName = focusIso ?? 'Selected economy' }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -1826,7 +1839,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
  * growth %, absolute change, start/middle/end level values and the
  * like-for-like relation per interval. No Effect column (fixed population).
  */
-export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption, focusIso = 'IND', focusName = 'India' }) {
+export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = null, caption, focusIso, focusName = focusIso ?? 'Selected economy' }) {
   const tableId = useId();
   const [openIso, setOpenIso] = useState(null);
   const isMobile = useIsMobile();
@@ -2067,137 +2080,39 @@ function sortGrowthRows(rows, sort) {
   });
 }
 
-/**
- * One self-contained growth interval card. Visual hierarchy (existing classes
- * only): 1. growth % hero, 2. growth + like-for-like ranks, 3. level
- * start → end and absolute change (secondary), 4. compact Benchmark
- * subsection (observed, then like-for-like), 5. subordinate indicator line,
- * 6. verification inside a collapsed Details row.
- */
-function GrowthIntervalCard({ iv, metric, isFlow = false, focusName = 'India' }) {
-  if (!iv || !iv.available) {
-    return (
-      <div className="card">
-        <h3>
-          {isFlow ? 'Annual flow' : 'Growth'} {iv ? growthIntervalLabel(iv) : '—'} <span className="card-unit">unavailable</span>
-        </h3>
-        <p className="card-rank">n/a</p>
-        <p className="card-unit">{iv?.reasonText ?? iv?.reason ?? 'Decomposition unavailable.'}</p>
-      </div>
-    );
-  }
-  // Presentation-only wording: backend display strings are reused verbatim
-  // except the abbreviated "pp" suffix, which is expanded to the full phrase
-  // for readability. No values are recalculated here.
-  // Rule A: only consecutive-year endpoint percent is called YoY;
-  // multi-year endpoint percent is a period endpoint change (not annualized).
-  const isAnnual = iv.endYear != null && iv.startYear != null && iv.endYear - iv.startYear === 1;
-  const ppText = (display) =>
-    display != null ? display.replace(/ pp$/, ' percentage points') : 'n/a';
-  const economiesText = (count) => `${count} ${count === 1 ? 'economy' : 'economies'}`;
-  // One self-contained comparison section (observed OR like-for-like): a
-  // bordered container holding four small subtle field boxes (universe,
-  // rank, average, difference). Labels carry the interval so values from
-  // different intervals can never be confused. Existing classes only.
-  const statBox = (label, value, valueClass, key) => (
-    <div key={key} className="denominators">
-      <p className="card-unit">{label}</p>
-      <div className={valueClass}>{value}</div>
-    </div>
-  );
-  const compareSection = ({
-    heading,
-    label,
-    universeLabel,
-    universeCount,
-    rankLabel,
-    rankText,
-    avgLabel,
-    avgDisplay,
-    avgCount,
-    diffLabel,
-    diffDisplay,
-    groupLabel,
-  }) => (
-    <div className="facts-group growth-section" role="group" aria-label={groupLabel}>
-      <h4 className="facts-group-title">{heading}</h4>
-      {statBox(`${focusName}'s change · ${label}`, iv.indiaGrowthDisplay ?? 'n/a', 'card-rank', 'india')}
-      {statBox(`${universeLabel} · ${label}`, economiesText(universeCount), 'card-rank', 'universe')}
-      {statBox(`${rankLabel} · ${label}`, rankText, 'card-rank', 'rank')}
-      {statBox(
-        `${avgLabel} · ${label}`,
-        avgDisplay != null ? `${avgDisplay} · ${economiesText(avgCount)}` : 'n/a (no other economies with calculable growth)',
-        'card-rank',
-        'average',
-      )}
-      {statBox(`${diffLabel} · ${label}`, ppText(diffDisplay), 'duo-rank', 'difference')}
-    </div>
-  );
-  return (
-    <div className="card">
-      <h3>
-        {isFlow
-          ? `Annual flow ${iv.endYear} vs ${iv.startYear}`
-          : isAnnual
-            ? `Annual YoY ${growthIntervalLabel(iv)}`
-            : `Period endpoint change ${growthIntervalLabel(iv)}`}{' '}
-        <span className="card-unit">
-          {isFlow ? 'annual-flow endpoint comparison' : isAnnual ? 'Annual YoY' : 'Period endpoint change (not annualized)'}
-        </span>
-      </h3>
-      <p className="card-unit">{focusName}&apos;s {isFlow ? 'annual-flow change' : isAnnual ? 'growth' : 'period change'}</p>
-      <p className="card-result-value" aria-label={`${focusName} growth ${iv.indiaGrowthDisplay} in ${growthIntervalLabel(iv)}`}>
-        {iv.indiaGrowthDisplay ?? 'n/a'}
-      </p>
-      {isFlow && iv.endpointMeaning ? <p className="footnote">{iv.endpointMeaning}</p> : null}
-      <p className="card-unit">
-        Level: {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}
-      </p>
-      <p className="card-unit">Absolute change: {iv.absoluteDisplay ?? 'n/a'}</p>
-      {compareSection({
-        heading: 'Observed',
-        label: growthIntervalLabel(iv),
-        universeLabel: 'Observed growth universe',
-        universeCount: iv.denominatorObserved,
-        rankLabel: `${focusName}'s observed growth rank`,
-        rankText: iv.fullGrowthRank != null ? `#${iv.fullGrowthRank} / ${iv.denominatorObserved}` : 'n/a',
-        avgLabel: 'Average growth of other economies',
-        avgDisplay: iv.peerAvgObservedDisplay,
-        avgCount: iv.peerCountObserved,
-        diffLabel: `${focusName}'s change vs observed average`,
-        diffDisplay: iv.vsPeerObservedDisplay,
-        groupLabel: `Observed comparison for ${growthIntervalLabel(iv)}`,
-      })}
-      {compareSection({
-        heading: 'Like-for-like comparison',
-        label: growthIntervalLabel(iv),
-        universeLabel: 'Like-for-like growth universe',
-        universeCount: iv.denominatorCommon,
-        rankLabel: `${focusName}'s like-for-like growth rank`,
-        rankText: iv.commonGrowthRank != null ? `#${iv.commonGrowthRank} / ${iv.denominatorCommon}` : 'n/a',
-        avgLabel: 'Average growth of other economies in the like-for-like universe',
-        avgDisplay: iv.peerAvgCommonDisplay,
-        avgCount: iv.peerCountCommon,
-        diffLabel: `${focusName}'s change vs like-for-like average`,
-        diffDisplay: iv.vsPeerCommonDisplay,
-        groupLabel: `Like-for-like comparison for ${growthIntervalLabel(iv)}`,
-      })}
-      <p className="footnote">
-        The average uses the same economies in the like-for-like comparison and excludes {focusName}.
-      </p>
-      <p className="card-code mono">
-        {metric.indicatorCode} · {metric.unit}
-      </p>
-      <details className="details">
-        <summary>Verification</summary>
-        <p className="mono footnote">Backend verification: {iv.identityText}</p>
-        <p className="footnote">
-          Peer averages exclude {focusName} and differences are percentage-point subtractions; neither affects
-          ranking.
-        </p>
-      </details>
-    </div>
-  );
+function GrowthPeriodTable({ intervals, metric, mode, isFlow, focusName }) {
+  const observed = mode === 'observed';
+  return <div role="region" aria-label={focusName + ' growth by interval'} className="table-scroll growth-period-table" tabIndex={0}>
+    <table className="table">
+      <caption className="sr-only">{metric.indicatorCode} · {metric.unit}</caption>
+      <thead><tr><th scope="col">Period</th><th scope="col" className="num">{isFlow ? 'Flow change' : 'Growth'}</th>
+        <th scope="col" className="num">Rank / eligible</th><th scope="col" className="num">Peer average</th>
+        <th scope="col" className="num">Difference</th><th scope="col">Inputs</th></tr></thead>
+      <tbody>{intervals.map(({ key, block: iv }) => {
+        const rank = observed ? iv.fullGrowthRank : iv.commonGrowthRank;
+        const count = observed ? iv.denominatorObserved : iv.denominatorCommon;
+        const average = observed ? iv.peerAvgObservedDisplay : iv.peerAvgCommonDisplay;
+        const peers = observed ? iv.peerCountObserved : iv.peerCountCommon;
+        const difference = observed ? iv.vsPeerObservedDisplay : iv.vsPeerCommonDisplay;
+        return <tr key={key}>
+          <th scope="row">{iv.startYear}–{iv.endYear}<small className="monitor-code">{isFlow ? 'Annual flow endpoints' : iv.endYear - iv.startYear === 1 ? 'Annual YoY' : 'Endpoint change'}</small></th>
+          {iv.available ? <>
+            <td className="num movement-growth-value">{iv.indiaGrowthDisplay ?? '—'}</td>
+            <td className="num">{rank != null ? '#' + rank : '—'} / {count ?? '—'}</td>
+            <td className="num">{average ?? 'Unavailable'}{average != null ? <small className="monitor-code">{peers} peers</small> : null}</td>
+            <td className="num">{difference?.replace(/ pp$/, ' percentage points') ?? '—'}</td>
+            <td><details className="rank-observation"><summary>Verification</summary>
+              <span>{metric.indicatorCode} · {metric.unit}</span>
+              <span>Level {iv.startDisplay ?? '—'} → {iv.endDisplay ?? '—'}</span>
+              <span>Absolute change {iv.absoluteDisplay ?? '—'}</span>
+              {iv.endpointMeaning ? <span>{iv.endpointMeaning}</span> : null}
+              <span>Backend verification {iv.identityText}</span>
+            </details></td>
+          </> : <td colSpan={5}>{iv.reasonText ?? iv.reason ?? 'Decomposition unavailable.'}</td>}
+        </tr>;
+      })}</tbody>
+    </table>
+  </div>;
 }
 
 /**
@@ -2206,7 +2121,7 @@ function GrowthIntervalCard({ iv, metric, isFlow = false, focusName = 'India' })
  * decomposed independently (FULL − OUTSIDE ABOVE = COMMON); interval results
  * are never added together.
  */
-function GrowthDecomposition({ data, intervals, focusName = 'India' }) {
+function GrowthDecomposition({ data, intervals, focusName = 'Selected economy' }) {
   const u = data.universe;
   const growth = data.focusMovement?.growth ?? {};
   const effectText = (n) =>
@@ -2324,11 +2239,11 @@ function GrowthDecomposition({ data, intervals, focusName = 'India' }) {
   );
 }
 
-function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
+function GrowthResults({ data, focusIso, focusName = focusIso ?? 'Selected economy' }) {
+  const [mode, setMode] = useState('observed');
   const u = data.universe;
   const y = data.years;
   const metric = data.metric;
-  const growth = data.focusMovement?.growth ?? {};
   const intervals = growthIntervalsOf(data);
   // describeMetric carries no observation type; resolve FLOW from the
   // hydrated registry so flow intervals read as endpoint comparisons.
@@ -2419,13 +2334,15 @@ function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
 
   return (
     <>
+      <MovementResearch sections={['overview', 'coverage', 'decomposition', 'evidence']}>
+      <MovementResearchPanel section="overview">
       <h3 className="subhead">
         {isFlow ? `What happened to ${focusName}'s annual flow?` : allAnnual ? `What happened to ${focusName}'s growth?` : `What happened to ${focusName}'s value over the period?`}
       </h3>
       {isFlow ? (
         <p className="section-sub">
           Each interval compares the annual flow observed in the end year with the annual flow in the start
-          year (“Annual flow: B vs A”) — never a sum over the span.
+          year. Each observation is an annual flow.
         </p>
       ) : null}
       {!isFlow && !allAnnual ? (
@@ -2434,6 +2351,8 @@ function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
           Multi-year percentages are not annualized and are never called YoY.
         </p>
       ) : null}
+      <MovementModeControl mode={mode} onChange={setMode} />
+      <GrowthPeriodTable intervals={intervals} metric={metric} mode={mode} isFlow={isFlow} focusName={focusName} />
       {intervals.some(({ block }) => block?.available && block?.indiaGrowthPercent != null) ? (
         <ChartCard
           title={`${focusName} ${isFlow ? 'annual-flow change' : 'endpoint change'} by interval`}
@@ -2447,18 +2366,15 @@ function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
           />
         </ChartCard>
       ) : null}
-      <div className="cards" role="region" aria-label={`${focusName} growth by interval`}>
-        {intervals.map(({ key }) => (
-          <GrowthIntervalCard key={key} iv={growth[key]} metric={metric} isFlow={isFlow} focusName={focusName} />
-        ))}
-      </div>
       <p className="footnote">
         Growth ranks order economies by growth percentage alone (rank 1 is the highest growth). Like-for-like
         ranks share one universe of {u.common} economies with calculable growth in every interval shown.
         Denominators count {u.membershipRule}. A percentage-point difference is {focusName}&apos;s growth rate minus
-        the average growth rate.
+        the average growth rate. Peer averages exclude {focusName} and use the active comparison universe.
       </p>
 
+      </MovementResearchPanel>
+      <MovementResearchPanel section="coverage">
       <h3 className="subhead">Like-for-like comparison</h3>
       <p className="section-sub">
         {u.common} economies have calculable growth in every interval shown. Each interval&apos;s like-for-like
@@ -2675,8 +2591,12 @@ function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
         </>
       ) : null}
 
+      </MovementResearchPanel>
+      <MovementResearchPanel section="decomposition">
       <GrowthDecomposition data={data} intervals={intervals} focusName={focusName} />
 
+      </MovementResearchPanel>
+      <MovementResearchPanel section="evidence">
       <h3 className="subhead">Evidence &amp; provenance</h3>
       <details className="details">
         <summary>Evidence &amp; provenance (vintage, runs, counters, limits)</summary>
@@ -2740,7 +2660,9 @@ function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
           Bank observations.
         </p>
       </details>
-    </>
+    </MovementResearchPanel>
+      </MovementResearch>
+      </>
   );
 }
 
@@ -2807,7 +2729,7 @@ function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation 
                 {data.period.size} annual observation{data.period.size === 1 ? '' : 's'}
               </p>
               <p className="footnote">
-                {data.semantic?.label ?? title} ({data.semantic?.formula ?? 'sum over [A, B)'}) —{' '}
+                {data.semantic?.label ?? title}. The selected end year is excluded.{' '}
                 {isAvg
                   ? 'typical annual flow during the period; distinct from the period total.'
                   : 'sum of the annual flows in the period; distinct from endpoint comparison.'}{' '}
@@ -2865,7 +2787,8 @@ function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation 
   );
 }
 
-export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis = 'level', country = 'IND', countries = [], focusName = 'India', onYearA, onYearB, onYearMid = null, onMetric, onBasis, onCountry }) {
+export default function RankMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis = 'level', country, countries = [], focusName = country ?? 'Selected economy', onYearA, onYearB, onYearMid = null, onMetric, onBasis, onCountry }) {
+  const [rankMode, setRankMode] = useState('observed');
   const [tab, setTab] = useState('all');
   const [query, setQuery] = useState('');
   const [relationFilter, setRelationFilter] = useState('all');
@@ -2883,7 +2806,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   // periods are not ranked, so the comparison engine stays out of the way.
   const periodActive = basis === RANKING_BASIS.PERIOD_TOTAL || basis === RANKING_BASIS.PERIOD_AVERAGE;
   const periodOperation = basis === RANKING_BASIS.PERIOD_AVERAGE ? 'AVG' : 'SUM';
-  const enabled = yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive && !isPricesMetricKey(metricKey) && !isTradeMetricKey(metricKey) && !isCapitalMetricKey(metricKey) && !isFxMetricKey(metricKey) && !isExternalMetricKey(metricKey) && !isPopulationMetricKey(metricKey);
+  const enabled = Boolean(country) && yearA != null && yearB != null && yearA !== yearB && metricKey != null && !periodActive && !isPricesMetricKey(metricKey) && !isTradeMetricKey(metricKey) && !isCapitalMetricKey(metricKey) && !isFxMetricKey(metricKey) && !isExternalMetricKey(metricKey) && !isPopulationMetricKey(metricKey);
   const depsKey = `movement:${metricKey}:${yearA ?? ''}:${yearB ?? ''}:${breakerActive ? yearMid : 'none'}:${basis}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) =>
@@ -2910,7 +2833,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
   // echoes the requested focus in every comparison payload
   // (data.focus.iso3); the country prop is the fallback before data loads.
   // focusName arrives from the application shell (backend metadata).
-  const focusIso = data?.focus?.iso3 ?? String(country ?? 'IND').toUpperCase();
+  const focusIso = data?.focus?.iso3 ?? country?.toUpperCase();
 
   const sameYear = yearA != null && yearB != null && yearA === yearB;
   const empty =
@@ -3217,7 +3140,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
       />
       {sameYear ? (
         <div className="status status-error" role="alert">
-          <p>Select two different years. Year A and Year B must differ for a rank-movement comparison.</p>
+          <p>Select different start and end years for a rank-movement comparison.</p>
         </div>
       ) : null}
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="rank movement" />
@@ -3239,32 +3162,13 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
             <ThreeYearResults data={data} focusIso={focusIso} focusName={focusName} />
           ) : (
           <>
-            <h3 className="subhead">What happened to {focusName}&apos;s position number?</h3>
-            <SummaryCards data={data} focusName={focusName} />
-            {(() => {
-              // Focus level values for the two selected years, straight from
-              // the backend analytical rows (same observations as the ranks).
-              const focusRow = (data.economies?.rows ?? []).find((r) => r.iso3 === data.focus?.iso3) ?? null;
-              const points = [
-                { year: data.years.a, value: focusRow?.valueA },
-                { year: data.years.b, value: focusRow?.valueB },
-              ].filter((p) => typeof p.value === 'number' && Number.isFinite(p.value));
-              if (points.length !== 2) return null;
-              return (
-                <ChartCard
-                  title={`${focusName} level value, ${data.years.a} vs ${data.years.b}`}
-                  unit={data.metric?.unit}
-                  summary={`${focusName} level values ${points.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
-                >
-                  <AnnualOrCategoricalChart
-                    entries={points.map((p) => ({ name: String(p.year), value: p.value }))}
-                    unit={data.metric?.unit}
-                    decimals={metricDecimals(metricKey)}
-                  />
-                </ChartCard>
-              );
-            })()}
-            <div className="explanation" role="note" aria-label="Result in words">
+            <MovementResearch sections={['overview', 'coverage', 'decomposition', 'evidence']}>
+      <MovementResearchPanel section="overview">
+      <h3 className="subhead">What happened to {focusName}&apos;s position number?</h3>
+            <MovementModeControl mode={rankMode} onChange={setRankMode} scope="year" />
+      {rankMode === 'observed' ? <>
+        <SummaryCards data={data} focusName={focusName} />
+        <div className="explanation" role="note" aria-label="Result in words">
               <StorySentence data={data} focusName={focusName} />
             </div>
             <p className="footnote">
@@ -3272,8 +3176,8 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               #{data.focusMovement.fullRankA}/{data.focusMovement.denominatorA} in {data.years.a} and #
               {data.focusMovement.fullRankB}/{data.focusMovement.denominatorB} in {data.years.b}.
             </p>
-
-            <h3 className="subhead">Like-for-like comparison</h3>
+      </> : <>
+        <h3 className="subhead">Like-for-like comparison</h3>
             <p className="section-sub">
               {data.universe.common} economies had valid observations in both {data.years.a} and {data.years.b}.
             </p>
@@ -3307,8 +3211,33 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               neither official ranks nor observed-year ranks.
             </p>
             <p className="footnote">The other economies shown below are outside this common comparison set.</p>
-
-            <h3 className="subhead">What changed outside the common comparison set?</h3>
+      </>}
+            {(() => {
+              // Focus level values for the two selected years, straight from
+              // the backend analytical rows (same observations as the ranks).
+              const focusRow = (data.economies?.rows ?? []).find((r) => r.iso3 === data.focus?.iso3) ?? null;
+              const points = [
+                { year: data.years.a, value: focusRow?.valueA },
+                { year: data.years.b, value: focusRow?.valueB },
+              ].filter((p) => typeof p.value === 'number' && Number.isFinite(p.value));
+              if (points.length !== 2) return null;
+              return (
+                <ChartCard
+                  title={`${focusName} level value, ${data.years.a} vs ${data.years.b}`}
+                  unit={data.metric?.unit}
+                  summary={`${focusName} level values ${points.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
+                >
+                  <AnnualOrCategoricalChart
+                    entries={points.map((p) => ({ name: String(p.year), value: p.value }))}
+                    unit={data.metric?.unit}
+                    decimals={metricDecimals(metricKey)}
+                  />
+                </ChartCard>
+              );
+            })()}
+            </MovementResearchPanel>
+      <MovementResearchPanel section="coverage">
+      <h3 className="subhead">What changed outside the common comparison set?</h3>
             <p>
               Entered and exited economies are not part of the common comparison set. They explain the difference
               between the two full observed ranking populations.
@@ -3413,50 +3342,6 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               {data.years.a} below {focusName}: {data.focusMovement.exitedBelowA}. These affect the size of the
               observed ranking population, not {focusName}&apos;s position number.
             </p>
-
-            <h3 className="subhead">Rank-movement decomposition</h3>
-            <dl className="facts">
-              <div>
-                <dt>Full position-number change</dt>
-                <dd className="num">
-                  {formatSigned(data.focusMovement.positionNumberChange)} positions (
-                  {signMeaning(data.focusMovement.positionNumberChange)})
-                </dd>
-              </div>
-              <div>
-                <dt>Common-set movement</dt>
-                <dd className="num">
-                  {formatSigned(data.focusMovement.commonEffect)} positions ({signMeaning(data.focusMovement.commonEffect)})
-                </dd>
-              </div>
-              <div>
-                <dt>Outside-common-set effect</dt>
-                <dd className="num">
-                  {formatSigned(data.focusMovement.observedSetEffect)} positions (
-                  {signMeaning(data.focusMovement.observedSetEffect)})
-                </dd>
-              </div>
-            </dl>
-            <div className="explanation" role="note" aria-label={data.focusMovement.identityText ?? 'Decomposition'}>
-              <p className="mono" aria-label="Clean verification equation">
-                {formatSigned(data.focusMovement.positionNumberChange)} ={' '}
-                {formatSigned(data.focusMovement.commonEffect)} + {data.focusMovement.enteredAboveB} −{' '}
-                {data.focusMovement.exitedAboveA}
-              </p>
-              <p className="mono footnote">Backend verification: {data.focusMovement.identityText}</p>
-              <p>Full position-number change = common-set movement + observed-set effect.</p>
-              <p>
-                Here, {focusName}&apos;s position number changed by {formatSigned(data.focusMovement.positionNumberChange)}{' '}
-                overall: {formatSigned(data.focusMovement.commonEffect)} within the {data.universe.common}{' '}
-                common economies, and {formatSigned(data.focusMovement.observedSetEffect)} from economies outside
-                the common set entering or exiting above {focusName}.
-              </p>
-              <p className="footnote">
-                Common-set movement is change among the same economies. Outside-common-set effect is the effect
-                of economies outside Common entering or exiting the full observed sets. This describes arithmetic
-                under the ranking definition — not economic performance.
-              </p>
-            </div>
 
             <h3 className="subhead">Economies outside the common comparison set</h3>
             <p>
@@ -3674,7 +3559,54 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
               </>
             ) : null}
 
-            <h3 className="subhead">Evidence &amp; provenance</h3>
+            </MovementResearchPanel>
+      <MovementResearchPanel section="decomposition">
+<h3 className="subhead">Rank-movement decomposition</h3>
+            <dl className="facts">
+              <div>
+                <dt>Full position-number change</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.positionNumberChange)} positions (
+                  {signMeaning(data.focusMovement.positionNumberChange)})
+                </dd>
+              </div>
+              <div>
+                <dt>Common-set movement</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.commonEffect)} positions ({signMeaning(data.focusMovement.commonEffect)})
+                </dd>
+              </div>
+              <div>
+                <dt>Outside-common-set effect</dt>
+                <dd className="num">
+                  {formatSigned(data.focusMovement.observedSetEffect)} positions (
+                  {signMeaning(data.focusMovement.observedSetEffect)})
+                </dd>
+              </div>
+            </dl>
+            <div className="explanation" role="note" aria-label={data.focusMovement.identityText ?? 'Decomposition'}>
+              <p className="mono" aria-label="Clean verification equation">
+                {formatSigned(data.focusMovement.positionNumberChange)} ={' '}
+                {formatSigned(data.focusMovement.commonEffect)} + {data.focusMovement.enteredAboveB} −{' '}
+                {data.focusMovement.exitedAboveA}
+              </p>
+              <p className="mono footnote">Backend verification: {data.focusMovement.identityText}</p>
+              <p>Full position-number change = common-set movement + observed-set effect.</p>
+              <p>
+                Here, {focusName}&apos;s position number changed by {formatSigned(data.focusMovement.positionNumberChange)}{' '}
+                overall: {formatSigned(data.focusMovement.commonEffect)} within the {data.universe.common}{' '}
+                common economies, and {formatSigned(data.focusMovement.observedSetEffect)} from economies outside
+                the common set entering or exiting above {focusName}.
+              </p>
+              <p className="footnote">
+                Common-set movement is change among the same economies. Outside-common-set effect is the effect
+                of economies outside Common entering or exiting the full observed sets. This describes arithmetic
+                under the ranking definition — not economic performance.
+              </p>
+            </div>
+</MovementResearchPanel>
+<MovementResearchPanel section="evidence">
+      <h3 className="subhead">Evidence &amp; provenance</h3>
             <details className="details">
               <summary>Evidence &amp; provenance (vintage, runs, counters, limits)</summary>
               <dl className="facts">
@@ -3722,7 +3654,9 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                 this application from World Bank observations.
               </p>
             </details>
-          </>
+          </MovementResearchPanel>
+      </MovementResearch>
+      </>
           )
         ) : (
           <div className="status status-empty" role="status">

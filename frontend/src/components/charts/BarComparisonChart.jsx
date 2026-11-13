@@ -17,7 +17,7 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useId } from 'react';
 import { plotMinWidth, toBarEntries } from './chartData.js';
-import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
+import { chartTooltipStyle, CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
 import { formatChartValue, formatTickValue, isPercentageUnit } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { AnnualPercentagePattern } from './AnnualSeriesMarker.jsx';
@@ -66,7 +66,7 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
             />
             <Tooltip
               formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={chartTooltipStyle}
             />
             {isGrouped
               ? series.map((s, i) => (

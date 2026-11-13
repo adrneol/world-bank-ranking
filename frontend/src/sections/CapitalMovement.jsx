@@ -16,6 +16,7 @@
 import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
+import { MovementModeControl, MovementPeriodResults, MovementResearch, MovementResearchPanel } from '../components/MovementComparison.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { isCapitalMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -341,29 +342,30 @@ function sectionFacts(section, focusName, heading, groupLabel) {
   );
 }
 
-function CapitalResultCard({ observed, likeForLike, focusName, diagnostic }) {
+function CapitalResultCard({ observed, likeForLike, mode, focusName, diagnostic }) {
   const key = observed ? (observed.period ?? String(observed.year)) : '?';
   const basisLabel = observed?.basis?.label ?? likeForLike?.basis?.label ?? '';
   const rankWording = observed?.basis?.rankWording ?? likeForLike?.basis?.rankWording;
-  const f = observed?.focus;
+  const result = mode === 'common' ? likeForLike : observed;
+  const f = result?.focus;
   const diag = diagnostic?.periods?.find((p) => p.period === key);
   return (
-    <div className="card">
+    <article className="movement-period">
       <h3>{key} <span className="card-unit">{basisLabel}</span></h3>
       <p className="card-unit">{possessive(focusName)} {lowerFirst(basisLabel)}</p>
       <p className="card-result-value" aria-label={`${possessive(focusName)} ${lowerFirst(basisLabel)} ${f ? (f.valueDisplay ?? f.value) : 'unavailable'} in ${key}`}>
-        {f ? (f.valueDisplay ?? valueText(observed, f.value)) : 'n/a'}
+        {f ? (f.valueDisplay ?? valueText(result, f.value)) : 'n/a'}
       </p>
       <p className="card-unit">{rankWording ?? ''}</p>
-      {observed ? sectionFacts(observed, focusName, 'Observed', `Observed comparison for ${key}`) : null}
-      {likeForLike ? sectionFacts(likeForLike, focusName, 'Like-for-like', `Like-for-like comparison for ${key}`) : null}
+      {result ? sectionFacts(result, focusName, mode === 'common' ? 'Like-for-like' : 'Observed', 'Comparison for ' + key) :
+        <p className="footnote">Like-for-like results are unavailable for this period.</p>}
       {diag && diag.available ? (
         <p className="footnote">
           Endpoint diagnostic: {isRatioId(observed?.basis?.id) ? `${fmtSigned(diag.endpointChange, 2)} pp change in annual ratio` : `${fmtUsdSigned(diag.endpointChange)} change in annual flow`} (descriptive only; not a ranking basis).
         </p>
       ) : null}
       <p className="footnote">The average excludes {focusName} and never affects ranking. Cumulative FDI is summed flows, never a stock.</p>
-    </div>
+    </article>
   );
 }
 
@@ -799,7 +801,8 @@ function CapitalSetPartition({ sets }) {
 /* Main Capital Flow Movement view                                      */
 /* ------------------------------------------------------------------ */
 
-export default function CapitalMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis, country = 'IND', countries = [], focusName = 'India', onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry }) {
+export default function CapitalMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis, country, countries = [], focusName = country ?? 'Selected economy', onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry }) {
+  const [preferredMode, setPreferredMode] = useState('observed');
   const [groupType, setGroupType] = useState(null);
   const [groupValue, setGroupValue] = useState('All');
   const [commonOpen, setCommonOpen] = useState(false);
@@ -833,6 +836,8 @@ export default function CapitalMovement({ availableYears, yearA, yearB, yearMid 
 
   const sameYear = yearA != null && yearB != null && yearA === yearB;
   const isAnnual = data?.kind === 'annual';
+  const supportsCommon = (data?.likeForLike?.length ?? 0) > 0;
+  const mode = supportsCommon ? preferredMode : 'observed';
   const focusIso = data?.focus?.iso3 ?? String(country).toUpperCase();
   const unit = data?.basis?.unit ?? null;
   const sets = useMemo(() => (data?.available ? buildCapitalSets(data) : null), [data]);
@@ -851,6 +856,7 @@ export default function CapitalMovement({ availableYears, yearA, yearB, yearMid 
     return { entries: rows.map((s) => ({ x: s.period ?? String(s.year), focus: s.focus?.value ?? null, benchmark: s.focus?.benchmark ?? null })) };
   }, [data, sets]);
 
+  const activeChart = mode === 'common' ? lflChart : observedChart;
   const series = useMemo(() => ([
     { key: 'focus', label: focusName },
     { key: 'benchmark', label: 'Other-economy average' },
@@ -896,17 +902,19 @@ export default function CapitalMovement({ availableYears, yearA, yearB, yearMid 
         <UnavailableState reason={data.reason} hint="Required World Bank data are incomplete for the selected comparison." />
       ) : null}
       {!loading && !error && data?.available ? (
-        <>
-          <h3 className="subhead">At a glance</h3>
-          <CapitalGlance data={data} focusName={focusName} />
+        <MovementResearch sections={['overview', 'coverage', 'evidence']}>
+          <MovementResearchPanel section="overview">
+
           <p className="card-unit">
             FDI net inflows are flows, not stocks. Negative and zero flows are valid data.
           </p>
 
-          <h3 className="subhead">{isAnnual ? 'Selected-year results — Observed and Like-for-like' : 'Period results — Observed and Like-for-like'}</h3>
-          <div className="cards" role="region" aria-label={isAnnual ? 'Capital selected-year results' : 'Capital period results'}>
+          <h3 className="subhead">{isAnnual ? 'Selected-year results' : 'Period results'}</h3>
+          <MovementModeControl mode={mode} onChange={setPreferredMode} supported={supportsCommon} scope={isAnnual ? 'year' : 'period'} />
+          <MovementPeriodResults label={isAnnual ? 'Capital selected-year results' : 'Capital period results'}>
             {(data.observed ?? []).map((s) => (
               <CapitalResultCard
+                mode={mode}
                 key={keyOf(s)}
                 observed={s}
                 likeForLike={(data.likeForLike ?? []).find((l) => keyOf(l) === keyOf(s))}
@@ -914,38 +922,24 @@ export default function CapitalMovement({ availableYears, yearA, yearB, yearMid 
                 diagnostic={data.descriptive}
               />
             ))}
-          </div>
+          </MovementPeriodResults>
 
-          <h3 className="subhead">Observed comparison</h3>
-          <p>
-            Each {isAnnual ? 'year' : 'period'} uses the economies satisfying that comparison&apos;s
-            basis-specific data requirement. Universes may differ between {isAnnual ? 'years' : 'periods'}.
-          </p>
-          {observedChart ? (
+          {activeChart ? (
             <ChartCard
-              title={`${data.basis?.label} — comparison (observed)`}
+              title={data.basis?.label + ' · ' + (mode === 'common' ? 'Like-for-like' : 'Observed')}
               unit={unit}
               source="World Bank WDI; calculated by this application"
             >
-              <AnnualOrCategoricalChart entries={observedChart.entries} series={series} unit={unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={activeChart.entries} series={series} unit={unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 
-          <h3 className="subhead">Like-for-like comparison</h3>
-          <p>
-            The same {sets?.commonRows?.length ?? 0} economies across all {isAnnual ? 'years' : 'periods'}
-            (intersection of the basis-specific requirements).
-          </p>
-          {lflChart ? (
-            <ChartCard
-              title={`${data.basis?.label} — comparison (like-for-like)`}
-              unit={unit}
-              source="World Bank WDI; calculated by this application"
-            >
-              <AnnualOrCategoricalChart entries={lflChart.entries} series={series} unit={unit} decimals={decimals} />
-            </ChartCard>
-          ) : null}
-
+          </MovementResearchPanel>
+          <MovementResearchPanel section="coverage">
+          <details className="details movement-overview">
+            <summary>Coverage and comparison overview</summary>
+            <CapitalGlance data={data} focusName={focusName} />
+          </details>
           {sets ? (
             <>
               <h3 className="subhead">What changed outside the common comparison set?</h3>
@@ -999,6 +993,8 @@ export default function CapitalMovement({ availableYears, yearA, yearB, yearMid 
             </>
           ) : null}
 
+          </MovementResearchPanel>
+          <MovementResearchPanel section="evidence">
           <MethodologyPanel
             source="App-derived"
             indicatorCode={`${data.metric?.indicatorCode} — ${data.metric?.label}`}
@@ -1029,7 +1025,8 @@ export default function CapitalMovement({ availableYears, yearA, yearB, yearMid 
               selector and /api/capital/country-groups).
             </p>
           </MethodologyPanel>
-        </>
+        </MovementResearchPanel>
+        </MovementResearch>
       ) : null}
     </div>
   );

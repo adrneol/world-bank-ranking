@@ -77,10 +77,10 @@ async function serve(db) {
 
 // --- Unit: IP extraction and routability ---
 
-test('client IP prefers X-Forwarded-For and normalizes mapped addresses', async () => {
+test('client IP ignores untrusted forwarding headers and normalizes mapped addresses', async () => {
   const { clientIpFromRequest, resetGeoCache } = await import('../src/services/geo.js');
   resetGeoCache();
-  assert.equal(clientIpFromRequest({ headers: { 'x-forwarded-for': '8.8.8.8, 10.0.0.1' } }), '8.8.8.8');
+  assert.equal(clientIpFromRequest({ headers: { 'x-forwarded-for': '8.8.8.8, 10.0.0.1' } }), null);
   assert.equal(clientIpFromRequest({ headers: {}, socket: { remoteAddress: '::ffff:9.9.9.9' } }), '9.9.9.9');
   assert.equal(clientIpFromRequest({ headers: {}, socket: { remoteAddress: '127.0.0.1' } }), '127.0.0.1');
   assert.equal(clientIpFromRequest({ headers: {} }), null);
@@ -89,18 +89,18 @@ test('client IP prefers X-Forwarded-For and normalizes mapped addresses', async 
 
 test('private, loopback and reserved addresses are never routable', async () => {
   const { isRoutableIp } = await import('../src/services/geo.js');
-  for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.5.4', '172.31.255.1', '192.168.0.1', '169.254.10.20', '0.0.0.0', '::1', '::', 'fe80::1', 'fc00::1', 'not-an-ip', '']) {
+  for (const ip of ['127.0.0.1', '10.1.2.3', '172.16.5.4', '172.31.255.1', '192.168.0.1', '169.254.10.20', '0.0.0.0', '::1', '::', 'fe80::1', 'fc00::1', 'not-an-ip', '203.0.113.7', '2001:db8::1', '']) {
     assert.equal(isRoutableIp(ip), false, ip);
   }
-  for (const ip of ['8.8.8.8', '1.1.1.1', '203.0.113.7', '2001:4860:4860::8888']) {
+  for (const ip of ['8.8.8.8', '1.1.1.1', '2001:4860:4860::8888']) {
     assert.equal(isRoutableIp(ip), true, ip);
   }
 });
 
 // --- HTTP: contract ---
 
-test('public IP resolves to an eligible ISO3 via the provider', async () => {
-  const { resetGeoCache } = await import('../src/services/geo.js');
+test('the route rejects untrusted forwarding and resolves a verified address through the provider', async () => {
+  const { resetGeoCache, lookupCountryForIp } = await import('../src/services/geo.js');
   resetGeoCache();
   providerMode = 'us';
   providerHits = [];
@@ -109,8 +109,9 @@ test('public IP resolves to an eligible ISO3 via the provider', async () => {
   try {
     const res = await api.get('/api/geo/country', { 'x-forwarded-for': '8.8.8.8' });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { iso3: 'USA', source: 'geoip' });
-    assert.ok(providerHits.some((u) => u.includes('8.8.8.8')), 'provider receives the client IP');
+    assert.deepEqual(res.body, { iso3: null, source: 'fallback' });
+    assert.equal(providerHits.length, 0);
+    assert.equal(await lookupCountryForIp(db, '8.8.8.8'), 'USA');
   } finally {
     await api.close();
     db.close();
@@ -136,7 +137,7 @@ test('private client IP short-circuits to fallback without a provider call', asy
 });
 
 test('unknown, aggregate and malformed provider results fall back safely', async () => {
-  const { resetGeoCache } = await import('../src/services/geo.js');
+  const { resetGeoCache, lookupCountryForIp } = await import('../src/services/geo.js');
   const db = await seedAsync();
   const api = await serve(db);
   try {
@@ -144,9 +145,7 @@ test('unknown, aggregate and malformed provider results fall back safely', async
       resetGeoCache();
       providerMode = mode;
       // eslint-disable-next-line no-await-in-loop
-      const res = await api.get('/api/geo/country', { 'x-forwarded-for': '8.8.4.4' });
-      assert.equal(res.status, 200, mode);
-      assert.deepEqual(res.body, { iso3: null, source: 'fallback' }, mode);
+      assert.equal(await lookupCountryForIp(db, '8.8.4.4'), null, mode);
     }
   } finally {
     await api.close();
@@ -155,15 +154,15 @@ test('unknown, aggregate and malformed provider results fall back safely', async
 });
 
 test('repeated lookups share one provider call (bounded cache)', async () => {
-  const { resetGeoCache } = await import('../src/services/geo.js');
+  const { resetGeoCache, lookupCountryForIp } = await import('../src/services/geo.js');
   resetGeoCache();
   providerMode = 'us';
   providerHits = [];
   const db = await seedAsync();
   const api = await serve(db);
   try {
-    await api.get('/api/geo/country', { 'x-forwarded-for': '1.1.1.1' });
-    await api.get('/api/geo/country', { 'x-forwarded-for': '1.1.1.1' });
+    assert.equal(await lookupCountryForIp(db, '1.1.1.1'), 'USA');
+    assert.equal(await lookupCountryForIp(db, '1.1.1.1'), 'USA');
     assert.equal(providerHits.length, 1, 'second lookup served from cache');
   } finally {
     await api.close();

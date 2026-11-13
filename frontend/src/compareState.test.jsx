@@ -135,21 +135,21 @@ describe('compare state decoupling and URL reconstruction', () => {
     ]);
   }
 
-  it('compare defaults initialize once from the entry focus (India vs USA)', async () => {
+  it('fresh Compare leaves both entities empty when geolocation is unavailable', async () => {
     stub = baseStubs();
     const { container, cleanup } = renderApp('/');
     await flushReact(act);
     drawerGo(container, 'Compare');
     await flushReact(act);
-    expect(cmpParam('cmpEntityA')).toBe('country:IND');
-    expect(cmpParam('cmpEntityB')).toBe('country:USA');
-    expect(container.textContent).toContain('India');
+    expect(cmpParam('cmpEntityA')).toBeNull();
+    expect(cmpParam('cmpEntityB')).toBeNull();
+    expect(stub.calls.some(url => url.includes('/api/compare?'))).toBe(false);
     cleanup();
   });
 
   it('changing focus elsewhere does not rewrite configured compare entities', async () => {
     stub = baseStubs();
-    const { container, cleanup } = renderApp('/');
+    const { container, cleanup } = renderApp('/?country=IND&cmpEntityA=country:IND&cmpEntityB=country:USA');
     await flushReact(act);
     drawerGo(container, 'Compare');
     await flushReact(act);
@@ -261,16 +261,16 @@ describe('compare state decoupling and URL reconstruction', () => {
     // verbatim (never reinterpreted), the empty slot fills deterministically.
     expect(container.textContent).toContain('Choose two entities');
     expect(cmpParam('cmpEntityA')).toBe('garbage!!!');
-    expect(cmpParam('cmpEntityB')).toBe('country:USA');
+    expect(cmpParam('cmpEntityB')).toBeNull();
     cleanup();
   });
 
-  it('partially specified cmp state fills only the empty slot', async () => {
+  it('partially specified cmp state leaves Entity B empty', async () => {
     stub = baseStubs();
     const { cleanup } = renderApp('/?view=compare&cmpEntityA=country:USA');
     await flushReact(act);
     expect(cmpParam('cmpEntityA')).toBe('country:USA');
-    expect(cmpParam('cmpEntityB')).toBe('country:USA');
+    expect(cmpParam('cmpEntityB')).toBeNull();
     cleanup();
   });
 

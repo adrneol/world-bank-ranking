@@ -370,7 +370,7 @@ describe('comparison section with a future year', () => {
     );
     expect(container.textContent).toContain('Absolute change by interval');
     expect(container.textContent).toContain('3,000 current US$');
-    expect(chartTicks).toContain('A → B');
+    expect(chartTicks).toContain('2025–2026');
   });
 });
 

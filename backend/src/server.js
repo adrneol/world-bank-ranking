@@ -1053,6 +1053,27 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     });
   });
 
+  // Public catalog routes reuse the same validators and response handlers.
+  // Their exact paths are outside the legacy UI's automatic TTL trigger list.
+  const publicBudgets = new Map();
+  const limitPublicRead = (req, res, next) => {
+    const minute = Math.floor(Date.now() / 60000);
+    const key = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    const previous = publicBudgets.get(key);
+    const count = previous?.minute === minute ? previous.count : 0;
+    if (count >= 60) {
+      res.setHeader('Retry-After', String(60 - Math.floor(Date.now() / 1000) % 60));
+      return res.status(429).json({ error: { code: 'PUBLIC_READ_RATE_LIMITED', message: 'Public read request limit reached. Retry after the indicated delay.' } });
+    }
+    if (!previous && publicBudgets.size >= 2048) publicBudgets.delete(publicBudgets.keys().next().value);
+    publicBudgets.set(key, { minute, count: count + 1 });
+    next();
+  };
+  const publicRead = (path, handler) => {
+    app.get(path, handler);
+    app.get(path.replace('/api/', '/api/public/'), limitPublicRead, handler);
+  };
+
   // ---------- default-country geolocation ----------
   // UX default only (never analytical): resolves the requester's eligible
   // ISO3 once, or null when detection is unavailable/invalid. Always 200 —
@@ -1060,12 +1081,13 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // excluded from AUTO_REFRESH_PATHS (side-effect free) and carrying no
   // methodology block (nothing here is economics).
   app.get('/api/geo/country', ah(async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
     const iso3 = await geoCountryForRequest(handle(), req);
     res.json({ iso3, source: iso3 ? 'geoip' : 'fallback' });
   }));
 
   // ---------- years ----------
-  app.get('/api/years', ah(async (req, res) => {
+  publicRead('/api/years', ah(async (req, res) => {
     const h = handle();
     // Cold-start seeding: the database is empty and the first ingest is
     // still running (boot or TTL-triggered empty refresh). There are no
@@ -1115,11 +1137,11 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     res.json({ ...result, methodology: methodologyBlock() });
   });
   app.get('/api/india/gdp-ranking', handleYearly);
-  app.get('/api/focus/yearly', handleYearly);
+  publicRead('/api/focus/yearly', handleYearly);
 
   // History is a bounded read of one serving snapshot, without rank work or
   // TTL engagement. The existing yearly endpoints retain their full contract.
-  app.get('/api/focus/history', ah(async (req, res) => {
+  publicRead('/api/focus/history', ah(async (req, res) => {
     const { startYear, endYear, country, series } = req.query;
     if (![startYear, endYear].every((year) => typeof year === 'string' && /^\d{4}$/.test(year))) {
       throw httpError(400, 'History requires startYear and endYear as four-digit years.', 'INVALID_YEAR');
@@ -1137,7 +1159,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
 
 
   // ---------- full level ranking ----------
-  app.get('/api/ranking', ah(async (req, res) => {
+  publicRead('/api/ranking', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
     const result = await buildFullRanking(handle(), {
@@ -1152,7 +1174,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- rank verification ----------
-  app.get('/api/ranking/verify', ah(async (req, res) => {
+  publicRead('/api/ranking/verify', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
     const result = await buildRankVerification(handle(), {
@@ -1165,7 +1187,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- full YoY ranking ----------
-  app.get('/api/yoy-ranking', ah(async (req, res) => {
+  publicRead('/api/yoy-ranking', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
     const result = await buildFullYoyRanking(handle(), {
@@ -1180,7 +1202,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- YoY verification ----------
-  app.get('/api/yoy-ranking/verify', ah(async (req, res) => {
+  publicRead('/api/yoy-ranking/verify', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator, METRIC_KEYS[0]);
     const year = parseYear(req.query.year, 'year');
     const result = await buildYoyVerification(handle(), {
@@ -1193,7 +1215,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- rank-movement comparison (level, separate analytical layer) ----------
-  app.get('/api/comparison/level', ah(async (req, res) => {
+  publicRead('/api/comparison/level', ah(async (req, res) => {
     // No silent indicator default: the comparison must name its series.
     const metricKey = parseMetric(req.query.indicator);
     const yearA = parseYear(req.query.yearA, 'yearA');
@@ -1246,7 +1268,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // "group:IND,CHN"); capability (entity types + metric semantics +
   // operation) is enforced in the service with explicit reason codes.
   // No silent indicator default: the comparison must name its series.
-  app.get('/api/compare', ah(async (req, res) => {
+  publicRead('/api/compare', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator);
     const yearA = parseYear(req.query.yearA, 'yearA');
     if (yearA === undefined) {
@@ -1276,7 +1298,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // Countries and official aggregates come from stored World Bank metadata —
   // never hard-coded lists. Optional indicator (+year) annotates each entity
   // with stored-data presence for capability-driven pickers.
-  app.get('/api/entities', ah(async (req, res) => {
+  publicRead('/api/entities', ah(async (req, res) => {
     const h = handle();
     const type = String(req.query.type ?? 'country').toLowerCase();
     if (type !== 'country' && type !== 'aggregate' && type !== 'all') {
@@ -1333,7 +1355,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // ---------- custom group evaluation preview (Phase 4, read-only) ----------
   // Validates a request-defined member set and reports capability + coverage
   // without performing a comparison. Groups are never persisted.
-  app.get('/api/groups/evaluate', ah(async (req, res) => {
+  publicRead('/api/groups/evaluate', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator);
     const rawA = req.query.yearA;
     const rawB = req.query.yearB;
@@ -1354,7 +1376,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // SUM/AVG over [startYear, endYear) with strict completeness. No new math
   // here — buildPeriodSummary owns the contract; the route only validates
   // request shape (unknown metric/operation/years fail closed with 400).
-  app.get('/api/periods/summary', ah(async (req, res) => {
+  publicRead('/api/periods/summary', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator);
     const startYear = parseYear(req.query.startYear, 'startYear');
     const endYear = parseYear(req.query.endYear, 'endYear');
@@ -1381,7 +1403,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // Uses S+1..E for inflation/deflator average+cumulative and endpoint-only
   // for CPI period change — never the generic [S,E) flow interval.
   // GDP/GDP-per-capita paths are untouched.
-  app.get('/api/movement/prices', ah(async (req, res) => {
+  publicRead('/api/movement/prices', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
     if (!isPricesMetric(metricKey)) {
       throw httpError(
@@ -1442,7 +1464,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // Trade-only: annual value, CAGR, inclusive period total (S..E),
   // inclusive period average. Never the generic [S,E) flow interval and
   // never the Prices S+1..E inflation interval. GDP/Prices paths untouched.
-  app.get('/api/movement/trade', ah(async (req, res) => {
+  publicRead('/api/movement/trade', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
     if (!isTradeMetric(metricKey)) {
       throw httpError(
@@ -1503,7 +1525,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // Capital-only: annual, cumulative/average over S+1..E, cumulative FDI/GDP
   // from FDI+GDP legs. Never Trade S..E, never [S,E), never % growth.
   // GDP/Prices/Trade paths untouched.
-  app.get('/api/movement/capital', ah(async (req, res) => {
+  publicRead('/api/movement/capital', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
     if (!isCapitalMetric(metricKey)) {
       throw httpError(
@@ -1564,7 +1586,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // FX-only: annual level (never ranked), annual change (t-1/t), period
   // change (endpoints S/E) with display-only CAGR. LOO median benchmark.
   // GDP/Prices/Trade/Capital paths untouched.
-  app.get('/api/movement/fx', ah(async (req, res) => {
+  publicRead('/api/movement/fx', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
     if (!isFxMetric(metricKey)) {
       throw httpError(
@@ -1625,7 +1647,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // External-only: CA/GDP ratios from CA+GDP legs, reserves stock/endpoints/
   // coverage, remittance flows + intensity. S+1..E for flow sequences,
   // endpoints for reserve change. Other families untouched.
-  app.get('/api/movement/external', ah(async (req, res) => {
+  publicRead('/api/movement/external', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
     if (!isExternalMetric(metricKey)) {
       throw httpError(
@@ -1686,7 +1708,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // Population-only: annual stock, endpoint absolute change, endpoint %
   // growth with display-only CAGR. Stock semantics: never summed/averaged.
   // Other families untouched.
-  app.get('/api/movement/population', ah(async (req, res) => {
+  publicRead('/api/movement/population', ah(async (req, res) => {
     const metricKey = parseMetric(req.query.indicator ?? req.query.metric);
     if (!isPopulationMetric(metricKey)) {
       throw httpError(
@@ -1744,7 +1766,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- coverage (+ changing-totals explanation) ----------
-  app.get('/api/coverage', ah(async (req, res) => {
+  publicRead('/api/coverage', ah(async (req, res) => {
     const h = handle();
     const year = parseYear(req.query.year, 'year');
     const subject = parseOptionalSubject(req.query.subject);
@@ -1779,7 +1801,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- raw observations with provenance ----------
-  app.get('/api/observations', ah(async (req, res) => {
+  publicRead('/api/observations', ah(async (req, res) => {
     const h = handle();
     const metricKey = parseMetric(req.query.indicator);
     const year = parseYear(req.query.year, 'year');
@@ -1840,7 +1862,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- countries ----------
-  app.get('/api/countries', ah(async (req, res) => {
+  publicRead('/api/countries', ah(async (req, res) => {
     const h = handle();
     const include = String(req.query.includeAggregates ?? 'true').toLowerCase();
     const includeAggregates = !['0', 'false', 'no'].includes(include);
@@ -1868,7 +1890,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // production-enabled universe only, so Phase-2 disabled definitions cannot
   // alter a single field of this response. Rich semantic metadata lives on
   // the new GET /api/indicators endpoint instead (guardrails §26).
-  app.get('/api/metadata', ah(async (req, res) => {
+  publicRead('/api/metadata', ah(async (req, res) => {
     const h = handle();
     res.json({
       source: SOURCE_INFO,
@@ -1895,7 +1917,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // ingestion, no calculations, no secrets — metadata display only. Future
   // capability-driven UI (Phase 4/6) gates on these flags; legacy clients
   // keep using /api/metadata, which is unchanged above.
-  app.get('/api/indicators', ah(async (req, res) => {
+  publicRead('/api/indicators', ah(async (req, res) => {
     const h = handle();
     // One batched read for every ingested flag below (never per-metric queries).
     const ingestedKeys = new Set((await listIndicators(h)).map((r) => r.metric_key));
@@ -1935,7 +1957,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- data status ----------
-  app.get('/api/data-status', ah(async (req, res) => {
+  publicRead('/api/data-status', ah(async (req, res) => {
     const h = handle();
     const target = activeTargetOf(shared);
     const cache = await getCacheStatus(h);

@@ -337,8 +337,8 @@ describe('compare UI: observed and like-for-like', () => {
     expect(text).toContain('10.00%');
     expect(text).toContain('15.00 percentage points');
     if (intervals) {
-      expect(view.container.querySelector('[aria-label="A → B comparison"] strong').textContent).toBe('15.00 percentage points');
-      expect(view.container.querySelector('[aria-label="A → B annual observations"]').textContent).toContain('721,000,000,000.00');
+      expect(view.container.querySelector('[aria-label="2004–2005 comparison"] strong').textContent).toBe('15.00 percentage points');
+      expect(view.container.querySelector('[aria-label="2004–2005 annual observations"]').textContent).toContain('721,000,000,000.00');
     } else {
       expect([...view.container.querySelectorAll('.result-value')].map((node) => node.textContent)).toEqual([
         '+25.00%', '+10.00%', '+15.00 percentage points',
@@ -442,7 +442,7 @@ describe('compare UI: observed and like-for-like', () => {
     expect(view.container.textContent).toContain('Analysis');
     expect(view.container.textContent).toContain('Comparison mode');
     expect(view.container.textContent).toContain('Middle year (optional)');
-    expect(view.container.textContent).toContain('Year C (later) (optional)');
+    expect(view.container.textContent).toContain('End year (optional)');
     expect(view.container.textContent).not.toContain('Group value mode');
     expect(view.container.textContent).not.toContain('Focus country');
     expect(view.container.querySelector('#mv-country')).toBeNull();
@@ -495,7 +495,7 @@ describe('compare UI: observed and like-for-like', () => {
     await flushReact(act);
     const options = [...document.querySelectorAll('.combo-option')].map((node) => node.textContent);
     expect(options.some((label) => label.includes('Total GDP level (value)'))).toBe(true);
-    expect(options.some((label) => label.includes('Annual flow (endpoint B vs A)'))).toBe(true);
+    expect(options.some((label) => label.includes('Annual flow (end year vs start year)'))).toBe(true);
     expect(options).not.toContain('total_constant');
   });
 
@@ -652,7 +652,7 @@ describe('compare UI: observed and like-for-like', () => {
     const note = view.container.querySelector('.compare-missing-note');
     expect(note?.textContent).toContain('India (IND) — 2005');
     expect(note?.textContent).toContain('Total GDP — Nominal — Current US$ (NY.GDP.MKTP.CD)');
-    expect(note?.textContent).toContain('Entity A A → C, Entity B A → C remains available');
+    expect(note?.textContent).toContain('India 2004–2006, Big two 2004–2006 remains available');
   });
 
   it('shows the universe only in like-for-like mode', async () => {
@@ -682,7 +682,7 @@ describe('compare UI: observed and like-for-like', () => {
     await flushReact(act);
 
     expect(view.container.querySelector('#cmp-year-c')).toBeTruthy();
-    expect(view.container.textContent).toContain('A → B');
+    expect(view.container.textContent).toContain('2004–2005');
     const call = stub.calls.find((href) => href.includes('/api/compare'));
     expect(call).toContain('yearC=2006');
     expect(call).toContain('yearB=2005');
@@ -719,7 +719,7 @@ describe('compare UI: observed and like-for-like', () => {
     ctx = { stub, cleanup: view.cleanup };
     await flushReact(act);
 
-    for (const label of ['A → B', 'B → C', 'A → C']) expect(view.container.textContent).toContain(label);
+    for (const label of ['2004–2005', '2005–2006', '2004–2006']) expect(view.container.textContent).toContain(label);
     expect(view.container.textContent).toContain('Entity A — India');
     expect(view.container.textContent).toContain('Entity B — Big two');
     expect(view.container.textContent).toContain('52,000,000,000.00 current US$');
@@ -770,15 +770,15 @@ describe('compare UI: observed and like-for-like', () => {
     const view = renderCompare({ yearB: null, yearC: 2006, operation: 'absolute_change' });
     ctx = { stub, cleanup: view.cleanup };
     await flushReact(act);
-    expect(view.container.textContent).toContain('A → C');
+    expect(view.container.textContent).toContain('2004–2006');
     expect(view.container.querySelectorAll('.compare-interval-card')).toHaveLength(1);
-    expect(view.container.querySelector('.compare-interval-card').textContent).toContain('A → C');
+    expect(view.container.querySelector('.compare-interval-card').textContent).toContain('2004–2006');
     const call = stub.calls.find((href) => href.includes('/api/compare'));
     expect(call).toContain('yearC=2006');
     expect(call).not.toContain('yearB=');
   });
 
-  it('keeps group search bounded, supports ISO search, and separates search-clear from selection-clear', async () => {
+  it('stages group edits until Apply and prevents duplicate membership', async () => {
     let latest = null;
     const countries = Array.from({ length: 100 }, (_, i) => ({ iso3: `C${String(i).padStart(2, '0')}`, name: `Country ${i}` }));
     countries.push({ iso3: 'USA', name: 'United States' });
@@ -791,36 +791,24 @@ describe('compare UI: observed and like-for-like', () => {
     act(() => renderPicker());
     ctx = { stub, cleanup: () => { act(() => root.unmount()); container.remove(); } };
 
-    expect(container.querySelector('#group-test-candidate-list')).toBeNull();
-    expect(container.textContent).toContain('1 selected');
-    act(() => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Add countries').click());
+    const dialog = container.querySelector('dialog');
+    dialog.showModal = () => dialog.setAttribute('open', '');
+    dialog.close = () => dialog.removeAttribute('open');
     await flushReact(act);
+    act(() => container.querySelector('.group-editor-trigger').click());
     const search = container.querySelector('#group-test-group-search');
-    expect(search).toBeTruthy();
     act(() => setInputValue(search, 'USA'));
-    await flushReact(act);
-    expect(container.querySelectorAll('#group-test-candidate-list [role="option"]')).toHaveLength(1);
-    expect(container.querySelector('#group-test-candidate-list').textContent).toContain('United States');
-    act(() => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Clear search').click());
-    await flushReact(act);
-    expect(container.querySelector('#group-test-country-options')).toBeTruthy();
-    expect(container.querySelectorAll('#group-test-candidate-list [role="option"]').length).toBeLessThanOrEqual(40);
-    act(() => setInputValue(search, 'USA'));
-    await flushReact(act);
-    act(() => container.querySelector('#group-test-candidate-list button').click());
-    expect(latest.members).toEqual(['IND', 'USA']);
-    act(() => renderPicker());
-    expect(container.querySelectorAll('.group-selected-chips .chip')).toHaveLength(2);
-    expect(container.querySelectorAll('#group-test-candidate-list [role="option"]').length).toBeLessThanOrEqual(40);
-    act(() => container.querySelector('[aria-label="Remove IND from group"]').click());
-    expect(latest.members).toEqual(['USA']);
-    act(() => renderPicker());
-    expect(container.querySelectorAll('.group-selected-chips .chip')).toHaveLength(1);
-    act(() => container.querySelector('.group-selection-heading .btn-ghost').click());
-    expect(latest.members).toEqual([]);
-    act(() => renderPicker());
-    expect(container.querySelector('#group-test-candidate-list')).toBeNull();
-    expect(container.textContent).toContain('No countries selected');
+    const option = dialog.querySelector('.group-editor-options input');
+    expect(dialog.querySelectorAll('.group-editor-options input')).toHaveLength(1);
+    act(() => option.click());
+    expect(option.checked).toBe(true);
+    expect(latest.members).toEqual(['IND']);
+    expect(dialog.textContent).toContain('2 selected');
+    act(() => dialog.querySelector('[aria-label="Remove IND from group"]').click());
+    act(() => setInputValue(dialog.querySelector('#group-test-group-label'), 'Research peers'));
+    act(() => dialog.querySelector('footer button').click());
+    expect(latest).toEqual({ kind: 'custom_group', members: ['USA'], label: 'Research peers' });
+    expect(dialog.hasAttribute('open')).toBe(false);
   });
 
   it('never issues an observations request for a chart', async () => {

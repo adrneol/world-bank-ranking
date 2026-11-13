@@ -1,0 +1,130 @@
+{
+  "title": "Public Economic Data API",
+  "source": "World Bank World Development Indicators (source 2)",
+  "publisher": "Independent WDI research application",
+  "format": "application/json",
+  "method": "GET",
+  "rateLimit": "60 requests per minute per server-resolved client address; HTTP 429 includes Retry-After.",
+  "resources": [
+    [
+      "/api/public/countries",
+      "Economies and ISO3 identities",
+      "Use the non-aggregate economy registry for focus and group members."
+    ],
+    [
+      "/api/public/entities",
+      "Countries and official aggregates",
+      "type, search, page, pageSize, indicator, year"
+    ],
+    [
+      "/api/public/indicators",
+      "Registered measures and comparison capabilities",
+      "Read the metric key, indicator code, unit, measurement basis and supported operations."
+    ],
+    [
+      "/api/public/metadata",
+      "Source and methodology",
+      "Registered indicator definitions and supported analysis semantics."
+    ],
+    [
+      "/api/public/years",
+      "Published year coverage",
+      "Use the available years and per-metric availability returned by the API."
+    ],
+    [
+      "/api/public/observations",
+      "Stored WDI observation evidence",
+      "indicator, year, optional country (ISO3). Without country, one indicator and year only."
+    ],
+    [
+      "/api/public/focus/yearly",
+      "Annual observations and focus evidence",
+      "country, subject, startYear, endYear"
+    ],
+    [
+      "/api/public/focus/history",
+      "Bounded annual trajectories",
+      "country, comma-separated series, startYear, endYear. Up to 8 series and 100 years."
+    ],
+    [
+      "/api/public/ranking",
+      "Level rankings",
+      "indicator, year, country, page, pageSize, search"
+    ],
+    [
+      "/api/public/ranking/verify",
+      "Level rank verification",
+      "indicator, year, country, neighbors"
+    ],
+    [
+      "/api/public/yoy-ranking",
+      "Year-over-year rankings",
+      "indicator, year, country, page, pageSize, search"
+    ],
+    [
+      "/api/public/yoy-ranking/verify",
+      "YoY observations and rank verification",
+      "indicator, year, country, neighbors"
+    ],
+    [
+      "/api/public/compare",
+      "Compare countries, groups and official aggregates",
+      "entityA, entityB, indicator, basis, operation, yearA, optional yearB/yearC, groupMode"
+    ],
+    [
+      "/api/public/groups/evaluate",
+      "Group eligibility and capability",
+      "members, indicator, optional label. No stored group is created."
+    ],
+    [
+      "/api/public/comparison/level",
+      "Level or growth Movement",
+      "indicator, country, yearA, yearB, optional yearMid, mode, detail"
+    ],
+    [
+      "/api/public/periods/summary",
+      "Period totals and averages",
+      "indicator, country, startYear, endYear, operation"
+    ],
+    [
+      "/api/public/movement/prices",
+      "Prices Movement",
+      "indicator, basis, country, yearA, yearB, optional yearMid and group filters"
+    ],
+    [
+      "/api/public/movement/trade",
+      "Trade Movement",
+      "indicator, basis, country, yearA, yearB, optional yearMid and group filters"
+    ],
+    [
+      "/api/public/movement/capital",
+      "Capital flows Movement",
+      "indicator, basis, country, yearA, yearB, optional yearMid and group filters"
+    ],
+    [
+      "/api/public/movement/fx",
+      "Exchange-rate Movement",
+      "indicator, basis, country, yearA, yearB, optional yearMid and group filters"
+    ],
+    [
+      "/api/public/movement/external",
+      "External sector Movement",
+      "indicator, basis, country, yearA, yearB, optional yearMid and group filters"
+    ],
+    [
+      "/api/public/movement/population",
+      "Population Movement",
+      "indicator, basis, country, yearA, yearB, optional yearMid and group filters"
+    ],
+    [
+      "/api/public/coverage",
+      "Coverage and missingness",
+      "indicator, subject, country, year, optional fromYear and toYear"
+    ],
+    [
+      "/api/public/data-status",
+      "Serving data and source freshness",
+      "Use the reported vintage, check time and publication time for their separate meanings."
+    ]
+  ]
+}

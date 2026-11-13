@@ -207,7 +207,7 @@ describe('analytical navigation and history', () => {
 
     await goBack();
     expect(new URLSearchParams(window.location.search).get('country')).toBeNull();
-    expect(container.querySelector('.app-header h1').textContent).toContain('India');
+    expect(container.querySelector('.app-header h1').textContent).toContain('Select a focus economy');
     cleanup();
   });
 
@@ -227,9 +227,9 @@ describe('analytical navigation and history', () => {
 
   it('rank sub-tab persists in the URL and across reload', async () => {
     stub = baseStubs();
-    const { container, cleanup } = renderApp('/?view=rank');
+    const { container, cleanup } = renderApp('/?view=rank&country=IND');
     await flushReact(act);
-    const tableTab = [...container.querySelectorAll('.subtab')].find((el) => el.textContent === 'Full table');
+    const tableTab = [...container.querySelectorAll('.subtab')].find((el) => el.textContent === 'Full ranking');
     expect(tableTab).toBeTruthy();
     act(() => {
       tableTab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -244,13 +244,13 @@ describe('analytical navigation and history', () => {
     const second = renderApp(window.location.search);
     await flushReact(act);
     expect(second.container.textContent).toContain('Full country ranking');
-    expect(second.container.querySelector('.subtab-active').textContent).toBe('Full table');
+    expect(second.container.querySelector('.subtab-active').textContent).toBe('Full ranking');
     second.cleanup();
   });
 
   it('yoy sub-tab persists in the URL and across reload', async () => {
     stub = baseStubs();
-    const { container, cleanup } = renderApp('/?view=yoy');
+    const { container, cleanup } = renderApp('/?view=yoy&country=IND');
     await flushReact(act);
     const verifyTab = [...container.querySelectorAll('.subtab')].find((el) => el.textContent.includes('Verify'));
     expect(verifyTab).toBeTruthy();

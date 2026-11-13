@@ -13,16 +13,15 @@
  * renders through a portal (never clipped by card/table overflow
  * ancestors) and positions viewport-aware (down when space allows, up near
  * the bottom edge, constrained otherwise — never hard-coded top:100%).
- * Mobile uses the same anchored menu with visual-viewport clamping, never
- * a page-width sheet, so long year lists stay recognizably anchored to
- * their trigger.
+ * Mobile uses the same anchored menu with visual-viewport clamping. Search
+ * is focused on explicit touch so opening a list leaves the keyboard closed.
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Field } from './ui.jsx';
 import {
-  computePopoverPlacement,
+  anchoredPlacement,
   estimatePopoverHeight,
   getPortalMount,
   viewportSize,
@@ -80,6 +79,7 @@ export function SearchableSelect({
   const inputRef = useRef(null);
   const listRef = useRef(null);
   const popoverRef = useRef(null);
+  const touchOpen = useRef(false);
   const listId = useId();
   const valueId = useId();
   // Flatten once per options identity: option arrays are rebuilt by callers,
@@ -123,9 +123,18 @@ export function SearchableSelect({
 
   function commit(item) {
     if (!item || item.disabled) return;
+    const trigger = buttonRef.current;
+    const anchor = trigger?.getBoundingClientRect().top;
     closeMenu();
     if (item.value !== value) onChange?.(item.value);
-    buttonRef.current?.focus({ preventScroll: true });
+    trigger?.focus({ preventScroll: true });
+    // Selecting a year can reflow the chart below the trigger. Preserve the
+    // trigger's screen position if browser scroll anchoring follows that chart.
+    if (anchor != null && item.value !== value) requestAnimationFrame(() => {
+      if (!trigger.isConnected || document.activeElement !== trigger) return;
+      const shift = trigger.getBoundingClientRect().top - anchor;
+      if (Math.abs(shift) > 1) window.scrollBy({ top: shift, behavior: 'instant' });
+    });
   }
 
   // Measure the trigger and place the popover before paint (no flash), then
@@ -134,15 +143,7 @@ export function SearchableSelect({
     if (!open) return;
     const rect = buttonRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const viewport = viewportSize();
-    setPlacement(
-      computePopoverPlacement({
-        trigger: { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
-        viewportW: viewport.width,
-        viewportH: viewport.height,
-        contentHeight: estimatePopoverHeight({ optionCount: fullOptionCount, showFilter }),
-      }),
-    );
+    setPlacement(anchoredPlacement(rect, estimatePopoverHeight({ optionCount: fullOptionCount, showFilter })));
   }, [open, fullOptionCount, showFilter]);
 
   // Reposition (never leave a stale position) on viewport change: resize,
@@ -151,45 +152,31 @@ export function SearchableSelect({
   useEffect(() => {
     if (!open) return undefined;
     let frame = 0;
-    const reposition = () => {
+    const reposition = (event) => {
+      if (event.target instanceof Node && (popoverRef.current?.contains(event.target) || rootRef.current?.contains(event.target))) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const rect = buttonRef.current?.getBoundingClientRect();
         if (!rect) return;
         const viewport = viewportSize();
-        setPlacement(
-          computePopoverPlacement({
-            trigger: { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width },
-            viewportW: viewport.width,
-            viewportH: viewport.height,
-            contentHeight: estimatePopoverHeight({ optionCount: fullOptionCount, showFilter }),
-          }),
-        );
+        if (rect.bottom <= viewport.offsetTop || rect.top >= viewport.offsetTop + viewport.height) {
+          if (document.activeElement !== inputRef.current) { closeMenu(); return; }
+        }
+        setPlacement(anchoredPlacement(rect, estimatePopoverHeight({ optionCount: fullOptionCount, showFilter })));
       });
     };
     window.addEventListener('resize', reposition);
+    document.addEventListener('scroll', reposition, true);
     window.visualViewport?.addEventListener('resize', reposition);
+    window.visualViewport?.addEventListener('scroll', reposition);
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener('resize', reposition);
+      document.removeEventListener('scroll', reposition, true);
       window.visualViewport?.removeEventListener('resize', reposition);
+      window.visualViewport?.removeEventListener('scroll', reposition);
     };
   }, [open, fullOptionCount, showFilter]);
-
-  // Scrolling anywhere outside the trigger+popover closes the menu (an open
-  // menu never holds a stale viewport position). Scrolls inside the option
-  // list or from the trigger itself are ignored.
-  useEffect(() => {
-    if (!open) return undefined;
-    const onScroll = (event) => {
-      const target = event.target;
-      if (rootRef.current?.contains(target)) return;
-      if (popoverRef.current?.contains(target)) return;
-      closeMenu();
-    };
-    document.addEventListener('scroll', onScroll, true);
-    return () => document.removeEventListener('scroll', onScroll, true);
-  }, [open ]);
 
   // Click-outside closes. The portal lives outside rootRef by design, so the
   // popover itself must be excluded explicitly.
@@ -201,14 +188,22 @@ export function SearchableSelect({
         closeMenu();
       }
     };
+    document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('mousedown', onPointerDown);
+    };
   }, [open ]);
 
-  // Focus the filter box on open (after the portalled popover has mounted).
+  const popoverReady = placement !== null;
+  // Touch opens the list first. Tapping Search explicitly opens the keyboard.
   useEffect(() => {
-    if (open && placement) (inputRef.current ?? listRef.current)?.focus({ preventScroll: true });
-  }, [open, placement]);
+    if (open && popoverReady) {
+      const target = touchOpen.current ? listRef.current : inputRef.current ?? listRef.current;
+      target?.focus({ preventScroll: true });
+    }
+  }, [open, popoverReady]);
 
   function move(delta) {
     if (navigable.length === 0) return;
@@ -236,6 +231,11 @@ export function SearchableSelect({
       closeMenu();
       buttonRef.current?.focus({ preventScroll: true });
     } else if (event.key === 'Tab') {
+      if (event.shiftKey && event.currentTarget === listRef.current && inputRef.current) {
+        event.preventDefault();
+        inputRef.current.focus({ preventScroll: true });
+        return;
+      }
       closeMenu();
       buttonRef.current?.focus({ preventScroll: true });
     }
@@ -247,7 +247,7 @@ export function SearchableSelect({
   // the selected option on open, since openMenu starts navigation there.
   useEffect(() => {
     if (!open || !activeId) return;
-    if (!placement) return;
+    if (!popoverReady) return;
     const list = listRef.current;
     const option = document.getElementById(activeId);
     if (!list || !option) return;
@@ -255,10 +255,9 @@ export function SearchableSelect({
     const row = option.getBoundingClientRect();
     if (row.top < viewport.top) list.scrollTop -= viewport.top - row.top;
     if (row.bottom > viewport.bottom) list.scrollTop += row.bottom - viewport.bottom;
-  }, [open, activeId, placement]);
+  }, [open, activeId, popoverReady]);
 
   const portalNode = open ? getComboPortal() : null;
-  const popoverReady = placement !== null;
 
   function renderPopover() {
     const anchoredStyle =
@@ -287,6 +286,7 @@ export function SearchableSelect({
             aria-controls={listId}
             aria-activedescendant={activeId}
             aria-autocomplete="list"
+            enterKeyHint="search"
             value={query}
             placeholder="Type to filter…"
             aria-label={`Filter ${typeof label === 'string' ? label : 'options'}`}
@@ -300,9 +300,9 @@ export function SearchableSelect({
           className="combo-list"
           role="listbox"
           id={listId}
-          aria-activedescendant={showFilter ? undefined : activeId}
+          aria-activedescendant={activeId}
           aria-label={ariaLabel ?? (typeof label === 'string' ? label : undefined)}
-          tabIndex={showFilter ? undefined : 0}
+          tabIndex={showFilter ? -1 : 0}
           onKeyDown={handleListKeyDown}
         >
           {rows.length === 0 ? (
@@ -354,7 +354,7 @@ export function SearchableSelect({
                     commit(item);
                   }}
                   onClick={(event) => { if (event.detail === 0) commit(item); }}
-                  onMouseEnter={() => setActiveIndex(navIndex)}
+                  onPointerMove={(event) => { if (event.pointerType === 'mouse') setActiveIndex(navIndex); }}
                 >
                   <span className="combo-label">{item.label}</span>
                   {item.hint ? <span className="combo-option-note">{item.hint}</span> : null}
@@ -386,6 +386,7 @@ export function SearchableSelect({
           aria-describedby={selected ? valueId : undefined}
           aria-label={ariaLabel ?? (typeof label === 'string' ? label : undefined)}
           disabled={disabled}
+          onPointerDown={(event) => { touchOpen.current = event.pointerType === 'touch'; }}
           onClick={() => {
             if (open) closeMenu();
             else openMenu();
@@ -398,6 +399,7 @@ export function SearchableSelect({
             }
             if ((event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') && !open) {
               event.preventDefault();
+              touchOpen.current = false;
               openMenu();
             }
           }}

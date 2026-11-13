@@ -17,6 +17,7 @@
 import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
+import { MovementModeControl, MovementPeriodResults, MovementResearch, MovementResearchPanel } from '../components/MovementComparison.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { isPricesMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -334,26 +335,27 @@ function sectionFacts(section, focusName, decimals, heading, groupLabel) {
   );
 }
 
-function PricesResultCard({ observed, likeForLike, focusName }) {
+function PricesResultCard({ observed, likeForLike, mode, focusName }) {
   const key = observed ? (observed.period ?? String(observed.year)) : '?';
   const basisId = observed?.basis?.id ?? likeForLike?.basis?.id;
   const basisLabel = observed?.basis?.label ?? likeForLike?.basis?.label ?? '';
   const unit = displayUnit(basisId, observed?.basis?.unit ?? likeForLike?.basis?.unit ?? '');
   const rankWording = observed?.basis?.rankWording ?? likeForLike?.basis?.rankWording;
-  const f = observed?.focus;
+  const result = mode === 'common' ? likeForLike : observed;
+  const f = result?.focus;
   const decimals = decimalsFor(basisId);
   return (
-    <div className="card">
+    <article className="movement-period">
       <h3>{key} <span className="card-unit">{basisLabel}</span></h3>
       <p className="card-unit">{possessive(focusName)} {lowerFirst(basisLabel)}</p>
       <p className="card-result-value" aria-label={`${possessive(focusName)} ${lowerFirst(basisLabel)} ${f ? fmt(f.value, decimals) : 'unavailable'} in ${key}`}>
         {f ? `${fmt(f.value, decimals)}${unit ? ` ${unit}` : ''}` : 'n/a'}
       </p>
       <p className="card-unit">{rankWording ?? 'Index level — descriptive, no cross-country rank.'}</p>
-      {observed ? sectionFacts(observed, focusName, decimals, 'Observed', `Observed comparison for ${key}`) : null}
-      {likeForLike ? sectionFacts(likeForLike, focusName, decimals, 'Like-for-like', `Like-for-like comparison for ${key}`) : null}
+      {result ? sectionFacts(result, focusName, decimals, mode === 'common' ? 'Like-for-like' : 'Observed', 'Comparison for ' + key) :
+        <p className="footnote">Like-for-like results are unavailable for this period.</p>}
       <p className="footnote">The average excludes {focusName} and never affects ranking.</p>
-    </div>
+    </article>
   );
 }
 
@@ -794,7 +796,8 @@ function PriceSetPartition({ sets }) {
 /* Main Prices Movement view                                           */
 /* ------------------------------------------------------------------ */
 
-export default function PricesMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis, country = 'IND', countries = [], focusName = 'India', onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry }) {
+export default function PricesMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis, country, countries = [], focusName = country ?? 'Selected economy', onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry }) {
+  const [preferredMode, setPreferredMode] = useState('observed');
   const [groupType, setGroupType] = useState(null);
   const [groupValue, setGroupValue] = useState('All');
   const [commonOpen, setCommonOpen] = useState(false);
@@ -829,6 +832,8 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
   const decimals = decimalsFor(effectiveBasis);
   const sameYear = yearA != null && yearB != null && yearA === yearB;
   const isAnnual = data?.kind === 'annual';
+  const supportsCommon = (data?.likeForLike?.length ?? 0) > 0;
+  const mode = supportsCommon ? preferredMode : 'observed';
   const focusIso = data?.focus?.iso3 ?? String(country).toUpperCase();
   const unit = displayUnit(effectiveBasis, data?.basis?.unit ?? null);
 
@@ -860,6 +865,7 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
     };
   }, [data, sets]);
 
+  const activeChart = mode === 'common' ? lflChart : observedChart;
   const series = useMemo(() => ([
     { key: 'focus', label: focusName },
     { key: 'benchmark', label: 'Other-economy average' },
@@ -904,9 +910,9 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
         <UnavailableState reason={data.reason} hint="Required World Bank data are incomplete for the selected period." />
       ) : null}
       {!loading && !error && data?.available ? (
-        <>
-          <h3 className="subhead">At a glance</h3>
-          <PricesGlance data={data} focusName={focusName} />
+        <MovementResearch sections={['overview', 'coverage', 'evidence']}>
+          <MovementResearchPanel section="overview">
+
           {data.descriptive ? (
             <div className="card">
               <h3>Index-point changes <span className="card-unit">descriptive, no rank</span></h3>
@@ -923,48 +929,36 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
             </div>
           ) : null}
 
-          <h3 className="subhead">{isAnnual ? 'Selected-year results — Observed and Like-for-like' : 'Period results — Observed and Like-for-like'}</h3>
-          <div className="cards" role="region" aria-label={isAnnual ? 'Prices selected-year results' : 'Prices period results'}>
+          <h3 className="subhead">{isAnnual ? 'Selected-year results' : 'Period results'}</h3>
+          <MovementModeControl mode={mode} onChange={setPreferredMode} supported={supportsCommon} scope={isAnnual ? 'year' : 'period'} />
+          <MovementPeriodResults label={isAnnual ? 'Prices selected-year results' : 'Prices period results'}>
             {(data.observed ?? []).map((s) => (
               <PricesResultCard
+                mode={mode}
                 key={keyOf(s)}
                 observed={s}
                 likeForLike={(data.likeForLike ?? []).find((l) => keyOf(l) === keyOf(s))}
                 focusName={focusName}
               />
             ))}
-          </div>
+          </MovementPeriodResults>
 
-          <h3 className="subhead">Observed comparison</h3>
-          <p>
-            Each {isAnnual ? 'year' : 'period'} uses the economies satisfying that comparison&apos;s
-            basis-specific data requirement. Universes may differ between {isAnnual ? 'years' : 'periods'}.
-          </p>
-          {observedChart ? (
+          {activeChart ? (
             <ChartCard
-              title={`${data.basis?.label} — comparison (observed)`}
+              title={data.basis?.label + ' · ' + (mode === 'common' ? 'Like-for-like' : 'Observed')}
               unit={unit}
               source="World Bank WDI; calculated by this application"
             >
-              <AnnualOrCategoricalChart entries={observedChart.entries} series={series} unit={unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={activeChart.entries} series={series} unit={unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 
-          <h3 className="subhead">Like-for-like comparison</h3>
-          <p>
-            The same {sets?.commonRows?.length ?? 0} economies across all {isAnnual ? 'years' : 'periods'}
-            (intersection of the basis-specific requirements). Directly comparable {isAnnual ? 'years' : 'decades'}.
-          </p>
-          {lflChart ? (
-            <ChartCard
-              title={`${data.basis?.label} — comparison (like-for-like)`}
-              unit={unit}
-              source="World Bank WDI; calculated by this application"
-            >
-              <AnnualOrCategoricalChart entries={lflChart.entries} series={series} unit={unit} decimals={decimals} />
-            </ChartCard>
-          ) : null}
-
+          </MovementResearchPanel>
+          <MovementResearchPanel section="coverage">
+          <details className="details movement-overview">
+            <summary>Coverage and comparison overview</summary>
+            <PricesGlance data={data} focusName={focusName} />
+          </details>
           {sets ? (
             <>
               <h3 className="subhead">What changed outside the common comparison set?</h3>
@@ -1018,6 +1012,8 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
             </>
           ) : null}
 
+          </MovementResearchPanel>
+          <MovementResearchPanel section="evidence">
           <MethodologyPanel
             source={isAnnual && !data.observed?.[0]?.rankable ? 'Raw observation (no cross-country rank for index levels)' : 'App-derived'}
             indicatorCode={`${data.metric?.indicatorCode} — ${data.metric?.label}`}
@@ -1041,7 +1037,8 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
               selector and /api/prices/country-groups).
             </p>
           </MethodologyPanel>
-        </>
+        </MovementResearchPanel>
+        </MovementResearch>
       ) : null}
     </div>
   );

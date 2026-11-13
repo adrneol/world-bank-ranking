@@ -56,8 +56,8 @@ export function EconomyMobileList({
   rows,
   rankOf,
   caption,
-  focusIso = 'IND',
-  focusName = 'India',
+  focusIso,
+  focusName = 'Selected economy',
   renderSummary,
   renderDetails = null,
 }) {

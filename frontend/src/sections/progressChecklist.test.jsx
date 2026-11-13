@@ -86,12 +86,12 @@ describe('refresh progress checklist', () => {
     expect(container.textContent).toContain('Indicators checked: 1 / 3');
     expect(container.textContent).toContain('Current: Label nominal_constant');
     expect(container.textContent).toContain('Label nominal_current');
-    expect(container.textContent).toContain('up to date');
-    expect(container.textContent).toContain('refreshing');
-    expect(container.textContent).toContain('waiting');
-    expect(container.querySelectorAll('.step-done')).toHaveLength(1);
-    expect(container.querySelectorAll('.step-active')).toHaveLength(1);
-    expect(container.querySelectorAll('.step-waiting')).toHaveLength(1);
+    expect(container.textContent).toContain('Checked · unchanged');
+    expect(container.textContent).toContain('Checking');
+    expect(container.textContent).toContain('Waiting');
+    expect(container.querySelectorAll('[data-run-state="published"], [data-run-state="unchanged"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-run-state="checking"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-run-state="waiting"]')).toHaveLength(1);
     // Live runs auto-open the details disclosure.
     expect(container.querySelector('details.refresh-details').open).toBe(true);
     expect(container.querySelector('progress').getAttribute('value')).toBe('1');
@@ -118,10 +118,10 @@ describe('refresh progress checklist', () => {
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     expect(container.textContent).toContain('Label nominal_current');
-    expect(container.textContent).toContain('updated');
+    expect(container.textContent).toContain('Updated');
     expect(container.textContent).toContain('Label nominal_constant');
-    expect(container.textContent).toContain('up to date');
-    expect(container.querySelectorAll('.step-done')).toHaveLength(2);
+    expect(container.textContent).toContain('Checked · unchanged');
+    expect(container.querySelectorAll('[data-run-state="published"], [data-run-state="unchanged"]')).toHaveLength(2);
     cleanup();
   });
 
@@ -148,9 +148,9 @@ describe('refresh progress checklist', () => {
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     expect(container.textContent).toContain('Label nominal_constant');
-    expect(container.textContent).toContain('failed: boom');
-    expect(container.textContent).toContain('waiting');
-    expect(container.querySelectorAll('.step-failed')).toHaveLength(1);
+    expect(container.textContent).toContain('Failed: boom');
+    expect(container.textContent).toContain('No result recorded');
+    expect(container.querySelectorAll('[data-run-state="failed"]')).toHaveLength(1);
     expect(container.textContent).toContain('rolled back — the previous valid dataset remains available');
     expect(container.textContent).toContain('Recent refresh runs (1)');
     cleanup();
@@ -179,7 +179,7 @@ describe('refresh progress checklist', () => {
       details.querySelector('summary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     });
     await flushReact(act);
-    expect(container.querySelectorAll('.step-done')).toHaveLength(3);
+    expect(container.querySelectorAll('[data-run-state="published"], [data-run-state="unchanged"]')).toHaveLength(3);
     cleanup();
   });
 
@@ -237,8 +237,8 @@ describe('refresh progress checklist', () => {
     expect(plain.container.textContent).toContain('1 October 2026, 13:17:02 UTC');
     expect(plain.container.textContent).toContain('1 October 2026, 13:17:16 UTC');
     expect(plain.container.textContent).toContain('Label nominal_current');
-    expect(plain.container.textContent).toContain('up to date');
-    expect(plain.container.querySelectorAll('.step-done')).toHaveLength(3);
+    expect(plain.container.textContent).toContain('Checked · unchanged');
+    expect(plain.container.querySelectorAll('[data-run-state="published"], [data-run-state="unchanged"]')).toHaveLength(3);
     plain.cleanup();
   });
 
@@ -311,7 +311,7 @@ describe('refresh progress checklist', () => {
     // same section transitions to in-progress instead of blanking).
     expect(container.textContent).toContain('Refresh in progress');
     expect(container.textContent).toContain('Label nominal_current');
-    expect(container.textContent).toContain('up to date');
+    expect(container.textContent).toContain('Checked · unchanged');
     expect(container.textContent).toContain('Updating…');
     expect(container.textContent).not.toContain('Loading data status');
     releaseRefreshPost?.();
@@ -509,7 +509,7 @@ describe('recent refresh runs display numbering (Phase 8Q)', () => {
 
   // Visible Run-column labels, newest row first.
   const runNumbers = (container) =>
-    [...container.querySelectorAll('tbody th[scope="row"]')].map((cell) => cell.textContent.trim());
+    [...container.querySelectorAll('[aria-label="Recent refresh runs"] tbody th[scope="row"]')].map((cell) => cell.textContent.trim());
 
   async function renderRuns(latestRuns, extra = {}) {
     stub = stubFetch([['/api/data-status', { ...BASE, inProgress: false, latestRuns, ...extra }]]);

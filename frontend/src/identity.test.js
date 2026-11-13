@@ -23,7 +23,7 @@ function metaContent(d, selector) {
 describe('public product identity', () => {
   it('document title is generic, not India-GDP-specific', () => {
     const title = doc().querySelector('title')?.textContent ?? '';
-    expect(title).toContain('World Bank WDI');
+    expect(title).toContain('WDI Research Explorer');
     expect(title).not.toMatch(/India/i);
   });
 
@@ -38,7 +38,7 @@ describe('public product identity', () => {
     const d = doc();
     const ogTitle = metaContent(d, 'meta[property="og:title"]') ?? '';
     const ogDescription = metaContent(d, 'meta[property="og:description"]') ?? '';
-    expect(ogTitle).toContain('World Bank WDI');
+    expect(ogTitle).toContain('WDI Research Explorer');
     expect(ogTitle).not.toMatch(/India/i);
     expect(ogDescription).not.toMatch(/India/i);
     // Must not claim the World Bank publishes the rankings.
@@ -55,7 +55,7 @@ describe('public product identity', () => {
 describe('PWA identity', () => {
   it('manifest name, short_name and description are generic', () => {
     const manifest = JSON.parse(manifestRaw);
-    expect(manifest.name).toContain('World Bank WDI');
+    expect(manifest.name).toContain('WDI Research Explorer');
     expect(manifest.short_name).toBeTruthy();
     expect(manifest.short_name.length).toBeLessThanOrEqual(20);
     for (const field of [manifest.name, manifest.short_name, manifest.description]) {

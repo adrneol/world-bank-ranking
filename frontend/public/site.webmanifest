@@ -1,5 +1,5 @@
 {
-  "name": "World Bank WDI Economic Data Analysis",
+  "name": "WDI Research Explorer",
   "short_name": "WDI Analysis",
   "description": "Analytical views of World Bank WDI observations: independently calculated rankings, movements, comparisons and coverage.",
   "start_url": "/",

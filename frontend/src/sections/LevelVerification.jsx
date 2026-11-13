@@ -55,7 +55,7 @@ function VerifyTable({ focus, above, below }) {
   );
 }
 
-export default function LevelVerification({ year, metricKey, neighbors, country = 'IND', focusName = 'India' }) {
+export default function LevelVerification({ year, metricKey, neighbors, country, focusName = country ?? 'Selected economy' }) {
   const depsKey = `verify:${metricKey}:${year ?? ''}:${neighbors}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) => api.rankVerify({ indicator: metricKey, year, country, neighbors }, { signal }),

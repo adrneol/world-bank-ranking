@@ -68,7 +68,7 @@ export default function Tabs({ views, active, onChange }) {
 }
 
 /** Secondary tab row for focused subviews (Rank and YoY workspaces). */
-export function SubTabs({ options, active, onChange, label }) {
+export function SubTabs({ options, active, onChange, label, idPrefix }) {
   const tabRefs = useRef([]);
 
   function focusTab(index) {
@@ -109,6 +109,8 @@ export function SubTabs({ options, active, onChange, label }) {
             }}
             type="button"
             role="tab"
+            id={idPrefix ? `${idPrefix}-${option.id}-tab` : undefined}
+            aria-controls={idPrefix ? `${idPrefix}-${option.id}-panel` : undefined}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             className={selected ? 'subtab subtab-active' : 'subtab'}

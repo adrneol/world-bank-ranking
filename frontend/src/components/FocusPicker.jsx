@@ -12,7 +12,7 @@ import { useMemo } from 'react';
 import { SearchableSelect } from './controls.jsx';
 import { Field } from './ui.jsx';
 
-export default function FocusPicker({ countries, value = 'IND', onChange, id = 'f-country' }) {
+export default function FocusPicker({ countries, value = '', onChange, id = 'f-country' }) {
   const list = useMemo(() => countries ?? [], [countries]);
 
   // No country metadata yet (loading or failed): fall back to a plain ISO3
@@ -20,7 +20,7 @@ export default function FocusPicker({ countries, value = 'IND', onChange, id = '
   // validates the code and fails closed with 400 INVALID_COUNTRY.
   if (list.length === 0) {
     return (
-      <Field label="Focus country" htmlFor={id} hint="ISO3 code (e.g. IND)">
+      <Field label="Focus country" htmlFor={id} hint="Three-letter economy code">
         <input
           id={id}
           value={value}

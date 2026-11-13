@@ -15,7 +15,7 @@ import { StatusBlock } from '../components/ui.jsx';
 import SubjectInsight from './SubjectInsight.jsx';
 import OverviewHistory from './OverviewHistory.jsx';
 
-export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country = 'IND', focusName = 'India', availableYears = [], metricYears = null, onCompareEntities = null }) {
+export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country, focusName = country ?? 'Selected economy', availableYears = [], metricYears = null, onCompareEntities = null }) {
   const keys = metricKeysForSubject(subject);
   const depsKey = `overview:${year ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(

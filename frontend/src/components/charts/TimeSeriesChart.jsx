@@ -16,7 +16,7 @@
 
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { alignSeries, plotMinWidth } from './chartData.js';
-import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
+import { chartTooltipStyle, CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
 import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
@@ -76,7 +76,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
             <Tooltip
               formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
               labelFormatter={(x) => `Year ${x}`}
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={chartTooltipStyle}
             />
             {zeroLine ? <ReferenceLine y={0} stroke={CHART_COLORS.zero} strokeDasharray="4 3" /> : null}
             {keys.map((key, i) => (

@@ -1,6 +1,5 @@
 // Display geometry only. Source observations never pass through these helpers for storage or calculation.
-const colors = ['#101828', '#24756f', '#a34228', '#5a54a0', '#816018', '#315f9c', '#9d3c65', '#576b32'];
-export const seriesColor = (index) => colors[index % colors.length];
+export const seriesColor = (index) => `var(--chart-series-${index % 8})`;
 export const plotInsets = { top: 12, bottom: 14, timeline: 29 };
 
 export function annualGeometry(yearCount, maxGroup, type, viewportWidth) {

@@ -69,7 +69,7 @@ function YoyTable({ focus, above, below, metricKey }) {
   );
 }
 
-export default function YoyVerification({ year, metricKey, neighbors, country = 'IND', focusName = 'India' }) {
+export default function YoyVerification({ year, metricKey, neighbors, country, focusName = country ?? 'Selected economy' }) {
   const depsKey = `yoyverify:${metricKey}:${year ?? ''}:${neighbors}:${country}`;
   const { data, loading, error, retry } = useApi(
     (signal) => api.yoyVerify({ indicator: metricKey, year, country, neighbors }, { signal }),

@@ -40,7 +40,7 @@ function MetricCell({ cell }) {
   );
 }
 
-export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
+export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_capita', country, focusName = country ?? 'Selected economy' }) {
   const keys = metricKeysForSubject(subject);
   const depsKey = `yearly:${startYear ?? ''}:${endYear ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(

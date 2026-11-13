@@ -90,10 +90,11 @@ function BasisDetail({ family, metric, basis }) {
   // GDP movement uses ordinal positions with deterministic ISO3 tie-breaks;
   // the specialist families use competition ranking (1, 1, 3).
   const isGdp = family.key === 'gdp_per_capita' || family.key === 'gdp_total';
+  const descriptiveIndex = basis.id === 'cpi_index_annual';
   return (
     <div className="card methodology-detail" role="region" aria-label={`${basis.label} methodology`}>
-      <h3>{metric.label} — {basis.label}</h3>
-      <p className="card-unit">{family.label}</p>
+      <h3>{metric.key === 'inflation_cpi_index' ? 'Consumer Price Index' : `${metric.label} — ${basis.label}`}</h3>
+      <p className="card-unit">{metric.key === 'inflation_cpi_index' ? `Index · 2010 = 100 · ${basis.label}` : family.label}</p>
       <dl className="facts facts-grid">
         <DetailRow label="What this measures">{basis.description ?? basis.question ?? basis.label}</DetailRow>
         {guide?.how ? <DetailRow label="How it is calculated">{guide.how}</DetailRow> : null}
@@ -110,18 +111,18 @@ function BasisDetail({ family, metric, basis }) {
             ? 'Not ranked — descriptive basis, no cross-economy ordering.'
             : `${basis.rankDirection ? `${basis.rankDirection}, ` : ''}${basis.rankWording ?? 'ordered under the registry direction'}${!isGdp ? ' Competition ranking (1, 1, 3).' : ''}`}
         </DetailRow>
-        {familyGuide?.benchmark ? (
+        {familyGuide?.benchmark && !descriptiveIndex ? (
           <DetailRow label="Benchmark">
             {familyGuide.benchmark}
             {basis.gapUnit ? ` Gaps expressed in ${basis.gapUnit}.` : ''}
           </DetailRow>
         ) : null}
         {guide?.eligibility ? <DetailRow label="Eligibility">{guide.eligibility}</DetailRow> : null}
-        <DetailRow label="Observed vs Like-for-like">
+        {!descriptiveIndex ? <DetailRow label="Observed vs Like-for-like">
           Identical formulas on two universes: Observed (all eligible economies with required data) vs
           Like-for-like (economies present in every compared period).
-        </DetailRow>
-        {familyGuide?.universe ? <DetailRow label="Universe">{familyGuide.universe}</DetailRow> : null}
+        </DetailRow> : null}
+        {familyGuide?.universe && !descriptiveIndex ? <DetailRow label="Universe">{familyGuide.universe}</DetailRow> : null}
         <DetailRow label="Units">{basis.unit ?? metric.unit}</DetailRow>
         {guide?.distinct ? <DetailRow label="Why this basis is distinct">{guide.distinct}</DetailRow> : null}
         {familyGuide?.missing ? <DetailRow label="Missing data">{familyGuide.missing}</DetailRow> : null}

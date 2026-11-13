@@ -17,6 +17,7 @@
 import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
+import { MovementModeControl, MovementPeriodResults, MovementResearch, MovementResearchPanel } from '../components/MovementComparison.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { isPopulationMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -348,22 +349,23 @@ function sectionFacts(section, focusName, heading, groupLabel) {
   }
 }
 
-function PopulationResultCard({ observed, likeForLike, focusName }) {
+function PopulationResultCard({ observed, likeForLike, mode, focusName }) {
   const key = observed ? (observed.period ?? String(observed.year)) : '?';
   const basisId = observed?.basis?.id ?? likeForLike?.basis?.id;
   const basisLabel = observed?.basis?.label ?? likeForLike?.basis?.label ?? '';
   const rankWording = observed?.basis?.rankWording ?? likeForLike?.basis?.rankWording;
-  const f = observed?.focus;
+  const result = mode === 'common' ? likeForLike : observed;
+  const f = result?.focus;
   return (
-    <div className="card">
+    <article className="movement-period">
       <h3>{key} <span className="card-unit">{basisLabel}</span></h3>
       <p className="card-unit">{possessive(focusName)} {lowerFirst(basisLabel)}</p>
       <p className="card-result-value" aria-label={`${possessive(focusName)} ${lowerFirst(basisLabel)} ${f ? (f.valueDisplay ?? f.value) : 'unavailable'} in ${key}`}>
-        {f ? (f.valueDisplay ?? valueText(observed, f.value)) : 'n/a'}
+        {f ? (f.valueDisplay ?? valueText(result, f.value)) : 'n/a'}
       </p>
       <p className="card-unit">{rankWording ?? ''}</p>
-      {observed ? sectionFacts(observed, focusName, 'Observed', `Observed comparison for ${key}`) : null}
-      {likeForLike ? sectionFacts(likeForLike, focusName, 'Like-for-like', `Like-for-like comparison for ${key}`) : null}
+      {result ? sectionFacts(result, focusName, mode === 'common' ? 'Like-for-like' : 'Observed', 'Comparison for ' + key) :
+        <p className="footnote">Like-for-like results are unavailable for this period.</p>}
       {isGrowthId(basisId) && f && f.cagr != null ? (
         <p className="footnote">
           Annualized {f.cagrDisplay ?? `${fmtSigned(f.cagr, 2)}%/year`} (display-only secondary representation; same ordering, no separate rank).
@@ -375,7 +377,7 @@ function PopulationResultCard({ observed, likeForLike, focusName }) {
         </p>
       ) : null}
       <p className="footnote">The average excludes {focusName} and never affects ranking. Higher means larger — never better.</p>
-    </div>
+    </article>
   );
 }
 
@@ -811,7 +813,8 @@ function PopulationSetPartition({ sets }) {
 /* Main Population Movement view                                        */
 /* ------------------------------------------------------------------ */
 
-export default function PopulationMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis, country = 'IND', countries = [], focusName = 'India', onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry }) {
+export default function PopulationMovement({ availableYears, yearA, yearB, yearMid = null, metricKey, basis, country, countries = [], focusName = country ?? 'Selected economy', onYearA, onYearB, onYearMid, onMetric, onBasis, onCountry }) {
+  const [preferredMode, setPreferredMode] = useState('observed');
   const [groupType, setGroupType] = useState(null);
   const [groupValue, setGroupValue] = useState('All');
   const [commonOpen, setCommonOpen] = useState(false);
@@ -845,6 +848,8 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
 
   const sameYear = yearA != null && yearB != null && yearA === yearB;
   const isAnnual = data?.kind === 'annual';
+  const supportsCommon = (data?.likeForLike?.length ?? 0) > 0;
+  const mode = supportsCommon ? preferredMode : 'observed';
   const isGrowth = effectiveBasis === 'pop_period_growth';
   const focusIso = data?.focus?.iso3 ?? String(country).toUpperCase();
   const unit = data?.basis?.unit ?? null;
@@ -864,6 +869,7 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
     return { entries: rows.map((s) => ({ x: s.period ?? String(s.year), focus: s.focus?.value ?? null, benchmark: s.focus?.benchmark ?? null })) };
   }, [data, sets]);
 
+  const activeChart = mode === 'common' ? lflChart : observedChart;
   const series = useMemo(() => ([
     { key: 'focus', label: focusName },
     { key: 'benchmark', label: 'Other-economy average' },
@@ -909,57 +915,45 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
         <UnavailableState reason={data.reason} hint="Required World Bank data are incomplete for the selected comparison." />
       ) : null}
       {!loading && !error && data?.available ? (
-        <>
-          <h3 className="subhead">At a glance</h3>
-          <PopulationGlance data={data} focusName={focusName} />
+        <MovementResearch sections={['overview', 'coverage', 'evidence']}>
+          <MovementResearchPanel section="overview">
+
           <p className="card-unit">
             World Bank total population is an annual mid-year estimate of the population resident under the
             series&apos; reference concept — not necessarily an exact census headcount. Higher means
             larger{isAnnual || !isGrowth ? '' : ' / faster relative growth'} — never better.
           </p>
 
-          <h3 className="subhead">{isAnnual ? 'Selected-year results — Observed and Like-for-like' : 'Period results — Observed and Like-for-like'}</h3>
-          <div className="cards" role="region" aria-label={isAnnual ? 'Population selected-year results' : 'Population period results'}>
+          <h3 className="subhead">{isAnnual ? 'Selected-year results' : 'Period results'}</h3>
+          <MovementModeControl mode={mode} onChange={setPreferredMode} supported={supportsCommon} scope={isAnnual ? 'year' : 'period'} />
+          <MovementPeriodResults label={isAnnual ? 'Population selected-year results' : 'Population period results'}>
             {(data.observed ?? []).map((s) => (
               <PopulationResultCard
+                mode={mode}
                 key={keyOf(s)}
                 observed={s}
                 likeForLike={(data.likeForLike ?? []).find((l) => keyOf(l) === keyOf(s))}
                 focusName={focusName}
               />
             ))}
-          </div>
+          </MovementPeriodResults>
 
-          <h3 className="subhead">Observed comparison</h3>
-          <p>
-            Each {isAnnual ? 'year' : 'period'} uses the economies satisfying that comparison&apos;s
-            basis-specific data requirement. Universes may differ between {isAnnual ? 'years' : 'periods'}.
-          </p>
-          {observedChart ? (
+          {activeChart ? (
             <ChartCard
-              title={`${data.basis?.label} — comparison (observed)`}
-              unit={isGrowth ? 'Population growth (%)' : unit}
+              title={data.basis?.label + ' · ' + (mode === 'common' ? 'Like-for-like' : 'Observed')}
+              unit={unit}
               source="World Bank WDI; calculated by this application"
             >
-              <AnnualOrCategoricalChart entries={observedChart.entries} series={series} unit={isGrowth ? 'Population growth (%)' : unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={activeChart.entries} series={series} unit={unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 
-          <h3 className="subhead">Like-for-like comparison</h3>
-          <p>
-            The same {sets?.commonRows?.length ?? 0} economies across all {isAnnual ? 'years' : 'periods'}
-            (intersection of the basis-specific requirements).
-          </p>
-          {lflChart ? (
-            <ChartCard
-              title={`${data.basis?.label} — comparison (like-for-like)`}
-              unit={isGrowth ? 'Population growth (%)' : unit}
-              source="World Bank WDI; calculated by this application"
-            >
-              <AnnualOrCategoricalChart entries={lflChart.entries} series={series} unit={isGrowth ? 'Population growth (%)' : unit} decimals={decimals} />
-            </ChartCard>
-          ) : null}
-
+          </MovementResearchPanel>
+          <MovementResearchPanel section="coverage">
+          <details className="details movement-overview">
+            <summary>Coverage and comparison overview</summary>
+            <PopulationGlance data={data} focusName={focusName} />
+          </details>
           {sets ? (
             <>
               <h3 className="subhead">What changed outside the common comparison set?</h3>
@@ -1013,6 +1007,8 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
             </>
           ) : null}
 
+          </MovementResearchPanel>
+          <MovementResearchPanel section="evidence">
           <MethodologyPanel
             source="App-derived"
             indicatorCode={`${data.metric?.indicatorCode} — ${data.metric?.label}`}
@@ -1046,7 +1042,8 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
               selector and /api/population/country-groups).
             </p>
           </MethodologyPanel>
-        </>
+        </MovementResearchPanel>
+        </MovementResearch>
       ) : null}
     </div>
   );

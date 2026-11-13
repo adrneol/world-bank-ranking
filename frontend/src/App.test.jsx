@@ -174,7 +174,7 @@ describe('App navigation', () => {
       ['/api/countries', COUNTRIES],
       ['/api/indicators', INDICATORS],
     ]);
-    window.history.replaceState(null, '', '/?view=movement&yearA=2020&yearB=2022&year=2024');
+    window.history.replaceState(null, '', '/?view=movement&country=IND&yearA=2020&yearB=2022&year=2024');
     const { container, cleanup } = renderApp();
     await flushReact(act);
     const header = container.querySelector('.app-header');

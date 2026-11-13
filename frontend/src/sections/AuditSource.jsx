@@ -10,7 +10,7 @@ import { useApi } from '../hooks/useApi.js';
 import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
-export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita', country = 'IND', focusName = 'India' }) {
+export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita', country, focusName = country ?? 'Selected economy' }) {
   const depsKey = `audit:${metricKey}:${year ?? ''}:${country}`;
   const { data, loading, error, retry } = useApi(
     async (signal) => {
