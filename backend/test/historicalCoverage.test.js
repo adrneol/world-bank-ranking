@@ -19,7 +19,7 @@ import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
 
 const wbRow = (code, name, iso3, countryName, year, value) => ({
   indicator: { id: code, value: name },
-  country: { id: iso3, value: countryName },
+  country: { id: { IND: 'IN', USA: 'US' }[iso3], value: countryName },
   countryiso3code: iso3,
   date: String(year),
   value,
@@ -56,6 +56,7 @@ let extraRows = null;
 
 test.before(async () => {
   stub = await startStubWorldBank({
+    inProcess: true,
     seriesRowsFor: (metricKey, baseRows) => {
       const hist = HISTORICAL_ROWS[metricKey] ? [...baseRows, ...HISTORICAL_ROWS[metricKey]] : baseRows;
       const extra = extraRows?.[metricKey];

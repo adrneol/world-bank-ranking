@@ -14,7 +14,7 @@ import { queryGet } from '../src/db/driver.js';
 let stub = null;
 
 test.before(async () => {
-  stub = await startStubWorldBank();
+  stub = await startStubWorldBank({ inProcess: true });
   useStubBaseUrl(stub.baseUrl);
 });
 

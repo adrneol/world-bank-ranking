@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import config, { BACKEND_ROOT } from '../config.js';
+import config, { BACKEND_ROOT, METRICS } from '../config.js';
 import { queryExec } from './driver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -255,35 +255,49 @@ export function closeDb() {
   }
 }
 
-/**
- * Open the local SQLite file ONLY if it already exists and already holds
- * observations. Returns `{ handle, file }` or null. Never creates, seeds,
- * or fabricates data: missing/empty/unreadable files all resolve to null
- * so callers can distinguish "usable fallback" from "nothing to serve".
- * The idempotent schema upgrade still applies (additive columns only).
- */
+/** Open an existing usable fallback without initialization or schema writes. */
 export async function openExistingLocalDb() {
   const file = config.databaseFile;
-  // The guard runs OUTSIDE the try: a refusal must be loud, not swallowed
-  // into the "no usable fallback" answer below.
   assertNotProtectedDatabase(file);
+  let handle;
+  let usable = false;
   try {
-    if (file === ':memory:') return null;
-    if (!fs.existsSync(file)) return null;
-    const handle = createClient({ url: pathToFileURL(file).href });
-    await initDatabase(handle, { localFile: true });
-    const count = await handle.execute('SELECT COUNT(*) AS n FROM observations');
-    if (!count.rows[0] || Number(count.rows[0].n) === 0) {
-      try {
-        handle.close();
-      } catch {
-        // Already closed.
-      }
-      return null;
+    if (file === ':memory:' || !fs.statSync(file, { throwIfNoEntry: false })?.isFile()) return null;
+    handle = createClient({ url: pathToFileURL(file).href });
+    const tx = await handle.transaction('read');
+    try {
+      const check = await tx.execute('PRAGMA quick_check(1)');
+      if (check.rows.length !== 1 || check.rows[0][0] !== 'ok') return null;
+      // Read the columns needed by serving and by the existing refresh lock.
+      await tx.execute('SELECT value_raw, wb_last_updated, fetched_at FROM observations LIMIT 0');
+      await tx.execute('SELECT status, completed_at, universe_snapshot FROM fetch_runs LIMIT 0');
+      await tx.execute('SELECT metric_key, year, rows_received FROM ingest_year_stats LIMIT 0');
+      const lock = await tx.execute('SELECT locked, run_id, holder, updated_at FROM refresh_locks WHERE id = 1');
+      if (lock.rows.length !== 1) return null;
+      const indicators = await tx.execute('SELECT id, code, metric_key FROM indicators');
+      if (indicators.rows.some((row) => METRICS[row.metric_key]?.indicatorCode !== row.code)) return null;
+      const coverage = await tx.execute(`
+        SELECT SUM(CASE WHEN c.is_aggregate = 0 THEN 1 ELSE 0 END) AS eligible,
+               SUM(CASE WHEN i.id IS NULL OR c.id IS NULL OR c.is_aggregate NOT IN (0, 1)
+                   OR typeof(o.year) != 'integer' OR o.year NOT BETWEEN 1000 AND 9999
+                   OR typeof(o.value) NOT IN ('integer', 'real')
+                   OR ABS(o.value) > 1.7976931348623157e308 THEN 1 ELSE 0 END) AS invalid
+          FROM observations o
+          LEFT JOIN countries c ON c.id = o.country_id
+          LEFT JOIN indicators i ON i.id = o.indicator_id
+      `);
+      usable = Number(coverage.rows[0]?.eligible) > 0 && Number(coverage.rows[0]?.invalid) === 0;
+    } finally {
+      tx.close();
     }
-    return { handle, file };
+    return usable ? { handle, file } : null;
   } catch {
+    usable = false;
     return null;
+  } finally {
+    if (!usable) {
+      try { handle?.close(); } catch { /* best effort */ }
+    }
   }
 }
 

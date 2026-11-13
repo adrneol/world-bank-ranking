@@ -18,6 +18,10 @@
  */
 
 import config from '../config.js';
+import { isWdiVintage } from './vintage.js';
+
+const WDI_SOURCE = '2';
+export const WDI_SOURCE_NAME = 'World Development Indicators';
 
 /** Error raised when the World Bank API returns its error envelope. */
 export class WorldBankApiError extends Error {
@@ -68,36 +72,34 @@ export function parseEnvelope(json, context = '') {
   if (!Array.isArray(json)) {
     throw new WorldBankPayloadError(
       `Expected a JSON array from the World Bank API${context ? ` (${context})` : ''}, received ${typeof json}.`,
-      { context, received: json },
+      { context },
     );
   }
 
   // Error envelope: [{ message: [...] }] - returned with HTTP 200.
   if (json.length === 1 && json[0] && typeof json[0] === 'object' && 'message' in json[0]) {
     const rawMessage = json[0].message;
-    const text = Array.isArray(rawMessage)
-      ? rawMessage.map((m) => m?.value ?? JSON.stringify(m)).join('; ')
-      : String(rawMessage);
+    const id = Array.isArray(rawMessage) && /^\d+$/.test(String(rawMessage[0]?.id)) ? rawMessage[0].id : null;
     throw new WorldBankApiError(
-      `World Bank API error${context ? ` (${context})` : ''}: ${text}`,
-      { context, message: rawMessage },
+      `World Bank API error${context ? ` (${context})` : ''}: ${id === null ? 'request rejected' : `error ${id}`}`,
+      { context, id },
     );
   }
 
-  if (json.length < 2 || !json[0] || !Array.isArray(json[1])) {
+  if (json.length < 2 || !json[0] || (!Array.isArray(json[1]) && !(json[1] === null && pageInteger(json[0].total) === 0))) {
     throw new WorldBankPayloadError(
       `Malformed World Bank payload${context ? ` (${context})` : ''}: expected [meta, rows[]].`,
-      { context, received: json },
+      { context },
     );
   }
 
   const meta = json[0];
-  const rows = json[1];
+  const rows = json[1] ?? [];
 
-  if (typeof meta !== 'object') {
+  if (typeof meta !== 'object' || Array.isArray(meta)) {
     throw new WorldBankPayloadError(
       `Malformed World Bank meta block${context ? ` (${context})` : ''}.`,
-      { context, meta },
+      { context },
     );
   }
 
@@ -126,24 +128,20 @@ async function fetchJson(url, { timeoutMs = config.worldBank.timeoutMs } = {}) {
     const body = await response.text();
 
     if (!response.ok) {
-      const error = new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+      const error = new Error(`HTTP ${response.status} from World Bank`);
       error.status = response.status;
       error.retryAfter = response.headers.get('retry-after');
-      error.body = body.slice(0, 500);
       throw error;
     }
 
     try {
       return JSON.parse(body);
-    } catch (parseError) {
-      throw new WorldBankPayloadError(`Response was not valid JSON: ${url}`, {
-        cause: parseError.message,
-        body: body.slice(0, 500),
-      });
+    } catch {
+      throw new WorldBankPayloadError('World Bank response was not valid JSON.');
     }
   } catch (error) {
     if (error.name === 'AbortError') {
-      const timeoutError = new Error(`Request timed out after ${timeoutMs}ms: ${url}`);
+      const timeoutError = new Error(`Request timed out after ${timeoutMs}ms while reading World Bank`);
       timeoutError.timeout = true;
       throw timeoutError;
     }
@@ -279,6 +277,42 @@ export function checkPaginationCompleteness(input = {}) {
   };
 }
 
+function pageInteger(value) {
+  if (typeof value === 'string' && /^\d+$/.test(value)) value = Number(value);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function checkWdiSource(source, context) {
+  if (source != null && source !== WDI_SOURCE && source !== Number(WDI_SOURCE)) {
+    throw new WorldBankPayloadError(`Unexpected World Bank source in ${context}. Expected WDI source 2.`);
+  }
+}
+
+function validatePage({ meta, rows }, page, source) {
+  const pages = pageInteger(meta.pages);
+  const total = pageInteger(meta.total);
+  const perPage = pageInteger(meta.per_page);
+  const vintage = meta.lastupdated === '' ? null : meta.lastupdated ?? null;
+  if (source === WDI_SOURCE) checkWdiSource(meta.sourceid, `page ${page}`);
+  if (vintage !== null && !isWdiVintage(vintage)) {
+    throw new WorldBankPayloadError(`Invalid World Bank vintage on page ${page}.`);
+  }
+  const expectedPages = perPage > 0 ? Math.ceil(total / perPage) : 0;
+  const expectedRows = perPage === null ? null : Math.min(perPage, total - (page - 1) * perPage);
+  if (
+    pageInteger(meta.page) !== page || pages === null || total === null ||
+    (total === 0 ? page !== 1 || pages > 1 || rows.length !== 0
+      : pages < page || rows.length === 0 || rows.length > total ||
+        (perPage !== null && (pages !== expectedPages || rows.length !== expectedRows)))
+    || (meta.per_page != null && perPage === null)
+  ) {
+    throw new WorldBankPayloadError(`World Bank pagination completeness check failed on page ${page}.`);
+  }
+  // An empty response can legitimately declare zero pages, but the first
+  // envelope was fetched and still counts as a request.
+  return { pages: Math.max(pages, 1), total, perPage, vintage };
+}
+
 /**
  * Fetch EVERY page of a World Bank collection endpoint.
  *
@@ -303,37 +337,27 @@ export async function fetchAllPages(pathname, params = {}, options = {}) {
 
   const first = await fetchPage(pathname, { ...params, page: 1, per_page: perPage }, options);
 
-  const totalPages = Number(first.meta?.pages ?? 1);
-  const declaredTotal =
-    first.meta?.total === undefined || first.meta?.total === null
-      ? null
-      : Number(first.meta.total);
-
-  if (!Number.isFinite(totalPages) || totalPages < 1) {
-    throw new WorldBankPayloadError(
-      `World Bank meta.pages was not a positive number for ${pathname}.`,
-      { meta: first.meta },
-    );
-  }
-
+  const initial = validatePage(first, 1, params.source);
+  const { pages: totalPages, total: declaredTotal } = initial;
   const rows = [...first.rows];
-  let requests = 1;
+  const lastUpdated = initial.vintage;
+  if (options.indicatorCode) validateSeriesPage(first.rows, options.indicatorCode, 1);
 
-  if (onProgress) {
-    onProgress({ page: 1, totalPages, rows: rows.length, declaredTotal });
-  }
+  onProgress?.({ page: 1, totalPages, rows: rows.length, declaredTotal });
 
   for (let page = 2; page <= totalPages; page += 1) {
-    const next = await fetchPage(
-      pathname,
-      { ...params, page, per_page: perPage },
-      options,
-    );
-    rows.push(...next.rows);
-    requests += 1;
-    if (onProgress) {
-      onProgress({ page, totalPages, rows: rows.length, declaredTotal });
+    const next = await fetchPage(pathname, { ...params, page, per_page: perPage }, options);
+    const header = validatePage(next, page, params.source);
+    if (header.pages !== totalPages || header.total !== declaredTotal
+        || (header.perPage !== null && initial.perPage !== null && header.perPage !== initial.perPage)) {
+      throw new WorldBankPayloadError(`Inconsistent World Bank pagination on page ${page}.`);
     }
+    if (header.vintage !== lastUpdated) {
+      throw new WorldBankPayloadError(`Inconsistent World Bank vintage on page ${page}.`);
+    }
+    if (options.indicatorCode) validateSeriesPage(next.rows, options.indicatorCode, page);
+    rows.push(...next.rows);
+    onProgress?.({ page, totalPages, rows: rows.length, declaredTotal });
   }
 
   const completeness = checkPaginationCompleteness({
@@ -347,18 +371,17 @@ export async function fetchAllPages(pathname, params = {}, options = {}) {
   if (!completeness.complete) {
     throw new WorldBankPayloadError(completeness.message, {
       pathname,
-      params,
-      meta: first.meta,
-      ...completeness,
+      declaredTotal,
+      receivedRows: rows.length,
     });
   }
 
   return {
     rows,
     meta: first.meta,
-    lastUpdated: first.meta?.lastupdated ?? null,
+    lastUpdated,
     pagesFetched: totalPages,
-    requests,
+    requests: totalPages,
     declaredTotal,
     completeness,
   };
@@ -370,6 +393,15 @@ export async function fetchAllPages(pathname, params = {}, options = {}) {
  */
 export async function fetchCountryMetadata(options = {}) {
   return fetchAllPages('/country', {}, options);
+}
+
+function validateSeriesPage(rows, indicatorCode, page) {
+  for (const [index, row] of rows.entries()) {
+    if (row?.indicator?.id !== indicatorCode) {
+      throw new WorldBankPayloadError(`Invalid World Bank indicator identity for ${indicatorCode} on page ${page}, row ${index + 1}.`);
+    }
+    checkWdiSource(row.sourceid ?? row.source?.id, `page ${page}, row ${index + 1}`);
+  }
 }
 
 /**
@@ -386,8 +418,8 @@ export async function fetchCountryMetadata(options = {}) {
 export async function fetchIndicatorSeries(indicatorCode, startYear, endYear, options = {}) {
   return fetchAllPages(
     `/country/all/indicator/${encodeURIComponent(indicatorCode)}`,
-    { date: `${startYear}:${endYear}` },
-    options,
+    { date: `${startYear}:${endYear}`, source: WDI_SOURCE },
+    { ...options, indicatorCode },
   );
 }
 
@@ -397,12 +429,27 @@ export async function fetchIndicatorSeries(indicatorCode, startYear, endYear, op
  * @returns {object|null} the indicator record, or null when not found
  */
 export async function fetchIndicatorMetadata(indicatorCode, options = {}) {
-  const { rows } = await fetchPage(
-    `/indicator/${encodeURIComponent(indicatorCode)}`,
-    { per_page: 5 },
-    options,
+  // The source-scoped metadata endpoint is documented separately from
+  // the observation endpoint's source query parameter.
+  const { rows } = await fetchAllPages(
+    `/source/${WDI_SOURCE}/indicator/${encodeURIComponent(indicatorCode)}`,
+    { source: WDI_SOURCE },
+    { ...options, perPage: options.perPage ?? 5 },
   );
-  return rows.length ? rows[0] : null;
+  if (rows.length === 0) return null;
+  const [row] = rows;
+  if (rows.length !== 1 || row?.id !== indicatorCode || typeof row.name !== 'string' || !row.name.trim()
+      || (row.unit != null && typeof row.unit !== 'string')
+      || (row.sourceNote != null && typeof row.sourceNote !== 'string')
+      || (row.source != null && (typeof row.source !== 'object' || Array.isArray(row.source)))
+      || (row.source?.value != null && typeof row.source.value !== 'string')) {
+    throw new WorldBankPayloadError(`Invalid World Bank indicator metadata for ${indicatorCode}.`);
+  }
+  checkWdiSource(row.source?.id, `indicator metadata for ${indicatorCode}`);
+  if (row.source?.value?.trim() && row.source.value.trim() !== WDI_SOURCE_NAME) {
+    throw new WorldBankPayloadError(`Unexpected source name in World Bank indicator metadata for ${indicatorCode}.`);
+  }
+  return row;
 }
 
 export default {

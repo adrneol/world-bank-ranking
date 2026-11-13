@@ -19,7 +19,7 @@ let previousTarget = null;
 let previousDbMode = null;
 
 test.before(async () => {
-  stub = await startStubWorldBank({});
+  stub = await startStubWorldBank({ inProcess: true });
   useStubBaseUrl(stub.baseUrl);
   process.env.WB_RETRY_BASE_MS = '20';
   process.env.WB_READ_RETRY_DELAY_MS = '5';
@@ -680,7 +680,7 @@ test('18. in-flight handles survive the switch; old handle never closed', async 
   }
 });
 
-test('15. older primary never regresses fresher fallback; catch-up reconciles', async () => {
+test('15. older primary stays behind when catch-up cannot verify the fallback revision', async () => {
   const { maybeRecoverPrimary, setActiveDbInfo, getActiveDbInfo } = await import('../src/server.js');
   const repository = await import('../src/db/repository.js');
   const primary = await seedDb();
@@ -708,19 +708,20 @@ test('15. older primary never regresses fresher fallback; catch-up reconciles', 
     assert.equal(fast.recovered, false);
     assert.equal(fast.reason, 'primary-behind');
     assert.equal(shared.current, fallback, 'still serving fallback');
-    // Reconciling path refreshes Turso through the normal pipeline, then promotes.
+    // The fixture upstream does not confirm the synthetic fallback revision.
+    // Reconciliation may check WDI but must not promote on timestamps alone.
+    const retryCandidate = await seedDb();
     const slow = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
-      createProbe: async () => primary,
+      createProbe: async () => retryCandidate,
     });
-    assert.equal(slow.recovered, true);
-    assert.equal(shared.current, primary);
-    assert.equal(getActiveDbInfo().provider, 'turso');
+    assert.equal(slow.recovered, false);
+    assert.equal(slow.reason, 'primary-behind');
+    assert.equal(shared.current, fallback);
+    assert.equal(getActiveDbInfo().provider, 'sqlite');
     // Fallback dataset untouched; primary caught up without regression.
     assert.equal(await repository.countObservations(fallback), fbCount);
     assert.deepEqual(await repository.getDatasetState(fallback), fbState);
-    const primaryFp = await repository.getDatasetFingerprint(primary);
-    assert.ok(primaryFp.lastSuccessAt > '2020-06-01T00:00:00.000Z', 'primary evidence renewed by catch-up');
   } finally {
     setActiveDbInfo(previous);
     primary.close();
@@ -803,17 +804,22 @@ test('16. cooldowns prevent oscillation in both directions', async () => {
 });
 
 test('8L-confirmation: healthy primary promotes only after the stability window', async () => {
-  const { maybeRecoverPrimary, setActiveDbInfo, getActiveDbInfo, resetRecoveryConfirmation } =
+  const { maybeRecoverPrimary, setActiveDbInfo, getActiveDbInfo, resetRecoveryConfirmation, getRecoveryConfirmation } =
     await import('../src/server.js');
   // Seed fallback FIRST so the primary is never newer: the generations stay
   // equivalent and the test exercises the window, not the reconcile path.
   // Reconcile cooldown is disabled so leftover state cannot interfere.
   const fallback = await seedDb();
-  const primary = await seedDb();
+  const primaries = [];
+  for (let i = 0; i < 3; i += 1) primaries.push(await seedDb());
+  const [firstPrimary, secondPrimary, primary] = primaries;
   const previous = getActiveDbInfo();
   const previousConfirm = process.env.WB_RECOVERY_CONFIRM_MS;
   const previousReconcileWindow = process.env.WB_RECOVERY_RECONCILE_COOLDOWN_MS;
   process.env.WB_RECOVERY_CONFIRM_MS = '400';
+  const now = Date.now;
+  let clock = now();
+  Date.now = () => clock;
   process.env.WB_RECOVERY_RECONCILE_COOLDOWN_MS = '0';
   resetRecoveryConfirmation();
   try {
@@ -822,22 +828,22 @@ test('8L-confirmation: healthy primary promotes only after the stability window'
     // First healthy probe starts the window but must NOT promote yet.
     const first = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
-      createProbe: async () => primary,
+      createProbe: async () => firstPrimary,
     });
     assert.equal(first.reason, 'confirming');
     assert.equal(first.recovered, false);
     assert.equal(shared.current, fallback, 'still serving fallback mid-window');
     assert.equal(shared.isFallback, true);
     // Inside the window a further healthy probe still waits.
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    clock = getRecoveryConfirmation().startedAt + 150;
     const mid = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
-      createProbe: async () => primary,
+      createProbe: async () => secondPrimary,
     });
     assert.equal(mid.reason, 'confirming');
     assert.equal(shared.isFallback, true);
     // Past the window with continued health: promote with the Turso label.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    clock = getRecoveryConfirmation().startedAt + 450;
     const done = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
       createProbe: async () => primary,
@@ -847,11 +853,12 @@ test('8L-confirmation: healthy primary promotes only after the stability window'
     assert.equal(shared.isFallback, false);
     assert.equal(getActiveDbInfo().provider, 'turso');
   } finally {
+    Date.now = now;
     if (previousConfirm === undefined) delete process.env.WB_RECOVERY_CONFIRM_MS;
     else process.env.WB_RECOVERY_CONFIRM_MS = previousConfirm;
     resetRecoveryConfirmation();
     setActiveDbInfo(previous);
-    primary.close();
+    for (const candidate of primaries) candidate.close();
     fallback.close();
   }
 });
@@ -1091,7 +1098,7 @@ test('8M-reconcile: failed catch-up backs off instead of hot-looping', async () 
       sql: 'UPDATE observations SET value = value + 1 WHERE rowid = (SELECT MIN(rowid) FROM observations)',
       args: [],
     });
-    const dead = deadTurso(primary, { match: 'refresh_locks' });
+    const dead = deadTurso(primary, { match: 'UPDATE refresh_locks' });
     const shared = { current: fallback, isFallback: true, isDegraded: false };
     const first = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
@@ -1103,7 +1110,7 @@ test('8M-reconcile: failed catch-up backs off instead of hot-looping', async () 
     // any catch-up refresh is attempted (no new recovery work started).
     const primary2 = await seedDb();
     await backdate(primary2);
-    const dead2 = deadTurso(primary2, { match: 'refresh_locks' });
+    const dead2 = deadTurso(primary2, { match: 'UPDATE refresh_locks' });
     process.env.WB_RECOVERY_RECONCILE_COOLDOWN_MS = '3600000';
     const second = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
@@ -1140,7 +1147,8 @@ test('8N-window: identical content advances one window across probes, then promo
     const probe = { calls: 0 };
     const createProbe = async () => {
       probe.calls += 1;
-      return primary;
+      if (probe.calls === 1) return primary;
+      return seedDb();
     };
     // First probe opens the window but must not promote yet.
     const first = await maybeRecoverPrimary(shared, { configuredMode: 'turso', createProbe });
@@ -1208,11 +1216,12 @@ test('8N-window: diverged content resets the window instead of promoting', async
       sql: 'UPDATE observations SET value = value - 1 WHERE rowid = (SELECT MIN(rowid) FROM observations)',
       args: [],
     });
-    const equivalent = await repository.compareDatasetContent(primary, fallback);
+    const nextPrimary = await seedDb();
+    const equivalent = await repository.compareDatasetContent(nextPrimary, fallback);
     assert.equal(equivalent.identical, true);
     const next = await maybeRecoverPrimary(shared, {
       configuredMode: 'turso',
-      createProbe: async () => primary,
+      createProbe: async () => nextPrimary,
     });
     assert.equal(next.reason, 'confirming', 'fresh window starts after divergence clears');
     assert.equal(shared.isFallback, true);

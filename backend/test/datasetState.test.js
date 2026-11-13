@@ -44,12 +44,13 @@ async function freshDb() {
   return createMemoryDb();
 }
 
-async function seedDb() {
+async function seedDb(vintage = null) {
   const db = await freshDb();
   const repository = await import('../src/db/repository.js');
   const { refreshData } = await import('../src/wb/ingest.js');
   stub.reset();
   rowsTransform = null;
+  stub.setSeriesLastUpdated(vintage);
   const summary = await refreshData({ db, startYear: 2024, endYear: 2025, trigger: 'test-seed' });
   assert.equal(summary.status, 'success');
   return { db, repository, refreshData, seedSummary: summary };
@@ -864,10 +865,10 @@ test('recomputing an existing dataset_state row re-derives the vintage from obse
 });
 
 test('content-changing refresh publishes the new vintage and the derived row agrees', async () => {
-  const { db, repository, refreshData } = await seedDb();
+  const olderVintage = '2021-05-05';
+  const { db, repository, refreshData } = await seedDb(olderVintage);
   try {
     const before = await repository.getDatasetState(db);
-    const olderVintage = '2021-05-05';
     const newerVintage = '2026-10-08';
 
     stub.reset();
@@ -967,11 +968,10 @@ test('upstream metadata advancing without value changes updates provenance only'
 });
 
 test('a generic older-to-newer vintage transition is followed (not hard-coded to any release)', async () => {
-  const { db, repository, refreshData } = await seedDb();
+  // Deliberately arbitrary dates in release order.
+  const genericOlder = '2018-03-04';
+  const { db, repository, refreshData } = await seedDb(genericOlder);
   try {
-    // Deliberately arbitrary dates: the behaviour must follow whatever the
-    // upstream reports, so every future World Bank release is covered.
-    const genericOlder = '2018-03-04';
     const genericNewer = '2023-11-19';
     stub.reset();
     stub.setSeriesLastUpdated(genericOlder);

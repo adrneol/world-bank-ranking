@@ -120,3 +120,13 @@ test('a persisted report is reusable only for the derived vintage it verified', 
   ];
   assert.equal(storedReportMatchesCurrentVintage(nullVintage, null), true);
 });
+test('equal generation keys on different handles do not reuse integrity reports', async () => {
+  const primary = {};
+  const fallback = {};
+  const key = expensiveIntegrityKey(1, '2026-07-13');
+  const bad = { passed: false, checks: [] };
+  const good = { passed: true, checks: [] };
+  assert.equal((await getCachedExpensiveIntegrity(key, async () => bad, fallback)).report, bad);
+  assert.equal((await getCachedExpensiveIntegrity(key, async () => good, primary)).report, good);
+  assert.equal((await getCachedExpensiveIntegrity(key, async () => good, fallback)).report, bad);
+});

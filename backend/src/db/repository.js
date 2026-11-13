@@ -21,6 +21,8 @@
  */
 
 import { getDb } from './index.js';
+import { METRICS } from '../config.js';
+import { isWdiVintage } from '../wb/vintage.js';
 import { batchGet, batchRun, queryAll, queryGet, queryRun, transaction } from './driver.js';
 
 const nowIso = () => new Date().toISOString();
@@ -539,9 +541,7 @@ function observationTuplesEqual(aRows, bRows) {
   return byKey.size === 0;
 }
 
-/** Symmetric country-metadata comparison (both directions must agree). */
-function countryRowsEqual(aRows, bRows) {
-  const norm = (row) =>
+const countryIdentity = (row) =>
     JSON.stringify([
       row.id,
       row.iso2 ?? null,
@@ -556,10 +556,13 @@ function countryRowsEqual(aRows, bRows) {
       row.is_aggregate ?? 0,
       row.aggregate_reason ?? null,
     ]);
+
+/** Symmetric country-metadata comparison (both directions must agree). */
+function countryRowsEqual(aRows, bRows) {
   if (!Array.isArray(aRows) || !Array.isArray(bRows)) return false;
   if (aRows.length !== bRows.length) return false;
-  const aNorm = aRows.map(norm).sort();
-  const bNorm = bRows.map(norm).sort();
+  const aNorm = aRows.map(countryIdentity).sort();
+  const bNorm = bRows.map(countryIdentity).sort();
   return aNorm.every((v, i) => v === bNorm[i]);
 }
 
@@ -608,6 +611,81 @@ export async function compareDatasetContent(dbA, dbB) {
     countriesMatch,
     rowsCompared,
   };
+}
+
+/**
+ * Proof for promotion, distinct from symmetric economic-content comparison.
+ * The candidate must cover every fallback key. A changed value requires a
+ * strictly newer source vintage on that very observation. Local run IDs and
+ * retrieval clocks cannot prove this relationship across databases.
+ */
+export async function verifyRecoveryCoverage(primary, fallback, signal) {
+  let p;
+  let f;
+  try {
+    signal?.throwIfAborted();
+    p = await primary.transaction('read');
+    signal?.throwIfAborted();
+    f = await fallback.transaction('read');
+    const [pIndicators, fIndicators] = await Promise.all([listIndicators(p), listIndicators(f)]);
+    const [pCountries, fCountries] = await Promise.all([listCountries(p), listCountries(f)]);
+    if (pIndicators.some((row) => METRICS[row.metric_key]?.indicatorCode !== row.code
+        || (row.source != null && row.source !== 'World Development Indicators'))) {
+      return { safe: false, reason: 'indicator-identity', rowsCompared: 0 };
+    }
+    signal?.throwIfAborted();
+    const countryById = new Map(pCountries.map((row) => [row.id, countryIdentity(row)]));
+    if (fCountries.some((row) => countryById.get(row.id) !== countryIdentity(row))) {
+      return { safe: false, reason: 'country-metadata', rowsCompared: 0 };
+    }
+    const eligibleIds = new Set(pCountries.filter((row) => row.is_aggregate === 0).map((row) => row.id));
+    const pByCode = new Map(pIndicators.map((row) => [row.code, row]));
+    const fByCode = new Map(fIndicators.map((row) => [row.code, row]));
+    const metadata = (row) => JSON.stringify([row.metric_key, row.unit, row.source]);
+    let primaryRows = 0;
+    let fallbackRows = 0;
+    let eligible = false;
+    for (const code of new Set([...fByCode.keys(), ...pByCode.keys()])) {
+      signal?.throwIfAborted();
+      const a = pByCode.get(code);
+      const b = fByCode.get(code);
+      if (!a || (b && metadata(a) !== metadata(b))) {
+        return { safe: false, reason: 'indicator-coverage', rowsCompared: primaryRows + fallbackRows };
+      }
+      const [pRows, fRows] = await Promise.all([
+        getObservationsForCompare(p, a.id, 1000, 9999),
+        b ? getObservationsForCompare(f, b.id, 1000, 9999) : [],
+      ]);
+      primaryRows += pRows.length;
+      fallbackRows += fRows.length;
+      const key = (row) => `${row.countryId}:${row.year}`;
+      const pByKey = new Map(pRows.map((row) => [key(row), row]));
+      eligible ||= pRows.some((row) => eligibleIds.has(row.countryId));
+      if (pRows.some((row) => !countryById.has(row.countryId) || !Number.isInteger(row.year) || !Number.isFinite(row.value)
+          || (row.valueRaw != null && canonicalDecimalString(row.valueRaw) === null))) {
+        return { safe: false, reason: 'invalid-observations', rowsCompared: primaryRows + fallbackRows };
+      }
+      for (const previous of fRows) {
+        const next = pByKey.get(key(previous));
+        if (!next) return { safe: false, reason: 'observation-coverage', rowsCompared: primaryRows + fallbackRows };
+        const older = previous.wbLastUpdated != null &&
+          (next.wbLastUpdated == null || next.wbLastUpdated < previous.wbLastUpdated);
+        const revised = next.value !== previous.value || next.valueRaw !== previous.valueRaw;
+        const newer = revised && next.wbLastUpdated > previous.wbLastUpdated
+          && isWdiVintage(next.wbLastUpdated) && isWdiVintage(previous.wbLastUpdated);
+        if (older || (revised && !newer)) {
+          return { safe: false, reason: 'observation-vintage-or-content', rowsCompared: primaryRows + fallbackRows };
+        }
+      }
+    }
+    // Compare counts against the scans to reject orphan indicators and rows
+    // outside the supported annual key space instead of skipping them.
+    const [pCount, fCount] = await Promise.all([countObservations(p), countObservations(f)]);
+    const safe = eligible && fallbackRows > 0 && pCount === primaryRows && fCount === fallbackRows;
+    return { safe, reason: safe ? 'verified' : 'invalid-observations', rowsCompared: primaryRows + fallbackRows };
+  } finally {
+    try { f?.close(); } finally { p?.close(); }
+  }
 }
 
 /**
@@ -1473,6 +1551,10 @@ export async function getUniverseSnapshotByRun(db, runId) {
     completedAt: row.completed_at ?? null,
     snapshot: JSON.parse(row.universe_snapshot),
   };
+}
+
+export async function getFetchRunStatus(db, id) {
+  return (await queryGet(db, 'SELECT status FROM fetch_runs WHERE id = ?', [id]))?.status ?? null;
 }
 
 export async function getLatestFetchRun(db, { status = 'success' } = {}) {

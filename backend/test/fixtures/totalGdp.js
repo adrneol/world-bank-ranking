@@ -68,8 +68,6 @@ const REJECTED_ROWS = Object.freeze([
   { metricKey: 'total_current', iso3: '', countryId: 'XD', countryName: 'High income', year: 2024, value: 45545.9 },
   // ISO3 absent from the World Bank country metadata entirely.
   { metricKey: 'total_current', iso3: 'ZZZ', countryId: 'ZZ', countryName: 'Nowhere', year: 2024, value: 999 },
-  // Null value: missing data must be skipped, never stored as 0.
-  { metricKey: 'total_current', iso3: 'PAK', countryId: 'PK', countryName: 'Pakistan', year: 2024, value: null },
 ]);
 
 function row(metricKey, iso3, countryId, countryName, year, value) {
@@ -94,10 +92,10 @@ export function totalGdpRows(metricKey) {
   for (const [iso3, economy] of Object.entries(ECONOMIES)) {
     for (const year of Object.keys(YEAR_FACTOR).map(Number)) {
       const isLiveIndia2025 = iso3 === 'IND' && year === 2025;
-      const value = isLiveIndia2025
-        ? IND_2025[metricKey]
-        : IND_2025[metricKey] * economy.factor * YEAR_FACTOR[year];
-      rows.push(row(metricKey, iso3, iso3 === 'USA' ? 'US' : iso3, economy.name, year, value));
+      const value = metricKey === 'total_current' && iso3 === 'PAK' && year === 2024
+        ? null // One explicit missing observation for this key.
+        : isLiveIndia2025 ? IND_2025[metricKey] : IND_2025[metricKey] * economy.factor * YEAR_FACTOR[year];
+      rows.push(row(metricKey, iso3, { IND: 'IN', USA: 'US', DEU: 'DE', PAK: 'PK', XKX: 'XK' }[iso3], economy.name, year, value));
     }
   }
   for (const rejected of REJECTED_ROWS) {

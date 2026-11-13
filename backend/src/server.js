@@ -35,7 +35,7 @@ import config, {
 import { closeDb, createPrimaryHandle, describeDbTarget, getDb, initDatabase, openExistingLocalDb, pingDatabase, resolveDbMode } from './db/index.js';
 import { isTransportError } from './db/driver.js';
 import {
-  compareDatasetContent,
+  verifyRecoveryCoverage,
   computeDatasetState,
   countAggregateCountries,
   countAllCountries,
@@ -49,6 +49,7 @@ import {
   getIndicatorByMetricKey,
   getMaxWbLastUpdated,
   getObservation,
+  refreshLockStatus,
   getObservedCountryIds,
   insertDatasetStateIfAbsent,
   listCountries,
@@ -75,7 +76,6 @@ import {
   getCachedExpensiveIntegrity,
   getCachedIntegrity,
   integrityCacheKey,
-  resetIntegrityCache,
   storedReportMatchesCurrentVintage,
 } from './services/statusCache.js';
 import {
@@ -276,10 +276,10 @@ export function publicDatabaseTarget(info = activeDbInfo) {
  *     of the stability wait (tests, explicit operator choice);
  *   - never while a refresh is in progress and never while the fallback lock
  *     is held (an in-flight refresh keeps its captured handle to completion);
- *   - the candidate primary is revalidated (ping + non-empty dataset) before
- *     promotion; an empty or unreachable primary keeps fallback serving;
- *   - freshness-guarded: a behind primary is reconciled through the normal
- *     refresh pipeline before it may promote — never a blind regress;
+ *   - every promotion requires a committed coverage and provenance proof;
+ *     a failed or inconclusive proof keeps fallback serving;
+ *   - a candidate behind the fallback can reconcile through WDI, with the
+ *     same proof required again after publication;
  *   - promotion swaps ONLY the future-handle cell (single-threaded assignment:
  *     in-flight requests keep their captured reference); the previous fallback
  *     handle is deliberately left open (never closed under live readers).
@@ -351,18 +351,30 @@ export function recoveryReconcileCooldownMs() {
 let lastReconcileAttemptAt = 0;
 /** Test seam: inspect or reset the confirmation window (never a DB write). */
 export function getRecoveryConfirmation() {
-  return recoveryConfirmation ? { ...recoveryConfirmation } : null;
+  if (!recoveryConfirmation) return null;
+  const { fallback, ...windowState } = recoveryConfirmation;
+  return windowState;
 }
 export function resetRecoveryConfirmation() {
   recoveryConfirmation = null;
 }
-const withProbeTimeout = (promise, ms, label) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Recovery probe timed out: ${label}`)), ms);
-    }),
-  ]);
+async function withProbeTimeout(promise, ms, label, controller) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error(`Recovery probe timed out: ${label}`);
+          controller?.abort(error);
+          reject(error);
+        }, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 async function defaultProbePrimary(timeoutMs) {
   const handle = createPrimaryHandle();
   try {
@@ -389,41 +401,15 @@ async function defaultProbePrimary(timeoutMs) {
     return null;
   }
 }
-/**
- * Phase 8I: compare dataset generations across two handles WITHOUT new
- * infrastructure, using existing metadata only (fingerprint + vintage).
- * content_version sequences are per-database and NOT cross-comparable, so
- * the comparison uses wall-clock retrieval evidence: maxFetchedAt (row-level
- * fetch times), lastSuccessAt (successful-check times), and the World Bank
- * vintage string (lexicographically comparable ISO dates). Null = unknown
- * and never blocks on its own; any positive "fallback is newer" signal
- * blocks promotion until reconciliation.
- */
-async function describeGeneration(handle, timeoutMs) {
-  const fp = await withProbeTimeout(getDatasetFingerprint(handle), timeoutMs, 'fingerprint');
-  let vintage = null;
-  try {
-    vintage = await withProbeTimeout(getMaxWbLastUpdated(handle), timeoutMs, 'vintage');
-  } catch {
-    vintage = null;
-  }
-  return {
-    lastSuccessAt: fp?.lastSuccessAt ?? null,
-    maxFetchedAt: fp?.maxFetchedAt ?? null,
-    count: Number(fp?.observationCount ?? 0) || 0,
-    vintage: vintage ?? null,
-  };
+// Compare generation markers only within the same database. The lock token
+// also changes across a failed or unchanged refresh.
+async function recoveryMarker(handle) {
+  const lock = await refreshLockStatus(handle);
+  if (!lock) throw new Error('Recovery lock state is unavailable.');
+  const state = await getDatasetState(handle);
+  return { locked: Boolean(lock.locked), token: JSON.stringify([lock.updatedAt, state?.contentVersion, state?.updatedRunId]) };
 }
-const isNewerStamp = (a, b) => a != null && (b == null || a > b);
-function fallbackIsNewerThanPrimary(fb, p) {
-  if (!fb) return false;
-  if (!p) return true;
-  return (
-    isNewerStamp(fb.maxFetchedAt, p.maxFetchedAt) ||
-    isNewerStamp(fb.lastSuccessAt, p.lastSuccessAt) ||
-    isNewerStamp(fb.vintage, p.vintage)
-  );
-}
+
 async function closeQuietly(handle) {
   try {
     await handle?.close?.();
@@ -443,8 +429,9 @@ export async function maybeRecoverPrimary(shared, options = {}) {
   // The manual-refresh fast path (reconcile:false) never joins a shared
   // attempt: it must stay a bounded probe+compare so POST latency cannot
   // inherit a minutes-long catch-up started elsewhere.
-  if (options?.reconcile === false) return runPrimaryRecovery(shared, options);
-  if (recoveryFlight) return recoveryFlight;
+  if (recoveryFlight) {
+    return options?.reconcile === false ? { recovered: false, reason: 'recovery-in-progress' } : recoveryFlight;
+  }
   const task = runPrimaryRecovery(shared, options);
   recoveryFlight = task;
   try {
@@ -494,6 +481,7 @@ async function runPrimaryRecovery(
     onWarn?.({ message: 'Primary recovery deferred: fallback lock unreadable.' });
     return { recovered: false, reason: 'lock-unreadable' };
   }
+  const fallback = shared.current;
   const probe = createProbe ?? defaultProbePrimary;
   let candidate = null;
   try {
@@ -510,7 +498,9 @@ async function runPrimaryRecovery(
     onWarn?.({ message: 'Primary still unavailable; staying on fallback.' });
     return { recovered: false, reason: 'primary-unavailable' };
   }
+  let promoted = false;
   const promote = () => {
+    promoted = true;
     // Promote: future handle() calls serve the revalidated primary. In-flight
     // work keeps its captured fallback reference to completion. Memos are
     // content-keyed (run/content-version) so the new generation simply misses
@@ -528,8 +518,8 @@ async function runPrimaryRecovery(
     if (!(required > 0)) return promote();
     const now = Date.now();
     const windowState = recoveryConfirmation;
-    if (!windowState || windowState.requiredMs !== required) {
-      recoveryConfirmation = { startedAt: now, requiredMs: required, lastTickLogged: 0, lastHealthyAt: now };
+    if (!windowState || windowState.fallback !== fallback || windowState.requiredMs !== required) {
+      recoveryConfirmation = { fallback, startedAt: now, requiredMs: required, lastTickLogged: 0, lastHealthyAt: now };
       console.log('Primary database available: Turso (production)');
       console.log(`Recovery confirmation started: ${Math.round(required / 1000)}s`);
       return { recovered: false, reason: 'confirming' };
@@ -550,119 +540,63 @@ async function runPrimaryRecovery(
     }
     return { recovered: false, reason: 'confirming' };
   };
-  // Phase 8I freshness guard: never regress from fresher fallback data to an
-  // older primary. Promotion requires NO positive "fallback is newer" signal
-  // across retrieval timestamps and vintage. Unknowns (nulls) never block.
-  let primaryGen = null;
-  let fallbackGen = null;
-  try {
-    primaryGen = await describeGeneration(candidate, recoveryProbeTimeoutMs());
-    fallbackGen = await describeGeneration(shared.current, recoveryProbeTimeoutMs());
-  } catch {
-    await closeQuietly(candidate);
-    // Preserve a pending window: a transient read failure is not evidence
-    // against previously established health (a truly dead primary clears
-    // the window via primary-unavailable on the next probe).
-    console.log('Remaining on: Local SQLite (production fallback)');
-    onWarn?.({ message: 'Primary generation unreadable; staying on fallback.' });
-    return { recovered: false, reason: 'generation-unknown' };
-  }
-  if (!fallbackIsNewerThanPrimary(fallbackGen, primaryGen)) {
-    // Equivalent-or-newer primary: enter (or advance) the confirmation
-    // window instead of promoting on this single probe.
-    return confirmHealthy();
-  }
-  // Phase 8N fast path: newer retrieval stamps alone do NOT prove content
-  // differs. Do NOT clear a pending confirmation window here: the compare
-  // below may vindicate it (identical content advances the same window).
-  // Only genuinely diverged content — or a failed probe/refresh — resets it.
-  // differs — a same-vintage refresh renews every timestamp with byte-identical
-  // values. Compare stored content directly first: pure reads on both
-  // handles, no transaction, no World Bank fetch, no writes. Only genuinely
-  // diverged content still needs the full catch-up refresh below.
-  //
-  // Budget note (measured live, 228k obs × 2 handles): the scan touches one
-  // indicator at a time and needs tens of seconds on remote+local reads, far
-  // beyond a single probe round trip — so it gets its own derived budget
-  // instead of the probe timeout. On timeout the safe direction wins and the
-  // code falls through to the full catch-up refresh, exactly as before.
-  const compareBudgetMs = Math.max(120000, recoveryProbeTimeoutMs() * 6);
-  let content = null;
-  try {
-    content = await withProbeTimeout(
-      compareDatasetContent(candidate, shared.current),
-      compareBudgetMs,
-      'content-compare',
+  // The ordinary read path still uses the active handle. Recovery is the
+  // only path that compares committed rows, once per eligible probe.
+  const verify = async () => {
+    const marker = async (db) => withProbeTimeout(recoveryMarker(db), recoveryProbeTimeoutMs(), 'generation');
+    const [beforePrimary, beforeFallback] = await Promise.all([marker(candidate), marker(fallback)]);
+    if (beforePrimary.locked || beforeFallback.locked) return { safe: false, busy: true };
+    const controller = new AbortController();
+    const compareBudgetMs = reconcile ? Math.max(120000, recoveryProbeTimeoutMs() * 6) : recoveryProbeTimeoutMs();
+    const proof = await withProbeTimeout(
+      verifyRecoveryCoverage(candidate, fallback, controller.signal),
+      compareBudgetMs, 'content-compare', controller,
     );
-  } catch {
-    content = null;
-  }
-  if (content?.identical) {
-    console.log(
-      `Primary content identical to fallback (${content.rowsCompared} stored rows compared, ` +
-        '0 fetched, 0 written); no catch-up refresh needed',
-    );
-    return confirmHealthy();
-  }
-  if (content) {
-    // Genuinely diverged content: any pending window described a different
-    // reality — clear it so the post-reconcile probe starts fresh.
+    const [afterPrimary, afterFallback] = await Promise.all([marker(candidate), marker(fallback)]);
+    if (shared.current !== fallback || !shared.isFallback || isRefreshInProgress() ||
+        afterPrimary.locked || afterFallback.locked ||
+        beforePrimary.token !== afterPrimary.token || beforeFallback.token !== afterFallback.token) {
+      return { safe: false, busy: true };
+    }
+    return proof;
+  };
+
+  try {
+    let proof = await verify();
+    if (proof.safe) {
+      console.log(`Primary coverage verified (${proof.rowsCompared} stored rows compared)`);
+      return confirmHealthy();
+    }
     recoveryConfirmation = null;
-    console.log(
-      `Primary content differs (${content.differingIndicators.length} indicator(s)` +
-        `${content.countriesMatch ? '' : ' + country metadata'}); catch-up refresh required`,
-    );
-  }
-  // CASE 2: fallback holds newer data (or the fast-path compare timed out,
-  // in which case a full refresh is the safe direction). Keep serving it;
-  // reconcile Turso through the NORMAL refreshData() pipeline (O10/O7/O8
-  // intact — unchanged Turso rows are skipped, only required changes
-  // publish), then promote only on a successful publication. The
-  // manual-refresh path passes reconcile:false to stay fast: it simply
-  // keeps refreshing fallback.
-  if (reconcile === false) {
-    console.log('Remaining on: Local SQLite (production fallback)');
-    onWarn?.({ message: 'Primary is behind fallback data; staying on fallback.' });
-    return { recovered: false, reason: 'primary-behind' };
-  }
-  // A failed catch-up must not hot-loop: one attempt per cooldown window
-  // while fallback keeps serving (discovered live: back-to-back catch-ups
-  // re-burned full World Bank fetches plus failed-run rows on Turso).
-  if (Date.now() - lastReconcileAttemptAt < recoveryReconcileCooldownMs()) {
-    return { recovered: false, reason: 'reconcile-cooldown' };
-  }
-  lastReconcileAttemptAt = Date.now();
-  try {
-    const summary = await refreshData({ db: candidate, trigger: 'recovery', onWarn });
-    if (summary?.status !== 'success') {
-      await closeQuietly(candidate);
-      onWarn?.({ message: 'Primary catch-up refresh did not publish; staying on fallback.' });
+    if (proof.busy) return { recovered: false, reason: 'generation-changed' };
+    onWarn?.({ message: `Primary coverage could not be verified (${proof.reason}); staying on fallback.` });
+    if (!reconcile || ['invalid-observations', 'indicator-identity'].includes(proof.reason)) {
+      return { recovered: false, reason: 'primary-behind' };
+    }
+    if (Date.now() - lastReconcileAttemptAt < recoveryReconcileCooldownMs()) {
+      return { recovered: false, reason: 'reconcile-cooldown' };
+    }
+    lastReconcileAttemptAt = Date.now();
+    try {
+      const summary = await refreshData({ db: candidate, trigger: 'recovery', preserveObservationKeys: true, onWarn });
+      if (summary?.status !== 'success') return { recovered: false, reason: 'reconcile-failed' };
+    } catch {
+      onWarn?.({ message: 'Primary catch-up refresh failed; staying on fallback.' });
       return { recovered: false, reason: 'reconcile-failed' };
     }
-  } catch {
-    await closeQuietly(candidate);
-    recoveryConfirmation = null;
-    console.log('Remaining on: Local SQLite (production fallback)');
-    onWarn?.({ message: 'Primary catch-up refresh failed; staying on fallback.' });
-    return { recovered: false, reason: 'reconcile-failed' };
-  }
-  try {
-    primaryGen = await describeGeneration(candidate, recoveryProbeTimeoutMs());
-    fallbackGen = await describeGeneration(shared.current, recoveryProbeTimeoutMs());
+    proof = await verify();
+    if (!proof.safe) {
+      onWarn?.({ message: 'Primary coverage still unverified after catch-up; staying on fallback.' });
+      return { recovered: false, reason: proof.busy ? 'generation-changed' : 'primary-behind' };
+    }
+    return confirmHealthy();
   } catch {
     recoveryConfirmation = null;
-    onWarn?.({ message: 'Primary generation unreadable after catch-up; staying on fallback.' });
+    onWarn?.({ message: 'Primary verification unavailable; staying on fallback.' });
     return { recovered: false, reason: 'generation-unknown' };
+  } finally {
+    if (!promoted && candidate !== fallback) await closeQuietly(candidate);
   }
-  if (fallbackIsNewerThanPrimary(fallbackGen, primaryGen)) {
-    recoveryConfirmation = null;
-    console.log('Remaining on: Local SQLite (production fallback)');
-    onWarn?.({ message: 'Primary still behind fallback data after catch-up; staying on fallback.' });
-    return { recovered: false, reason: 'primary-behind' };
-  }
-  // Caught up: an immediately-healthy primary still earns promotion through
-  // the confirmation window (or at once when operators opt out with 0).
-  return confirmHealthy();
 }
 
 /**
@@ -726,7 +660,7 @@ export function logFailoverNotTriggered(reason, req) {
 }
 export async function maybeFailoverToFallback(
   shared,
-  { onWarn = null, mode = null, allowFallback = null, openFallback = null, cause = null } = {},
+  { onWarn = null, mode = null, allowFallback = null, openFallback = null } = {},
 ) {
   const effectiveMode = mode ?? resolveDbMode();
   if (effectiveMode !== 'turso') return { failedOver: false, reason: 'primary-not-turso' };
@@ -741,12 +675,8 @@ export async function maybeFailoverToFallback(
   const task = (async () => {
     // Phase 8L terminal state machine: human-readable lines, logical names
     // only (never hosts, URLs, tokens, or credentials).
-    const reasonText =
-      cause?.message != null && String(cause.message).trim() !== ''
-        ? String(cause.message).slice(0, 200)
-        : 'transport failure detected';
     console.warn('Primary database unavailable: Turso (production)');
-    console.warn(`Reason: ${reasonText}`);
+    console.warn('Reason: transport failure detected');
     console.warn('Fallback enabled: yes');
     let opened = null;
     try {
@@ -1987,6 +1917,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // ---------- data status ----------
   app.get('/api/data-status', ah(async (req, res) => {
     const h = handle();
+    const target = activeTargetOf(shared);
     const cache = await getCacheStatus(h);
     let lock = null;
     try {
@@ -2028,6 +1959,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
             );
             return { passed: checks.every((c) => c.status === 'pass'), checks };
           },
+          h,
         );
         const expensive = await getCachedExpensiveIntegrity(
           // The key carries the derived vintage as well as the content
@@ -2051,6 +1983,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
             const checks = await runExpensiveIntegrityChecks(h);
             return { passed: checks.every((c) => c.status === 'pass'), checks };
           },
+          h,
         );
         const checks = mergeIntegrityChecks(cheap.report.checks, expensive.report.checks);
         const passed = cheap.report.passed && expensive.report.passed;
@@ -2074,11 +2007,11 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
           await getCachedIntegrity(key, async () => {
             const report = await runIntegrityChecks(h);
             return { passed: report.passed, checks: report.checks.map((c) => ({ check: c.check, status: c.status })) };
-          })
+          }, h)
         ).report;
       }
-    } catch (error) {
-      integrity = { passed: false, error: error.message };
+    } catch {
+      integrity = { passed: false, error: 'Integrity verification unavailable.' };
     }
     // Phase 8E: persisted terminal refresh summary + enriched history.
     // Metadata-only (fetch_runs tiny-table reads + pure-JS derivation; no
@@ -2182,10 +2115,9 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
         enabled: autoRefreshEnabled,
         ttlHours: cache.ttlHours,
       },
-      // Phase 8K: label derived from the SAME shared cell the request
-      // handle resolves through — handle and label are one logical state,
-      // so a fallback commit can never serve beside a stale Turso label.
-      database: publicDatabaseTarget(activeTargetOf(shared)),
+      // Report the target captured with this request's database handle.
+      database: publicDatabaseTarget(target),
+      degraded: target.isFallback || target.isDegraded,
       // Additive presentation signal (Phase 6): lets the public UI hide the
       // manual-refresh action when the backend requires an admin token.
       // Non-analytical; exposes only whether auth is required, never the token.

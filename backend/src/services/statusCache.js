@@ -14,9 +14,17 @@
  * Integrity semantics are untouched: this memoizes, never skips, validation.
  */
 
-let cached = { key: null, value: null };
-let cheapCached = { key: null, value: null };
-let expensiveCached = { key: null, value: null };
+const defaultScope = {};
+let caches = new WeakMap();
+
+function memoFor(scope) {
+  let memo = caches.get(scope);
+  if (!memo) {
+    memo = { legacy: {}, cheap: {}, expensive: {} };
+    caches.set(scope, memo);
+  }
+  return memo;
+}
 
 /**
  * Refresh-generation key for the memo. Both parts advance only when a new
@@ -35,20 +43,13 @@ export function integrityCacheKey(fingerprint) {
  * shaped `{ passed, checks }` / `{ passed: false, error }` payload. It may
  * be async.
  */
-export async function getCachedIntegrity(key, compute) {
-  if (cached.key === key && cached.value !== null) {
-    return { report: cached.value, fromCache: true };
-  }
-  const report = await compute();
-  cached = { key, value: report };
-  return { report, fromCache: false };
+export async function getCachedIntegrity(key, compute, scope = defaultScope) {
+  return getCachedSlot(memoFor(scope).legacy, key, compute);
 }
 
-/** Test seam: clear the memo (also used if the process ever needs it). */
+/** Test seam: clear the memo. */
 export function resetIntegrityCache() {
-  cached = { key: null, value: null };
-  cheapCached = { key: null, value: null };
-  expensiveCached = { key: null, value: null };
+  caches = new WeakMap();
 }
 
 /**
@@ -101,7 +102,7 @@ export function storedReportMatchesCurrentVintage(checks, currentVintage) {
 }
 
 async function getCachedSlot(slot, key, compute) {
-  if (slot.key === key && slot.value !== null) {
+  if (slot.key === key && slot.value !== undefined) {
     return { report: slot.value, fromCache: true };
   }
   const report = await compute();
@@ -110,12 +111,12 @@ async function getCachedSlot(slot, key, compute) {
   return { report, fromCache: false };
 }
 
-export async function getCachedCheapIntegrity(key, compute) {
-  return getCachedSlot(cheapCached, key, compute);
+export async function getCachedCheapIntegrity(key, compute, scope = defaultScope) {
+  return getCachedSlot(memoFor(scope).cheap, key, compute);
 }
 
-export async function getCachedExpensiveIntegrity(key, compute) {
-  return getCachedSlot(expensiveCached, key, compute);
+export async function getCachedExpensiveIntegrity(key, compute, scope = defaultScope) {
+  return getCachedSlot(memoFor(scope).expensive, key, compute);
 }
 
 export default { integrityCacheKey, getCachedIntegrity, resetIntegrityCache };

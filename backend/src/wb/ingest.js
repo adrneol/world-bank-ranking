@@ -33,7 +33,7 @@
  *   - fetches `startYear - 1` through `endYear`, so the FIRST selected year can
  *     still have a YoY value computed from its predecessor
  *   - applies the universe rule from domain/universe.js to every observation;
- *     aggregate rows and blank-ISO3 rows are never written to the database
+ *     official coded aggregates are stored separately from ranked economies
  *   - never converts null to 0: null observations are counted and skipped
  *   - records one fetch_runs row per run with full audit metadata, including the
  *     eligible/aggregate universe snapshot and the per-year counters
@@ -61,6 +61,7 @@ import { METRICS, PRODUCTION_METRIC_KEYS, config, isProductionMetric } from '../
 import { getDb } from '../db/index.js';
 import { batchGet, isTransportError } from '../db/driver.js';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -121,6 +122,7 @@ import {
   finishFetchRun,
   forceReleaseRefreshLock,
   getDatasetState,
+  getFetchRunStatus,
   getIndicatorByMetricKey,
   getLatestFetchRun,
   getObservationsForCompare,
@@ -149,6 +151,8 @@ import {
   fetchCountryMetadata,
   fetchIndicatorMetadata,
   fetchIndicatorSeries,
+  WorldBankPayloadError,
+  WDI_SOURCE_NAME,
 } from './client.js';
 
 /** Process-level refresh lock. Prevents overlapping ingests in one process. */
@@ -297,6 +301,16 @@ export async function fetchCountryMetadataPayload(options = {}) {
     onProgress: options.onProgress,
   });
 
+  const ids = new Set();
+  for (const [index, row] of result.rows.entries()) {
+    if (typeof row?.id !== 'string' || !/^[A-Z0-9]{3}$/.test(row.id)
+        || typeof row.name !== 'string' || !row.name.trim()
+        || typeof row.region?.id !== 'string' || typeof row.region?.value !== 'string') {
+      throw new WorldBankPayloadError(`Invalid World Bank country metadata at row ${index + 1}.`);
+    }
+    if (ids.has(row.id)) throw new WorldBankPayloadError(`Duplicate World Bank country metadata at row ${index + 1}.`);
+    ids.add(row.id);
+  }
   const universe = buildUniverse(result.rows);
 
   if (universe.eligibleCount === 0) {
@@ -326,7 +340,7 @@ export async function fetchCountryMetadataPayload(options = {}) {
  * @param {string} metricKey
  * @param {number} fetchedStartYear inclusive
  * @param {number} fetchedEndYear inclusive
- * @param {{eligibleIso3Set: Set<string>, aggregateIso3Set: Set<string>}} universeIndex
+ * @param {{eligibleIso3Set: Set<string>, aggregateIso3Set: Set<string>, economyIds?: Map<string, string>, eligibleSourceIds?: Set<string>}} universeIndex
  *        indexes built by domain/universe.js createUniverseIndex()
  * @param {{onProgress?: Function, onWarn?: Function}} [options]
  */
@@ -340,17 +354,13 @@ export async function fetchIndicatorPayload(
   const metric = METRICS[metricKey];
   if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
 
-  const { eligibleIso3Set, aggregateIso3Set = new Set() } = universeIndex ?? {};
+  const { eligibleIso3Set, aggregateIso3Set = new Set(), economyIds, eligibleSourceIds } = universeIndex ?? {};
 
-  // Indicator metadata (name/unit) is helpful for the audit panel; a failure
-  // here must not abort the numeric ingest.
-  let indicatorMeta = null;
-  try {
-    indicatorMeta = await fetchIndicatorMetadata(metric.indicatorCode);
-  } catch (error) {
-    options.onWarn?.({
-      message: `Indicator metadata unavailable for ${metric.indicatorCode}: ${error.message}`,
-    });
+  // A failed lookup cannot certify an indicator label or source. Keep
+  // the previously published generation and retry through the usual policy.
+  const indicatorMeta = await fetchIndicatorMetadata(metric.indicatorCode);
+  if (!indicatorMeta) {
+    throw new WorldBankPayloadError(`World Bank indicator metadata is missing for ${metric.indicatorCode}.`);
   }
 
   const series = await fetchIndicatorSeries(
@@ -410,9 +420,37 @@ export async function fetchIndicatorPayload(
     return yearStats.get(key);
   };
 
-  for (const raw of series.rows) {
-    const year = Number.parseInt(raw?.date, 10);
-    const rawValue = raw?.value === null || raw?.value === undefined ? null : Number(raw.value);
+  const identities = new Set();
+  for (const [index, raw] of series.rows.entries()) {
+    const invalid = (field) => new WorldBankPayloadError(
+      `Invalid World Bank ${field} for ${metric.indicatorCode} at observation ${index + 1}.`,
+    );
+    if (!((typeof raw.date === 'string' && /^\d{4}$/.test(raw.date))
+        || (Number.isInteger(raw.date) && raw.date >= 1000 && raw.date <= 9999))) throw invalid('annual year');
+    const year = Number(raw.date);
+    if (year < fetchedStartYear || year > fetchedEndYear) throw invalid('year outside requested range');
+    const iso3 = raw.countryiso3code ?? '';
+    if (typeof iso3 !== 'string' || (iso3 !== '' && !/^[A-Z0-9]{3}$/.test(iso3))) {
+      throw invalid('economy code');
+    }
+    // Blank ISO3s are legitimate for some aggregates. Their source entity
+    // identifier distinguishes them for duplicate detection, never ranking.
+    const sourceEntity = raw.country?.id;
+    if (sourceEntity != null && (typeof sourceEntity !== 'string' || !/^[A-Z0-9]{2,3}$/.test(sourceEntity))) {
+      throw invalid('source economy code');
+    }
+    if (!iso3 && !sourceEntity) throw invalid('missing economy identity');
+    if (!iso3 && eligibleSourceIds?.has(sourceEntity)) throw invalid('missing economy code for a ranked economy');
+    const expectedSourceEntity = economyIds?.get(iso3);
+    if (expectedSourceEntity && sourceEntity && sourceEntity !== expectedSourceEntity && sourceEntity !== iso3) {
+      throw invalid('mismatched economy identity');
+    }
+    const identity = iso3 ? `iso3:${iso3}:${year}` : `source:${sourceEntity}:${year}`;
+    if (identities.has(identity)) throw invalid('duplicate observation identity');
+    identities.add(identity);
+    const lexical = canonicalDecimalString(raw.value);
+    if (raw.value != null && lexical === null) throw invalid('numeric value');
+    const rawValue = lexical === null ? null : Number(lexical);
     const perYear = statsForYear(year);
     perYear.rowsReceived += 1;
 
@@ -439,13 +477,12 @@ export async function fetchIndicatorPayload(
           counters.rowsAggregateStored += 1;
           perYear.rowsAggregateStored += 1;
           perYear.rowsWritten += 1;
-          const aggregateLexical = typeof raw?.value === 'string' ? canonicalDecimalString(raw.value) : null;
           stagedRows.push({
             metricKey,
             countryId: aggregateIso3,
             year,
             value: rawValue,
-            valueRaw: aggregateLexical ?? String(rawValue),
+            valueRaw: lexical,
             wbLastUpdated: series.lastUpdated,
           });
           continue;
@@ -463,13 +500,12 @@ export async function fetchIndicatorPayload(
     // Preserve the canonical decimal string alongside the numeric value.
     // When the API sent a string decimal that round-trips, keep its lexical
     // form; otherwise store the shortest round-trip of the parsed double.
-    const lexical = typeof raw?.value === 'string' ? canonicalDecimalString(raw.value) : null;
     stagedRows.push({
       metricKey,
       countryId: verdict.iso3,
       year,
       value: verdict.value,
-      valueRaw: lexical ?? String(verdict.value),
+      valueRaw: lexical,
       wbLastUpdated: series.lastUpdated,
     });
   }
@@ -484,7 +520,7 @@ export async function fetchIndicatorPayload(
     indicatorCode: metric.indicatorCode,
     indicatorName: indicatorMeta?.name ?? metric.label,
     indicatorUnit: indicatorMeta?.unit || metric.unit,
-    indicatorSource: indicatorMeta?.source?.value ?? 'World Development Indicators',
+    indicatorSource: WDI_SOURCE_NAME,
     indicatorSourceNote: indicatorMeta?.sourceNote ?? null,
     stagedRows,
     ...counters,
@@ -694,13 +730,17 @@ async function spillStagedRows(dir, metricKey, rows) {
       wbLastUpdated: row.wbLastUpdated ?? null,
     }),
   );
-  await fs.promises.writeFile(file, lines.length > 0 ? `${lines.join('\n')}\n` : '', 'utf8');
-  return file;
+  const text = lines.length > 0 ? `${lines.join('\n')}\n` : '';
+  await fs.promises.writeFile(file, text, 'utf8');
+  return { file, digest: createHash('sha256').update(text).digest('hex') };
 }
 
 /** Replay one spilled file back into staged-row objects (one indicator at a time). */
-async function readSpilledRows(file) {
+async function readSpilledRows({ file, digest }) {
   const text = await fs.promises.readFile(file, 'utf8');
+  if (createHash('sha256').update(text).digest('hex') !== digest) {
+    throw new WorldBankPayloadError('World Bank staging content changed before publication.');
+  }
   const rows = [];
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
@@ -810,6 +850,18 @@ export async function refreshData(options = {}) {
     error.code = 'REFRESH_IN_PROGRESS';
     throw error;
   }
+  const requestedStartYear = options.startYear ?? config.ingestStartYear;
+  const requestedEndYear = options.endYear ?? config.ingestEndYear;
+  const { fetchedStartYear, fetchedEndYear } = deriveFetchRange(requestedStartYear, requestedEndYear);
+  if (!Number.isInteger(requestedStartYear) || !Number.isInteger(requestedEndYear)
+      || fetchedStartYear < 1000 || fetchedEndYear > 9999 || requestedStartYear > requestedEndYear) {
+    throw new WorldBankPayloadError('Refresh requires an ordered four-digit annual range.');
+  }
+  const requestedMetrics = options.indicators ?? PRODUCTION_METRIC_KEYS;
+  if (!Array.isArray(requestedMetrics) || requestedMetrics.length === 0) {
+    throw new WorldBankPayloadError('Refresh requires at least one registered indicator.');
+  }
+  const metricKeys = [...new Set(requestedMetrics)];
   // Phase 8D: bounded inline retries for transient TRANSPORT failures only
   // (e.g. Turso/Hrana HTTP-layer blips mid-refresh). Each attempt is a full,
   // independent refresh: the previous attempt always failed definitively and
@@ -835,12 +887,7 @@ export async function refreshData(options = {}) {
     stage: 'starting',
     startedAt: new Date().toISOString(),
     trigger: options.trigger ?? 'manual',
-    requestedStartYear: options.startYear ?? config.ingestStartYear,
-    requestedEndYear: options.endYear ?? config.ingestEndYear,
-    ...deriveFetchRange(
-      options.startYear ?? config.ingestStartYear,
-      options.endYear ?? config.ingestEndYear,
-    ),
+    requestedStartYear, requestedEndYear, fetchedStartYear, fetchedEndYear,
     // Phase 8B: per-indicator execution ledger for the progress UI.
     // In-memory only (never a database write): each entry records what the
     // refresh loop actually did — published (rows rewritten), unchanged
@@ -848,11 +895,11 @@ export async function refreshData(options = {}) {
     // Execution progress, NOT publication state: on rollback nothing here
     // was published. Reset on every attempt; survives completion so the UI
     // can render the final checklist without extra polling.
-    metricKeys: [...(Array.isArray(options.indicators) ? options.indicators : PRODUCTION_METRIC_KEYS)],
+    metricKeys,
     // Display labels for every requested key (including not-yet-attempted
     // ones, which never get a step entry). Registry display metadata only.
     labels: Object.fromEntries(
-      (Array.isArray(options.indicators) ? options.indicators : PRODUCTION_METRIC_KEYS).map((k) => [
+      metricKeys.map((k) => [
         k,
         METRICS[k]?.label ?? k,
       ]),
@@ -872,13 +919,6 @@ export async function refreshData(options = {}) {
   // never retries. The finally releases only when dbLockHeld is true, so a
   // contention rejection can never release another holder's lock.
   let dbLockHeld = false;
-  const requestedStartYear = options.startYear ?? config.ingestStartYear;
-  const requestedEndYear = options.endYear ?? config.ingestEndYear;
-  const { fetchedStartYear, fetchedEndYear } = deriveFetchRange(
-    requestedStartYear,
-    requestedEndYear,
-  );
-  const metricKeys = options.indicators ?? PRODUCTION_METRIC_KEYS;
   const trigger = options.trigger ?? 'manual';
 
   const totals = {
@@ -943,7 +983,6 @@ export async function refreshData(options = {}) {
       contention.lockedBy = lockedBy;
       throw contention;
     }
-    const metricKeys = options.indicators ?? PRODUCTION_METRIC_KEYS;
 
     // Lifecycle enforcement (inside the try so the finally below always
     // releases the refresh lock): only production-enabled metrics may be
@@ -982,6 +1021,8 @@ export async function refreshData(options = {}) {
     wbLastUpdated = meta.lastUpdated;
 
     const { eligibleIso3Set, aggregateIso3Set } = createUniverseIndex(meta.universe);
+    const economyIds = new Map(meta.countries.map((row) => [row.id, row.iso2]));
+    const eligibleSourceIds = new Set(meta.universe.eligible.flatMap((row) => [row.id, row.iso2]).filter(Boolean));
     eligibleUniverseSize = eligibleIso3Set.size;
     aggregateUniverseSize = aggregateIso3Set.size;
 
@@ -1057,6 +1098,7 @@ export async function refreshData(options = {}) {
     // except for their provenance column, which is advanced inside the same
     // atomic publish transaction.
     const provenancePlans = [];
+    const indicatorMetadataPlans = [];
     for (const metricKey of metricKeys) {
         lastProgress = { ...lastProgress, stage: `indicator:${metricKey}` };
 
@@ -1070,7 +1112,7 @@ export async function refreshData(options = {}) {
             metricKey,
             fetchedStartYear,
             fetchedEndYear,
-            { eligibleIso3Set, aggregateIso3Set },
+            { eligibleIso3Set, aggregateIso3Set, economyIds, eligibleSourceIds },
             {
               onProgress: (p) => options.onProgress?.({ stage: `indicator:${metricKey}`, ...p }),
               onWarn: (w) => options.onWarn?.(w),
@@ -1108,7 +1150,9 @@ export async function refreshData(options = {}) {
             ...entry,
           });
         }
-        if (result.lastUpdated) wbLastUpdated = result.lastUpdated;
+        if (result.lastUpdated && (!wbLastUpdated || result.lastUpdated > wbLastUpdated)) {
+          wbLastUpdated = result.lastUpdated;
+        }
 
         // Phase 6C O10: skip the delete+upsert writes when the staged payload
         // is proven element-identical to what is already stored. The run is
@@ -1126,10 +1170,32 @@ export async function refreshData(options = {}) {
             fetchedStartYear,
             fetchedEndYear,
           );
+          if (existingIndicator.code !== result.indicatorCode) {
+            throw new WorldBankPayloadError(`Committed indicator identity does not match ${result.indicatorCode}.`);
+          }
+          if (stored.some((row) => !economyIds.has(row.countryId))) {
+            throw new WorldBankPayloadError(`World Bank country metadata no longer covers a committed observation for ${result.indicatorCode}.`);
+          }
+          const candidateKeys = options.preserveObservationKeys
+            ? new Set(result.stagedRows.map((row) => `${row.countryId}:${row.year}`))
+            : null;
+          if (candidateKeys && stored.some((row) => !candidateKeys.has(`${row.countryId}:${row.year}`))) {
+            throw new WorldBankPayloadError(`Recovery would remove a committed observation for ${result.indicatorCode}.`);
+          }
+          const newerStoredVintage = stored.some((row) => row.wbLastUpdated != null
+            && (result.lastUpdated == null || row.wbLastUpdated > result.lastUpdated));
+          if (newerStoredVintage) {
+            throw new WorldBankPayloadError(`World Bank vintage is missing or older than the committed data for ${result.indicatorCode}.`);
+          }
           unchanged = isIndicatorPayloadUnchanged(stored, result.stagedRows);
           storedVintages = collectStoredVintages(stored);
         }
         if (unchanged) {
+          if (existingIndicator.name !== result.indicatorName || existingIndicator.unit !== result.indicatorUnit ||
+              existingIndicator.source !== result.indicatorSource || existingIndicator.source_note !== result.indicatorSourceNote) {
+            indicatorMetadataPlans.push(result);
+            contentChanged = true;
+          }
           result.skippedUnchanged = true;
           totals.rowsSkippedUnchanged += result.rowsUpserted;
           result.stagedRows = EMPTY_RELEASED_ROWS;
@@ -1247,6 +1313,15 @@ export async function refreshData(options = {}) {
         // Countries are published (or were proven identical above); the
         // staged copy is now provably unneeded.
         meta.countries = EMPTY_RELEASED_ROWS;
+        for (const plan of indicatorMetadataPlans) {
+          await upsertIndicatorInner(tx, {
+            ...METRICS[plan.metricKey],
+            name: plan.indicatorName,
+            unit: plan.indicatorUnit,
+            source: plan.indicatorSource,
+            sourceNote: plan.indicatorSourceNote,
+          });
+        }
         for (const plan of changedPlans) {
           const stagedRows = await readSpilledRows(plan.stagedFile);
           await upsertIndicatorInner(tx, {
@@ -1320,6 +1395,12 @@ export async function refreshData(options = {}) {
           // Phase 8E: persisted terminal summary rides the existing UPDATE.
           progressSummary: buildFinalProgressSummary({ stage: 'complete', status: 'success', trigger }),
         });
+      }, {
+        confirmCommit: async () => {
+          const status = await getFetchRunStatus(db, runId);
+          if (status === 'success') return true;
+          throw new Error('Publication run status is unavailable.');
+        },
       });
 
     const summary = {
@@ -1348,22 +1429,13 @@ export async function refreshData(options = {}) {
   } catch (error) {
     lastProgress = { ...lastProgress, stage: 'failed', error: error.message };
 
-    // Total failure (zero indicators staged, acquisition/publish failure, or
-    // the publish transaction itself failed): NOTHING from this refresh was
-    // ever published to the live tables — acquisition writes nothing to live
-    // tables at all, and the single short publish transaction rolls back on
-    // error. The previous dataset is therefore intact by construction.
-    //
-    // error.datasetPreserved states that accurately: no restore of a
-    // destroyed dataset took place because the live dataset was never
-    // mutated. error.datasetRestored is ALSO set to preserve its historical
-    // contract ("previous dataset intact", asserted by ttlRefresh.test.js);
-    // under the staged architecture both flags mean the same observable
-    // fact, but only datasetPreserved describes the mechanism truthfully.
-    error.datasetPreserved = true;
-    error.datasetRestored = true;
+    // A known failure never replaces the committed data. If commit could
+    // not be verified, keep the ledger intact and report that uncertainty.
+    const outcomeUnknown = error.code === 'PUBLICATION_OUTCOME_UNKNOWN';
+    error.datasetPreserved = outcomeUnknown ? null : true;
+    error.datasetRestored = outcomeUnknown ? null : true;
 
-    if (runId !== null) {
+    if (runId !== null && !outcomeUnknown) {
       // Recording the failure must never mask the original error.
       try {
         await upsertIngestYearStats(db, runId, yearStats);
@@ -1396,7 +1468,7 @@ export async function refreshData(options = {}) {
     // Phase 8D inline retry: transport-class failures get bounded fresh
     // attempts (the failed attempt is fully recorded above and its locks
     // release in `finally` before the sleep). Anything else rethrows.
-    if (isTransportError(error) && attempt < transportDelays.length) {
+    if (!outcomeUnknown && isTransportError(error) && attempt < transportDelays.length) {
       const delay = transportDelays[attempt];
       options.onWarn?.({
         message:
@@ -1542,7 +1614,9 @@ export async function maybeAutoRefresh(db, options = {}) {
           // Best effort; the retry below proceeds regardless.
         }
       }
-      scheduleRefreshRetry(handle, { trigger, onWarn: options.onWarn });
+      if (error.code !== 'PUBLICATION_OUTCOME_UNKNOWN') {
+        scheduleRefreshRetry(handle, { trigger, onWarn: options.onWarn });
+      }
     },
   );
   return { triggered: true, reason: status.empty ? 'empty' : 'stale' };

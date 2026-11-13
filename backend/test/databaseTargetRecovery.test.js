@@ -150,6 +150,10 @@ test('recovery promotes a revalidated primary and flips the label', async () => 
   const primaryDb = await createMemoryDb();
   const previous = getActiveDbInfo();
   try {
+    const { refreshData } = await import('../src/wb/ingest.js');
+    for (const db of [primaryDb, fallbackDb]) {
+      await refreshData({ db, indicators: ['nominal_current'], startYear: 2024, endYear: 2025, trigger: 'test' });
+    }
     setActiveDbInfo({ provider: 'sqlite', isFallback: true, isDegraded: false, isProduction: true });
     const shared = { current: fallbackDb, isFallback: true, isDegraded: false };
     const result = await maybeRecoverPrimary(shared, {

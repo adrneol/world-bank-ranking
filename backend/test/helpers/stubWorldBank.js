@@ -139,7 +139,7 @@ export async function startStubWorldBank(options = {}) {
 
     const send = (payload) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(payload));
+      res.end(JSON.stringify(options.responseFor?.({ path: url.pathname, params, payload }) ?? payload));
     };
 
     if (state.invalidJson) {
@@ -188,7 +188,7 @@ export async function startStubWorldBank(options = {}) {
       return;
     }
 
-    const indicatorMatch = /^\/indicator\/(.+)$/.exec(path);
+    const indicatorMatch = /^(?:\/source\/2)?\/indicator\/(.+)$/.exec(path);
     if (indicatorMatch) {
       const metricKey = metricKeyForCode(decodeURIComponent(indicatorMatch[1]));
       if (!metricKey) {

@@ -226,9 +226,9 @@ function sabotageFirstPublish(handle) {
   let txCount = 0;
   const restorers = [];
   handle.transaction = async (...args) => {
-    txCount += 1;
+    if (args[0] !== 'read') txCount += 1;
     const tx = await origTransaction(...args);
-    if (txCount === 1 && typeof tx.batch === 'function') {
+    if (args[0] !== 'read' && txCount === 1 && typeof tx.batch === 'function') {
       const origBatch = tx.batch.bind(tx);
       let calls = 0;
       restorers.push(() => {

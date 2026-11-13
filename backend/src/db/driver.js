@@ -195,17 +195,34 @@ export async function batchGet(handle, statements) {
  * transaction-capable object is NOT re-wrapped: callers inside a publish
  * transaction must use the Inner repository variants, as before).
  */
-export async function transaction(handle, fn) {
+export async function transaction(handle, fn, { confirmCommit } = {}) {
   const tx = await handle.transaction();
+  let result;
+  let committing = false;
   try {
-    const result = await fn(tx);
+    result = await fn(tx);
+    committing = true;
     await tx.commit();
     return result;
   } catch (error) {
+    let rolledBack = false;
     try {
-      await tx.rollback();
+      if (!tx.closed) {
+        await tx.rollback();
+        rolledBack = true;
+      }
     } catch {
-      // Ignore rollback failures; the original error is what matters.
+      // The remote commit outcome can be uncertain after a lost response.
+    }
+    if (committing && !rolledBack && confirmCommit) {
+      try {
+        if (await confirmCommit()) return result;
+        throw new Error('Publication commit could not be confirmed.');
+      } catch {
+        const uncertain = new Error('Publication commit outcome could not be verified.', { cause: error });
+        uncertain.code = 'PUBLICATION_OUTCOME_UNKNOWN';
+        throw uncertain;
+      }
     }
     throw error;
   }
