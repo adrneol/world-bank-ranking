@@ -29,3 +29,5 @@ Before moving a control, chart, or table, map its current information, behavior 
 - Keep controls and analytical detail compact. Avoid redundant headings, decorative chips, oversized hover panels and unused space. Preserve observations, genuine zeros, gaps, units, measurement bases, calculations and provenance in every mode.
 
 Reuse React and Recharts primitives that already preserve the required behavior. Treat design instructions as guidance for authorized work. A visual task does not authorize application logic, data, dependency or deployment changes.
+
+- Use compact, unit-aware chart ticks and stable numeric columns with exact-value disclosure. Separate the official World Bank source from application API documentation.

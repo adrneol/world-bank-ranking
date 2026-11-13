@@ -1,6 +1,6 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { chartTooltipStyle, CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
-import { formatChartValue, formatTickValue, isPercentageUnit } from './chartFormat.js';
+import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
@@ -19,7 +19,7 @@ export default function IntervalLineChart({ entries = [], series = [], unit = nu
             <YAxis
               width={yAxisWidthFor(unit, narrow)}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(value) => formatTickValue(value, decimals) + (isPercentageUnit(unit) ? '%' : '')}
+              tickFormatter={(value) => formatTickValue(value, decimals, unit)}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip

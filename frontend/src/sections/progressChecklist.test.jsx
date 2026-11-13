@@ -152,7 +152,7 @@ describe('refresh progress checklist', () => {
     expect(container.textContent).toContain('No result recorded');
     expect(container.querySelectorAll('[data-run-state="failed"]')).toHaveLength(1);
     expect(container.textContent).toContain('rolled back — the previous valid dataset remains available');
-    expect(container.textContent).toContain('Recent refresh runs (1)');
+    expect(container.textContent).toContain('Run history (1)');
     cleanup();
   });
 
@@ -171,7 +171,7 @@ describe('refresh progress checklist', () => {
     await flushReact(act);
     const details = container.querySelector('details.refresh-details');
     expect(details.open).toBe(false);
-    expect(container.textContent).toContain('Show refresh details');
+    expect(container.textContent).toContain('Indicator results and timestamps');
     expect(container.textContent).toContain('Last refresh completed successfully');
     expect(container.textContent).toContain('Indicators checked: 3 / 3');
     // Disclosure is presentation only: expanding reveals all indicators.
@@ -356,7 +356,7 @@ describe('refresh progress checklist', () => {
     expect(container.textContent).toContain('Started UTC');
     expect(container.textContent).toContain('1 October 2026, 13:17:02 UTC');
     expect(container.textContent).toContain('1 October 2026, 13:17:16 UTC');
-    expect(container.textContent).toContain('Recent refresh runs (1)');
+    expect(container.textContent).toContain('Run history (1)');
     // No browser-local timestamp rendering anywhere in the section.
     expect(container.innerHTML).not.toContain('toLocaleString');
     cleanup();
@@ -423,7 +423,7 @@ describe('refresh progress checklist', () => {
     expect(container.textContent).not.toContain('The most recent refresh run failed');
     expect(container.querySelector('.checklist')).toBeNull();
     // History still records the failed recovery run for diagnostics.
-    expect(container.textContent).toContain('Recent refresh runs (1)');
+    expect(container.textContent).toContain('Run history (1)');
     cleanup();
   });
 
@@ -520,7 +520,7 @@ describe('recent refresh runs display numbering (Phase 8Q)', () => {
 
   it('numbers five visible runs 5 (newest) to 1 (oldest), never the internal ids', async () => {
     const { container, cleanup } = await renderRuns([30, 29, 28, 27, 26].map((id) => historyRun(id)));
-    expect(container.textContent).toContain('Recent refresh runs (5)');
+    expect(container.textContent).toContain('Run history (5)');
     expect(runNumbers(container)).toEqual(['#5', '#4', '#3', '#2', '#1']);
     expect(container.textContent).not.toContain('#30');
     expect(container.textContent).not.toContain('#26');
@@ -529,21 +529,21 @@ describe('recent refresh runs display numbering (Phase 8Q)', () => {
 
   it('numbers four visible runs 4 to 1', async () => {
     const { container, cleanup } = await renderRuns([41, 40, 39, 38].map((id) => historyRun(id)));
-    expect(container.textContent).toContain('Recent refresh runs (4)');
+    expect(container.textContent).toContain('Run history (4)');
     expect(runNumbers(container)).toEqual(['#4', '#3', '#2', '#1']);
     cleanup();
   });
 
   it('numbers three visible runs 3 to 1', async () => {
     const { container, cleanup } = await renderRuns([12, 11, 10].map((id) => historyRun(id)));
-    expect(container.textContent).toContain('Recent refresh runs (3)');
+    expect(container.textContent).toContain('Run history (3)');
     expect(runNumbers(container)).toEqual(['#3', '#2', '#1']);
     cleanup();
   });
 
   it('numbers a single visible run 1', async () => {
     const { container, cleanup } = await renderRuns([historyRun(7)]);
-    expect(container.textContent).toContain('Recent refresh runs (1)');
+    expect(container.textContent).toContain('Run history (1)');
     expect(runNumbers(container)).toEqual(['#1']);
     cleanup();
   });

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { SearchableSelect } from '../controls.jsx';
 import { recentWindow } from './chartData.js';
 
@@ -29,6 +29,7 @@ export function AnnualRangeControl({ value, onChange }) {
 
 export function HistoryWindowControls({ years, from, to, onChange, reset, idPrefix }) {
   const id = useId();
+  const [custom, setCustom] = useState(false);
   const prefix = idPrefix ?? id;
   const full = { from: years[0], to: years.at(-1) };
   if (full.from === undefined) return null;
@@ -39,23 +40,24 @@ export function HistoryWindowControls({ years, from, to, onChange, reset, idPref
     ['2000 to latest', since2000],
     ['Full history', full],
   ];
+  const active = presets.find(([, range]) => from === range.from && to === range.to)?.[0];
   return (
     <div className="history-controls">
-      <div className="history-presets" role="group" aria-label="History presets">
-        {presets.map(([label, range]) => (
-          <button type="button" key={label} aria-pressed={from === range.from && to === range.to}
-            onClick={() => onChange(range)}>{label}</button>
-        ))}
-        <button type="button" onClick={reset}>Reset range</button>
-      </div>
-      <div className="chart-period-controls" aria-label="Chart period filter">
+      <SearchableSelect id={prefix + '-period'} label="Period" value={custom ? 'custom' : active ?? 'custom'}
+        options={[...presets.map(([label]) => ({ value: label, label })), { value: 'custom', label: 'Custom range' }, { value: 'reset', label: 'Reset range' }]}
+        onChange={choice => {
+          setCustom(choice === 'custom');
+          if (choice === 'reset') reset();
+          else if (choice !== 'custom') onChange(presets.find(([label]) => label === choice)[1]);
+        }} />
+      {custom || !active ? <div className="chart-period-controls" aria-label="Chart period filter">
         {[['from', 'From year', from, years.filter((year) => year <= to)],
           ['to', 'To year', to, years.filter((year) => year >= from)]].map(([key, label, value, options]) => {
           const change = (next) => onChange({ from, to, [key]: Number(next) });
           return <SearchableSelect key={key} id={prefix + '-' + key} label={label} value={String(value)}
             options={options.map((year) => ({ value: String(year), label: String(year) }))} onChange={change} />;
         })}
-      </div>
+      </div> : null}
     </div>
   );
 }

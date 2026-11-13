@@ -65,7 +65,7 @@ describe('data-status cold start', () => {
     ]);
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
-    expect(container.textContent).toContain('Starting the data service');
+    expect(container.textContent).toContain('Loading data status');
     expect(container.textContent).not.toContain('Could not load data status');
     cleanup();
   });
@@ -85,7 +85,7 @@ describe('data-status cold start', () => {
     ]);
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
-    expect(container.textContent).toContain('Starting the data service');
+    expect(container.textContent).toContain('Loading data status');
     await act(async () => {
       vi.advanceTimersByTime(3000);
     });
@@ -118,7 +118,7 @@ describe('data-status cold start', () => {
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     // Listen-first readiness is a normal delay, never a red failure.
-    expect(container.textContent).toContain('Starting the data service');
+    expect(container.textContent).toContain('Loading data status');
     expect(container.textContent).not.toContain('Could not load data status');
     await act(async () => {
       vi.advanceTimersByTime(3000);
@@ -145,7 +145,7 @@ describe('data-status cold start', () => {
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     expect(container.textContent).toContain('Could not load data status');
-    expect(container.textContent).not.toContain('Starting the data service');
+    expect(container.textContent).not.toContain('Loading data status');
     cleanup();
   });
 
@@ -158,8 +158,8 @@ describe('data-status cold start', () => {
     ]);
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
-    expect(container.textContent).toContain('Starting the data service');
-    // Walk the whole backoff ladder past the 120 s window.
+    expect(container.textContent).toContain('Loading data status');
+    // Walk the bounded backoff ladder.
     for (let i = 0; i < 10; i += 1) {
       // eslint-disable-next-line no-await-in-loop
       await act(async () => {
@@ -169,7 +169,7 @@ describe('data-status cold start', () => {
       await flushReact(act);
     }
     expect(container.textContent).toContain('Could not load data status');
-    expect(container.textContent).not.toContain('Starting the data service');
+    expect(container.textContent).not.toContain('Loading data status');
     cleanup();
   });
 });

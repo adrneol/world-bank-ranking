@@ -1001,7 +1001,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     app.use((req, res, next) => {
       (async () => {
         try {
-          if (req.method === 'GET' && AUTO_REFRESH_PATHS.includes(req.path)) {
+          if (req.method === 'GET' && req.query.readOnly !== '1' && AUTO_REFRESH_PATHS.includes(req.path)) {
             // Phase 8F: while serving fallback, opportunistically re-probe the
             // primary (cooldown-gated inside maybeRecoverPrimary: no storm, no
             // per-request work beyond a timestamp check when cooling down).

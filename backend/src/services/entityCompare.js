@@ -500,7 +500,7 @@ function buildSeries({ entity, mode, years, values, groupSeries, groupMembers, c
       const source = mode === 'like_for_like' ? groupSeries.likeForLike[year] : groupSeries.observed[year];
       const complete = source?.complete === true;
       if (!complete) partialYears.push(year);
-      points.push({ year, value: complete ? source.value : null, complete });
+      points.push({ year, value: complete ? source.value : null, valueRaw: complete ? source.valueRaw ?? String(source.value) : null, complete });
     }
     return {
       basis: mode === 'like_for_like' ? COVERAGE_BASIS.COMMON_UNIVERSE : COVERAGE_BASIS.COMMON_UNIVERSE,
@@ -514,7 +514,7 @@ function buildSeries({ entity, mode, years, values, groupSeries, groupMembers, c
   }
   for (const year of years) {
     const entry = values.get(year);
-    points.push({ year, value: entry ? entry.value : null, complete: entry !== null });
+    points.push({ year, value: entry ? entry.value : null, valueRaw: entry?.valueRaw ?? null, complete: entry !== null });
   }
   return {
     basis: entity.kind === ENTITY_KINDS.OFFICIAL_AGGREGATE ? COVERAGE_BASIS.WORLD_BANK_PUBLISHED : COVERAGE_BASIS.ENTITY_OWN_OBSERVATION,

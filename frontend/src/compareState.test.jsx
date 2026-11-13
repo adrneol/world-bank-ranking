@@ -335,6 +335,8 @@ describe('compare state decoupling and URL reconstruction', () => {
       expect(compareUrl.searchParams.get('indicator')).toBe('total_current');
       expect(compareUrl.searchParams.get('basis')).toBe('total_current');
       expect(compareUrl.searchParams.get('operation')).toBe('level');
+      act(() => container.querySelector('#cmp-chart-period').click());
+      act(() => [...document.querySelectorAll('[role="option"]')].find(option => option.textContent === 'Custom range').click());
       expect(container.querySelector('#cmp-chart-from')).toBeTruthy();
       expect(container.querySelector('#cmp-chart-to')).toBeTruthy();
       expect(container.textContent).toContain('Displayed period: 1960–2025');

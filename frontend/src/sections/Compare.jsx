@@ -781,8 +781,14 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
     .map(({ id, label, map }) => ({ id, label, points: visibleYears.map((x) => ({ x, y: map.get(x)?.value ?? null })) }));
   const rows = visibleYears.map((year) => [String(year), ...[mapA, mapB].map((map, index) => {
     const value = map.get(year)?.value;
-    if (!Number.isFinite(value)) return <span key={index} aria-label="Missing observation">—</span>;
-    return <CompareObservationValue key={index} value={value} metricKey={metricKey} />;
+    if (!Number.isFinite(value)) return <span key={index} className="trajectory-missing" aria-label="Missing observation">—</span>;
+    const point = map.get(year);
+    return <details key={index} className="trajectory-value">
+      <summary><span>{formatAnnualReadout(value, basis, decimals)}</span><span className="sr-only">Exact value for {index === 0 ? labelA : labelB}, {year}</span></summary>
+      <span className="trajectory-exact">{point.valueRaw ?? exactChartValue(value)} {basis}</span>
+      {point.complete === false ? <span className="trajectory-exact">Incomplete coverage{point.missingIso3?.length ? ` · Missing ${point.missingIso3.join(', ')}` : ''}</span> : null}
+      {point.members != null ? <span className="trajectory-exact">{point.members} members</span> : null}
+    </details>;
   })]);
   return (
     <>
@@ -793,7 +799,7 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
         <AnnualChart series={plots} unit={basis} decimals={decimals} chartType={chartType} onChartType={onChartType}
           />
       </ChartCard>
-      <ChartDataFallback label="trajectory values" regionName="Trajectory stored observations by year"
+      <ChartDataFallback label="trajectory values" className="trajectory-evidence" regionName="Trajectory stored observations by year"
         columns={[{ header: 'Year' }, { header: labelA, unit: basis }, { header: labelB, unit: basis }]} rows={rows} />
     </>
   );

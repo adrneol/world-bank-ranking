@@ -10,17 +10,11 @@ function exact(value) {
 }
 
 function tickLabels(plot) {
-  const percent = isPercentageUnit(plot.unit);
-  const suffix = percent ? '%' : '';
-  const fits = labels => new Set(labels).size === labels.length && labels.every(label => label.length <= 8);
-  const labels = plot.axis.ticks.map((tick) => formatTickValue(tick, plot.decimals ?? 1, plot.unit) + suffix);
-  if (fits(labels)) return { labels };
-  // Close extrema can collapse under magnitude compaction.
-  const largest = Math.max(...plot.axis.ticks.map(Math.abs));
-  const magnitude = !percent && largest >= 1e12 ? [1e12, 'T'] : !percent && largest >= 1e9 ? [1e9, 'B'] : !percent && largest >= 1e6 ? [1e6, 'M'] : [1, ''];
-  for (let precision = 1; precision <= 8; precision += 1) {
-    const compact = plot.axis.ticks.map((tick) => tick === 0 ? '0' + suffix : (tick / magnitude[0]).toPrecision(precision) + magnitude[1] + suffix);
-    if (fits(compact)) return { labels: compact };
+  const { ticks } = plot.axis;
+  const suffix = isPercentageUnit(plot.unit) ? '%' : '';
+  for (let precision = 1; precision <= 5; precision += 1) {
+    const labels = ticks.map(tick => formatTickValue(tick, plot.decimals, plot.unit, { precision }));
+    if (new Set(labels).size === labels.length && labels.every(label => label.length <= 9)) return { labels };
   }
   // If full labels cannot fit, the rail labels bounds relative to a stated
   // reference. The tooltip, evidence and bounds disclosure stay in raw units.
@@ -188,6 +182,12 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
     <div className="annual-plot-instructions">
       <p id={hint}>{domainMode === 'auto' ? 'Auto scales to visible years. Use Fixed to compare slopes across windows.' : 'Fixed scales to the selected period.'}{' '}
         <span>Scroll or use arrow keys to inspect years.</span></p>
+      {viewport > 0 && geometry.width > viewport + 1 ? <div className="timeline-navigation" role="group" aria-label="Timeline navigation">
+        <button type="button" className="btn btn-secondary" aria-label="Earlier years" disabled={viewLeft <= 1}
+          onClick={() => scroller.current.scrollBy({ left: -Math.max(step, viewport - step) })}>←</button>
+        <button type="button" className="btn btn-secondary" aria-label="Later years" disabled={viewRight >= geometry.width - 1}
+          onClick={() => scroller.current.scrollBy({ left: Math.max(step, viewport - step) })}>→</button>
+      </div> : null}
     </div>
     <AxisRail plot={plots[0]} height={height} side="left" />
     <div className="annual-plot-center">

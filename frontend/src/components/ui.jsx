@@ -1,4 +1,5 @@
 import { AnalyticalTable, MeasurementHeading } from './AnalyticalTable.jsx';
+import { DataLoading } from './BootstrapStatus.jsx';
 /**
  * Shared presentational components: section shell, async-state blocks,
  * pagination controls and labeled form controls.
@@ -23,11 +24,7 @@ export function Section({ id, title, subtitle, children, aside }) {
 
 export function StatusBlock({ loading, error, empty, emptyText, onRetry, sectionName }) {
   if (loading) {
-    return (
-      <p className="status status-loading" role="status">
-        Loading{sectionName ? ` ${sectionName}` : ''}…
-      </p>
-    );
+    return <DataLoading title={sectionName ? `Loading ${sectionName}` : 'Retrieving data'} />;
   }
   if (error) {
     return (
@@ -260,12 +257,12 @@ export function AnalysisHeader({ title, unit, subjectLabel: subject, indicatorCo
  * @param {{header:string, numeric?:boolean}[]} columns
  * @param {string[][]} rows pre-formatted cell strings (missing stays '—')
  */
-export function ChartDataFallback({ label = 'chart values', regionName = null, columns = [], rows = [] }) {
+export function ChartDataFallback({ label = 'chart values', regionName = null, columns = [], rows = [], className }) {
   if (!Array.isArray(rows) || rows.length === 0) return null;
   return (
     <details className="chart-data-fallback">
       <summary>View {label} as a table</summary>
-      <AnalyticalTable label={regionName ?? label} freezeYear={columns[0]?.header === 'Year'}>
+      <AnalyticalTable label={regionName ?? label} className={className} freezeYear={columns[0]?.header === 'Year'}>
         <table className="table table-compact">
           <thead>
             <tr>

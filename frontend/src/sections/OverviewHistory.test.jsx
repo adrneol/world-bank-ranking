@@ -43,6 +43,11 @@ function renderHistory(primary) {
 
 const tableHeaders = (node) => [...node.querySelectorAll('thead th')].map((th) => th.textContent.trim());
 const pick = (node, label) => [...node.querySelectorAll('button')].find((b) => b.textContent === label);
+const period = (node, label) => {
+  act(() => node.querySelector('[aria-label="Period"]').click());
+  const option = [...document.querySelectorAll('[role="option"]')].find(item => item.querySelector('.combo-label')?.textContent === label);
+  act(() => option.click());
+};
 const toggle = (node, label) => {
   const remove = node.querySelector('[aria-label^="Remove ' + label + ' ("]');
   if (remove) {
@@ -99,15 +104,15 @@ describe('bounded Overview histories', () => {
     act(() => pick(view.container, 'Bar chart').click());
     await flushReact(act);
     expect(stub.calls).toHaveLength(count);
-    act(() => pick(view.container, 'Recent 10 years').click());
+    period(view.container, 'Recent 10 years');
     await flushReact(act);
     expect(view.container.querySelectorAll('tbody tr')).toHaveLength(10);
     expect(stub.calls.at(-1)).toContain('startYear=2016');
     expect(tableHeaders(view.container)).toEqual(['Year', 'Exportscurrent US$', 'Importscurrent US$']);
-    act(() => pick(view.container, 'Full history').click());
+    period(view.container, 'Full history');
     await flushReact(act);
     expect(view.container.querySelectorAll('tbody tr')).toHaveLength(66);
-    act(() => pick(view.container, 'Reset range').click());
+    period(view.container, 'Reset range');
     await flushReact(act);
     expect(view.container.querySelectorAll('tbody tr')).toHaveLength(25);
   });

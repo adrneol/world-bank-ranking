@@ -30,43 +30,18 @@ import {
   formatUtcDateTimeSeconds,
   formatVintageDate,
 } from '../utils/format.js';
+import { BootstrapStillConnecting } from '../components/BootstrapStatus.jsx';
 import IndicatorMonitor from '../components/IndicatorMonitor.jsx';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 /** Full refreshes stream dozens of indicator payloads; bound the POST at 10 min. */
 const REFRESH_POST_TIMEOUT_MS = 10 * 60 * 1000;
 /** Status reads stay tolerant of cold starts, but never unbounded. */
-const STATUS_TIMEOUT_MS = 45000;
+const STATUS_TIMEOUT_MS = 12000;
 /** After this long with no status response, say so instead of spinning quietly. */
 const SLOW_LOAD_HINT_MS = 10000;
 /** Status poll cadence while a refresh is running. */
 const PROGRESS_POLL_MS = 2000;
-/**
- * Cold-start window (R-02b): a status failure with no HTTP response at all
- * (connection refused / timeout while Render wakes) is treated as "starting",
- * not "dead". Auto-retry stays inside this window; a failure that persists
- * past it falls back to the explicit red error with manual retry.
- * Matches the years-bootstrap tolerance (120 s).
- */
-const CONNECT_RETRY_WINDOW_MS = 120000;
-/** Controlled auto-retry cadence inside the cold-start window (no storm). */
-const CONNECT_RETRY_DELAYS_MS = [3000, 5000, 10000, 15000, 30000];
-
-/** True when the backend never answered at all (cold start), as opposed to an HTTP error it returned. */
-function isConnectivityError(error) {
-  return Boolean(error) && !error.status && (error.code === 'NETWORK_ERROR' || error.code === 'TIMEOUT');
-}
-
-/**
- * Phase 8G: the backend answers liveness but is still initializing
- * (HTTP 503 DATA_SERVICE_STARTING). Like a refused connection this is a
- * normal readiness delay — never a red failure — so it shares the neutral
- * "starting" presentation and the controlled auto-retry window.
- */
-function isBackendStarting(error) {
-  return Boolean(error) && error.status === 503 && error.code === 'DATA_SERVICE_STARTING';
-}
-
 function ageText(ageHours) {
   if (ageHours === null || ageHours === undefined) return 'unknown';
   if (ageHours < 1) return `${Math.round(ageHours * 60)} min ago`;
@@ -103,44 +78,10 @@ export default function DataStatus({ onRefreshed }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const wasPollingRef = useRef(false);
   const { data, loading, error, retry } = useApi(
-    (signal) => api.dataStatus({ signal, timeoutMs: STATUS_TIMEOUT_MS }),
+    (signal) => api.dataStatus({ signal, timeoutMs: STATUS_TIMEOUT_MS, recover: true }),
     `datastatus:${pollToken}`,
   );
-  // Cold-start retry state: attempts + first-failure timestamp for
-  // connectivity errors only. HTTP errors (backend answered) bypass this and
-  // render red immediately. `expired` flips the panel from the neutral
-  // "starting" state to the explicit error once the window passes.
-  const connectStartRef = useRef(null);
-  const connectAttemptsRef = useRef(0);
-  const [connectExpired, setConnectExpired] = useState(false);
-  const connectivityFailure = isConnectivityError(error);
-  const backendStarting = isBackendStarting(error);
-  const startingFailure = Boolean(connectivityFailure || backendStarting);
-  const showStarting = Boolean(startingFailure && !connectExpired);
-
-  const resetConnectRetry = () => {
-    connectStartRef.current = null;
-    connectAttemptsRef.current = 0;
-    setConnectExpired(false);
-  };
-
-  // Bump the status poll and clear a stale slow-load hint. All pollToken
-  // changes flow through here so the warming hint always restarts cleanly.
-  // Called only from event/async contexts (never synchronously in an effect).
-  const bumpPoll = () => {
-    setSlowLoad(false);
-    resetConnectRetry();
-    setPollToken((t) => t + 1);
-  };
-  const retryWhileLoading = () => {
-    setSlowLoad(false);
-    retry();
-  };
-  // Manual retry from the starting/error panels restarts the backoff cleanly.
-  const retryConnectivity = () => {
-    resetConnectRetry();
-    retry();
-  };
+  const bumpPoll = () => setPollToken(t => t + 1);
   const inProgress = Boolean(data?.inProgress);
   // Poll while the backend is refreshing OR while our own manual POST is in
   // flight (R-07): the POST resolves only when the whole refresh completes,
@@ -159,7 +100,7 @@ export default function DataStatus({ onRefreshed }) {
   // known-good payload with a non-destructive warning.
   const hasData = data !== null && data !== undefined;
   const initialLoading = Boolean(loading && !hasData);
-  const pollWarning = Boolean(hasData && error && !showStarting);
+  const pollWarning = Boolean(hasData && error);
 
   // Live progress ledger (in-memory, during a run) vs persisted terminal
   // summary (fetch_runs progress_summary, survives remount/reload).
@@ -231,10 +172,10 @@ export default function DataStatus({ onRefreshed }) {
   const refreshTerminalPersisted = !useLive && persistedSummary !== null;
   const refreshCompletedOk =
     (useLive && liveStage === 'complete' && data?.progress?.summary?.status === 'success') ||
-    (!useLive && persistedSummary?.status === 'success');
+    (!useLive && (persistedSummary?.status ?? data?.lastRefresh?.status) === 'success');
   const refreshRolledBack =
     (useLive && (liveStage === 'partial' || liveStage === 'failed')) ||
-    (!useLive && (persistedSummary?.status === 'partial' || persistedSummary?.status === 'failed'));
+    (!useLive && ['partial', 'failed'].includes(persistedSummary?.status ?? data?.lastRefresh?.status));
   // Phase 8N: background database recovery is infrastructure state, not a
   // user refresh. While fallback serves and the ledger/snapshot belongs to a
   // recovery run, show one calm line instead of the 20-indicator checklist,
@@ -277,46 +218,19 @@ export default function DataStatus({ onRefreshed }) {
 
   useEffect(() => {
     if (!loading) return undefined;
+    setSlowLoad(false);
     const timer = setTimeout(() => setSlowLoad(true), SLOW_LOAD_HINT_MS);
     return () => clearTimeout(timer);
   }, [loading, pollToken]);
 
   useEffect(() => {
-    if (!polling) return undefined;
+    if (!polling || loading || (error && !refreshState.running)) return undefined;
     const timer = setTimeout(() => bumpPoll(), PROGRESS_POLL_MS);
     return () => clearTimeout(timer);
     // bumpPoll is stable in practice (no deps); including it would restart
     // the cadence needlessly on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [polling, pollToken]);
-
-  // Cold-start auto-retry: while the backend never answers (Render waking)
-  // or answers "still starting" (listen-first readiness), retry on a
-  // controlled backoff inside CONNECT_RETRY_WINDOW_MS. The timer belongs to
-  // this effect only (single outstanding retry); success, polling bumps and
-  // unmount clear it via cleanup. Past the window, mark expired so the
-  // explicit red error renders instead of retrying forever.
-  useEffect(() => {
-    if (!startingFailure || data) {
-      if (data) resetConnectRetry();
-      return undefined;
-    }
-    if (connectStartRef.current === null) connectStartRef.current = Date.now();
-    const elapsed = Date.now() - connectStartRef.current;
-    if (elapsed >= CONNECT_RETRY_WINDOW_MS) {
-      setConnectExpired(true);
-      return undefined;
-    }
-    const attempt = connectAttemptsRef.current;
-    const delay = CONNECT_RETRY_DELAYS_MS[Math.min(attempt, CONNECT_RETRY_DELAYS_MS.length - 1)];
-    const timer = setTimeout(() => {
-      connectAttemptsRef.current += 1;
-      retry();
-    }, delay);
-    return () => clearTimeout(timer);
-    // retry is stable (useCallback []); error identity changes per attempt.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startingFailure, error, data, pollToken]);
+  }, [polling, loading, error, pollToken, refreshState.running]);
 
   async function startRefresh() {
     if (refreshState.running) return;
@@ -367,8 +281,8 @@ export default function DataStatus({ onRefreshed }) {
       }
     >
       <StatusBlock
-        loading={initialLoading && !slowLoad && !showStarting}
-        error={showStarting ? null : hasData ? null : error}
+        loading={initialLoading && !slowLoad}
+        error={hasData ? null : error}
         empty={false}
         onRetry={retry}
         sectionName="data status"
@@ -381,37 +295,15 @@ export default function DataStatus({ onRefreshed }) {
           </button>
         </p>
       ) : null}
-      {loading && hasData && !showStarting ? (
+      {loading && hasData ? (
         <p className="status-polling" role="status" aria-live="off">
           Updating…
         </p>
       ) : null}
-      {showStarting ? (
-        <div className="status status-loading" role="status">
-          <p>
-            Starting the data service — connecting now. This may take a little longer after a period
-            of inactivity. No data has been changed; this view continues automatically.
-          </p>
-          <button type="button" className="btn btn-secondary" onClick={retryConnectivity}>
-            Retry now
-          </button>
-        </div>
-      ) : null}
-      {initialLoading && slowLoad && !error ? (
-        <div className="status status-loading" role="status">
-          <p>
-            Still loading data status — the API is taking longer than expected
-            (it may be warming up after a cold start). You can wait or try again;
-            no data has been changed.
-          </p>
-          <button type="button" className="btn btn-secondary" onClick={retryWhileLoading}>
-            Retry now
-          </button>
-        </div>
-      ) : null}
+      {initialLoading && slowLoad ? <BootstrapStillConnecting onRetry={retry} /> : null}
       {hasData ? (
         <>
-          <h3>Dataset and freshness</h3>
+          <h3>Current dataset</h3>
           <dl className="facts facts-grid">
             <div>
               <dt>Dataset</dt>
@@ -496,7 +388,7 @@ export default function DataStatus({ onRefreshed }) {
           ) : null}
           {showRefreshPanel ? (
             <div className="refresh-progress" aria-live="polite">
-              <h3>Refresh</h3>
+              <h3>Latest refresh</h3>
               {showRecoveryCalm ? (
                 <p>
                   Using backup database while the primary recovers.
@@ -530,21 +422,23 @@ export default function DataStatus({ onRefreshed }) {
                   ) : null}
                 </p>
               ) : refreshCompletedOk ? (
-                <p className="status status-ok" role="status">
+                <p className="refresh-outcome" role="status">
                   Last refresh completed successfully
                 </p>
               ) : refreshRolledBack ? (
                 <p className="status status-error" role="alert">
                   Refresh did not publish: rolled back — the previous valid dataset remains available.
                 </p>
+              ) : data.lastRefresh ? (
+                <p>Latest run outcome unavailable.</p>
               ) : (
                 <p>No refresh recorded yet.</p>
               )}
               {!showRecoveryCalm ? (
                 <>
-                  <p className="refresh-count">
+                  {polling || !refreshOutcomeText ? <p className="refresh-count">
                     Indicators checked: {doneCount} / {activeKeys.length}
-                  </p>
+                  </p> : null}
                   {polling && activeKeys.length ? <progress aria-label="Indicator checks completed" value={doneCount} max={activeKeys.length}>
                     {doneCount} / {activeKeys.length}
                   </progress> : null}
@@ -554,15 +448,7 @@ export default function DataStatus({ onRefreshed }) {
                   {polling && runningKey ? <p className="refresh-current">Current: {labelOf(runningKey) ?? runningKey}</p> : null}
                 </>
               ) : null}
-              {!showRecoveryCalm ? (
-              <details
-                className="refresh-details"
-                open={detailsOpen}
-                onToggle={(event) => setDetailsOpen(event.target.open)}
-              >
-                <summary>{detailsOpen ? 'Hide refresh details ▲' : 'Show refresh details ▼'}</summary>
-                <IndicatorMonitor keys={activeKeys} steps={activeStepByKey} labelOf={labelOf} polling={polling} runningKey={runningKey} />
-                {!polling && (refreshTerminalLive || refreshTerminalPersisted) ? (
+              {!showRecoveryCalm && !polling && (refreshTerminalLive || refreshTerminalPersisted) ? (
                   <dl className="facts facts-grid refresh-times">
                     <div>
                       <dt>Started UTC</dt>
@@ -580,6 +466,14 @@ export default function DataStatus({ onRefreshed }) {
                     </div>
                   </dl>
                 ) : null}
+              {!showRecoveryCalm ? (
+              <details
+                className="refresh-details"
+                open={detailsOpen}
+                onToggle={(event) => setDetailsOpen(event.target.open)}
+              >
+                <summary>Indicator results and timestamps</summary>
+                <IndicatorMonitor keys={activeKeys} steps={activeStepByKey} labelOf={labelOf} polling={polling} runningKey={runningKey} />
               </details>
               ) : null}
             </div>
@@ -597,7 +491,7 @@ export default function DataStatus({ onRefreshed }) {
 
           {data.latestRuns?.length > 0 ? (
             <details className="details">
-              <summary>Recent refresh runs ({data.latestRuns.length})</summary>
+              <summary>Run history ({data.latestRuns.length})</summary>
               <div className="table-scroll" role="region" aria-label="Recent refresh runs" tabIndex={0}>
                 <table className="table">
                   <thead>

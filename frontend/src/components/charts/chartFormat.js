@@ -8,19 +8,26 @@
 import { compareCurrencySymbol } from '../../utils/compareFormat.js';
 import { formatDecimal } from '../../utils/format.js';
 
-/** Compact axis tick: 1.2T / 3.4B / 5.6M / 7.8k, else registry precision. */
-export function formatTickValue(value, decimals = 0, unit = null) {
+const tickScales = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
+
+/** Choose the magnitude before formatting and never combine exponent and scale suffix. */
+export function formatTickValue(value, decimals = 0, unit = null, { precision = 1, scientific = false } = {}) {
   if (value === null || value === undefined) return '';
   const n = Number(value);
   if (!Number.isFinite(n)) return '';
   const abs = Math.abs(n);
+  const percentage = isPercentageUnit(unit);
   const prefix = compareCurrencySymbol(unit?.replace(/ per person$/, ''));
-  if (abs >= 1e12) return `${prefix}${(n / 1e12).toFixed(1)}T`;
-  if (abs >= 1e9) return `${prefix}${(n / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `${prefix}${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1000) return `${prefix}${(n / 1000).toFixed(1)}k`;
-  if (abs > 0 && abs < 10 ** -decimals) return n.toPrecision(2);
-  return formatDecimal(n, decimals);
+  const sign = n < 0 ? '−' : percentage && n > 0 ? '+' : '';
+  const suffix = percentage ? '%' : '';
+  const [scale, compact] = (!scientific && !percentage && tickScales.find(([factor]) => abs >= factor)) || [1, ''];
+  const amount = abs / scale;
+  const places = compact ? precision : Math.max(precision, Math.min(decimals, 2));
+  if (abs && (scientific || amount >= 1e6 || amount < 1e-4)) {
+    return sign + prefix + abs.toExponential(precision).replace(/\.0+(?=e)/, '') + suffix;
+  }
+  const digits = amount && amount < 1 ? Math.max(places, Math.ceil(-Math.log10(amount)) + precision - 1) : places;
+  return sign + prefix + amount.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: digits }) + compact + suffix;
 }
 
 /** Tooltip / data-label value: full precision, never compacted. */
@@ -49,8 +56,9 @@ export function formatAnnualReadout(value, unit, decimals = 2) {
   const abs = Math.abs(value);
   if (currency) {
     const [scale, suffix] = compactScales.find(([scale]) => abs >= scale) ?? compactScales.at(-1);
-    const amount = readoutNumber(abs / scale, 2);
-    return `${value < 0 ? '−' : ''}${currency}${amount}${suffix}${perPerson ? '/person' : ''}`;
+    const scaled = abs / scale;
+    const amount = readoutNumber(scaled >= 1e9 ? abs : scaled, 2);
+    return `${value < 0 ? '−' : ''}${currency}${amount}${scaled >= 1e9 ? '' : suffix}${perPerson ? '/person' : ''}`;
   }
   const amount = readoutNumber(value, Math.min(decimals, 2));
   const shortUnit = /^(?:index points|index)\s*\(/i.test(unit) ? 'index pts'

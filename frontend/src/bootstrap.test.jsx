@@ -75,7 +75,7 @@ function yearsCalls(stub) {
 }
 
 function clickRetry(container) {
-  const button = [...container.querySelectorAll('.warmup-foot button, .status-error button')].find((el) =>
+  const button = [...container.querySelectorAll('.data-loading button, .status-error button')].find((el) =>
     el.textContent.includes('Retry'),
   );
   expect(button).toBeTruthy();
@@ -111,27 +111,25 @@ describe('bootstrap cold-start UX', () => {
     const { container, cleanup } = renderApp();
     await flushReact(act);
 
-    expect(container.textContent).toContain('Starting the data service');
-    expect(container.textContent).toContain('usually takes up to about a minute');
-    expect(container.textContent).toContain('0 seconds');
+    expect(container.textContent).toContain('Connecting to economic data');
+    expect(container.textContent).toContain('Retrieving the available dataset');
 
     await act(async () => {
       vi.advanceTimersByTime(5000);
     });
     await flushReact(act);
-    expect(container.textContent).toContain('5 seconds');
-    expect(container.textContent).not.toContain('Still connecting');
+    expect(container.textContent).not.toContain('Connection is taking longer than expected');
 
     await act(async () => {
       resolveYears();
     });
     await flushReact(act);
-    expect(container.textContent).not.toContain('Starting the data service');
+    expect(container.textContent).not.toContain('Connecting to economic data');
     expect(container.textContent).toContain('Quality analysis of World Bank raw data');
     cleanup();
   });
 
-  it('transitions to still-connecting after ~60s without creating extra requests', async () => {
+  it('transitions to still-connecting after 10s without creating extra requests', async () => {
     stub = stubFetch([
       ['/api/years', () => new Promise(() => {})],
       ['/api/countries', COUNTRIES],
@@ -139,27 +137,26 @@ describe('bootstrap cold-start UX', () => {
     ]);
     const { container, cleanup } = renderApp();
     await flushReact(act);
-    expect(container.textContent).toContain('Starting the data service');
+    expect(container.textContent).toContain('Connecting to economic data');
 
     await act(async () => {
-      vi.advanceTimersByTime(59000);
+      vi.advanceTimersByTime(9000);
     });
     await flushReact(act);
-    expect(container.textContent).not.toContain('Still connecting');
+    expect(container.textContent).not.toContain('Connection is taking longer than expected');
 
     await act(async () => {
       vi.advanceTimersByTime(2000);
     });
     await flushReact(act);
-    expect(container.textContent).toContain('Still connecting');
-    expect(container.textContent).toContain('taking longer than usual');
-    expect(container.textContent).toContain('61 seconds');
+    expect(container.textContent).toContain('Connection is taking longer than expected');
+    expect(container.textContent).toContain('Still trying to reach the data service');
     expect(container.textContent).toContain('Retry connection');
     // Still exactly one bootstrap attempt: the UI waited, it did not storm.
     expect(yearsCalls(stub)).toHaveLength(1);
 
     await act(async () => {
-      vi.advanceTimersByTime(30000);
+      vi.advanceTimersByTime(500);
     });
     await flushReact(act);
     expect(yearsCalls(stub)).toHaveLength(1);
@@ -182,7 +179,7 @@ describe('bootstrap cold-start UX', () => {
     // the bootstrap hydration — retry must add no further fetches.
     const indicatorsBaseline = stub.calls.filter((href) => href.includes('/api/indicators')).length;
     await act(async () => {
-      vi.advanceTimersByTime(61000);
+      vi.advanceTimersByTime(11000);
     });
     await flushReact(act);
     expect(yearsCalls(stub)).toHaveLength(1);
@@ -191,15 +188,14 @@ describe('bootstrap cold-start UX', () => {
     clickRetry(container);
     await flushReact(act);
     expect(yearsCalls(stub)).toHaveLength(2);
-    expect(container.textContent).toContain('Starting the data service');
-    expect(container.textContent).toContain('0 seconds');
+    expect(container.textContent).toContain('Connecting to economic data');
 
     // The fresh attempt re-arms the 60 s threshold on its own clock.
     await act(async () => {
-      vi.advanceTimersByTime(61000);
+      vi.advanceTimersByTime(11000);
     });
     await flushReact(act);
-    expect(container.textContent).toContain('Still connecting');
+    expect(container.textContent).toContain('Connection is taking longer than expected');
 
     // Second retry supersedes the still-pending attempt: still single-flight.
     clickRetry(container);
@@ -207,8 +203,8 @@ describe('bootstrap cold-start UX', () => {
     expect(yearsCalls(stub)).toHaveLength(3);
     // Retry re-runs only the years gate: countries/indicators call counts are
     // unchanged from the pre-retry baseline.
-    expect(stub.calls.filter((href) => href.includes('/api/countries'))).toHaveLength(1);
-    expect(stub.calls.filter((href) => href.includes('/api/indicators'))).toHaveLength(indicatorsBaseline);
+    expect(stub.calls.filter((href) => href.includes('/api/countries'))).toHaveLength(3);
+    expect(stub.calls.filter((href) => href.includes('/api/indicators'))).toHaveLength(indicatorsBaseline + 2);
 
     await act(async () => {
       resolveYears();
@@ -231,9 +227,9 @@ describe('bootstrap cold-start UX', () => {
     const { container, cleanup } = renderApp();
     await flushReact(act);
 
-    expect(container.textContent).toContain('Could not load available years');
+    expect(container.textContent).toContain('Unable to connect');
     expect(container.textContent).toContain('backend exploded');
-    expect(container.textContent).not.toContain('Starting the data service');
+    expect(container.textContent).not.toContain('Connecting to economic data');
 
     fail = false;
     clickRetry(container);
@@ -258,8 +254,8 @@ describe('bootstrap cold-start UX', () => {
     ]);
     const { container, cleanup } = renderApp();
     await flushReact(act);
-    expect(container.textContent).toContain('Starting the data service');
-    expect(container.textContent).not.toContain('Could not load available years');
+    expect(container.textContent).toContain('Connecting to economic data');
+    expect(container.textContent).not.toContain('Unable to connect');
 
     // The single follow-up fires after the seed delay; the original clock continues.
     await act(async () => {
@@ -286,8 +282,8 @@ describe('bootstrap cold-start UX', () => {
     ]);
     const { container, cleanup } = renderApp();
     await flushReact(act);
-    expect(container.textContent).toContain('Starting the data service');
-    expect(container.textContent).not.toContain('Could not load available years');
+    expect(container.textContent).toContain('Connecting to economic data');
+    expect(container.textContent).not.toContain('Unable to connect');
 
     await act(async () => {
       vi.advanceTimersByTime(10000);

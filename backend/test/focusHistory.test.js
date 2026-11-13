@@ -76,6 +76,9 @@ test('Compare level trajectories preserve both backend entity identities in ever
       assert.deepEqual(b.series.points.map((point) => point.year), [2024, 2025]);
       assert.equal(a.kind, ['country', 'custom_group', 'wb_aggregate'][i]);
       assert.equal(b.kind, ['country', 'custom_group', 'wb_aggregate'][j]);
+      for (const point of [...a.series.points, ...b.series.points]) {
+        if (point.value != null) assert.equal(Number(point.valueRaw), point.value);
+      }
       if (j === 2) assert.deepEqual(b.series.points.map((point) => point.value), [1e14, 1e14]);
     }
   }

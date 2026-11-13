@@ -21,6 +21,8 @@
 // The optional chaining keeps this module importable outside Vite (e.g.
 // Node-based contract tests where import.meta.env is undefined); browser
 // behavior is unchanged.
+import { recoverRead } from './readRecovery.js';
+
 let baseUrlOverride = null;
 const BASE_URL = (import.meta.env?.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
 
@@ -74,15 +76,15 @@ async function request(
   // POSTs and already-aborted callers always take the direct path, so their
   // exact behavior is untouched.
   if (method === 'GET' && !body && !signal?.aborted) {
-    return requestShared(url, { method, path, headers, signal, timeoutMs });
+    return requestShared(url, { headers, signal, timeoutMs });
   }
-  return fetchOnce(url, { method, path, headers, body, signal, timeoutMs });
+  return fetchOnce(url, { method, headers, body, signal, timeoutMs });
 }
 
 /**
  * One fetch with its own timeout/abort semantics (the historical behavior).
  */
-async function fetchOnce(url, { method, path, headers, body, signal, timeoutMs }) {
+async function fetchOnce(url, { method, headers, body, signal, timeoutMs }) {
   // Compose the caller's AbortSignal (filter changes, unmount, manual retry)
   // with a bounded timeout so a hung backend can never leave the UI in
   // loading forever. Caller aborts keep AbortError semantics; only the
@@ -115,12 +117,12 @@ async function fetchOnce(url, { method, path, headers, body, signal, timeoutMs }
   } catch (error) {
     if (timedOut || error?.name === 'TimeoutError') {
       throw new ApiError(
-        `The backend is taking longer than expected (HTTP ${method} ${path} exceeded ${timeoutMs} ms). It may be warming up — retry shortly.`,
+        `The data service did not respond in time.`,
         { code: 'TIMEOUT' },
       );
     }
     if (error?.name === 'AbortError') throw error;
-    throw new ApiError('Could not reach the backend. Is the API server running?', { code: 'NETWORK_ERROR' });
+    throw new ApiError('The data service could not be reached.', { code: 'NETWORK_ERROR' });
   } finally {
     if (timer !== null) clearTimeout(timer);
     if (signal && typeof signal.removeEventListener === 'function') {
@@ -177,11 +179,11 @@ function callerAbortError(signal) {
  * semantics (own AbortError, fetch aborted only when no waiter remains).
  * The shared fetch resolves/rejects with the exact fetchOnce mapping.
  */
-function requestShared(url, { method, path, headers, signal, timeoutMs }) {
+function requestShared(url, { headers, signal, timeoutMs, recover = false }) {
   // Keyed by method + URL only: timeouts stay strictly per waiter (each
   // waiter owns its timer and message), so sharing across different
   // timeoutMs values changes nothing observable.
-  const key = `GET ${url}`;
+  const key = recover ? `RECOVER ${timeoutMs} ${url}` : `GET ${url}`;
   let entry = inflightGets.get(key);
   if (!entry) {
     const controller = new AbortController();
@@ -189,6 +191,12 @@ function requestShared(url, { method, path, headers, signal, timeoutMs }) {
     inflightGets.set(key, entry);
     entry.promise = (async () => {
       try {
+        if (recover) {
+          return await recoverRead(
+            () => requestShared(url, { headers, signal: controller.signal, timeoutMs }),
+            controller.signal,
+          );
+        }
         let response;
         try {
           response = await fetch(url, { method: 'GET', signal: controller.signal, headers });
@@ -198,7 +206,7 @@ function requestShared(url, { method, path, headers, signal, timeoutMs }) {
           // anything else is a connectivity failure. Timeouts stay
           // per-waiter (own timers), never shared.
           if (error?.name === 'AbortError') throw error;
-          throw new ApiError('Could not reach the backend. Is the API server running?', {
+          throw new ApiError('The data service could not be reached.', {
             code: 'NETWORK_ERROR',
           });
         }
@@ -256,12 +264,12 @@ function requestShared(url, { method, path, headers, signal, timeoutMs }) {
     if (signal && typeof signal.addEventListener === 'function') {
       signal.addEventListener('abort', waiter.onAbort, { once: true });
     }
-    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    if (!recover && Number.isFinite(timeoutMs) && timeoutMs > 0) {
       waiter.timer = setTimeout(() => {
         detach();
         reject(
           new ApiError(
-            `The backend is taking longer than expected (HTTP ${method} ${path} exceeded ${timeoutMs} ms). It may be warming up — retry shortly.`,
+            `The data service did not respond in time.`,
             { code: 'TIMEOUT' },
           ),
         );
@@ -285,7 +293,15 @@ function requestShared(url, { method, path, headers, signal, timeoutMs }) {
   });
 }
 
-const get = (path, params, options) => request(path, { ...options, params });
+const get = (path, params, options) => {
+  const { recover, passive, signal, timeoutMs } = options ?? {};
+  const query = passive ? { ...params, readOnly: 1 } : params;
+  if (!recover) return request(path, { params: query, signal, timeoutMs });
+  if (signal?.aborted) return Promise.reject(callerAbortError(signal));
+  return requestShared(buildUrl(path, query), {
+    headers: { Accept: 'application/json' }, signal, timeoutMs: timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, recover: true,
+  });
+};
 
 export const api = {
   health: (options) => get('/api/health', {}, options),

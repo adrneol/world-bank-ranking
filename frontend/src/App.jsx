@@ -190,19 +190,7 @@ function isAnalyticalView(value) {
   return ANALYTICAL_VIEWS.some((v) => v.id === value);
 }
 
-// Cold-start bootstrap policy: GET /api/years is the cold-start gate, and a
-// free-tier backend wake can take up to about a minute. This ONE request
-// therefore carries a longer per-call bound (the shared 30 s
-// DEFAULT_REQUEST_TIMEOUT_MS is unchanged for every other request). The UI
-// shows the warm-up state below 60 s, the still-connecting state with a
-// controlled retry at/above 60 s, and a genuine error only when the request
-// actually fails.
-const YEARS_BOOTSTRAP_TIMEOUT_MS = 120000;
-const WARMUP_THRESHOLD_S = 60;
-// Re-check delay while the backend explicitly reports DATA_LOADING (empty
-// database with the first ingest still running): not a failure, so the
-// warm-up clock keeps running and a single follow-up attempt is scheduled.
-const SEED_FOLLOWUP_MS = 10000;
+const CONNECTION_HINT_SECONDS = 10;
 
 export default function App() {
   const [yearsData, setYearsData] = useState(null);
@@ -256,6 +244,8 @@ export default function App() {
     }));
   }, []);
 
+  const passiveBootstrap = filters.view === 'status' || filters.view === 'audit';
+
   // Lifecycle-aware years bootstrap: single-flight, abortable, real clock.
   // Exactly one attempt runs at a time. A newer attempt (manual retry,
   // post-refresh revalidation) or unmount aborts the previous controller,
@@ -270,7 +260,7 @@ export default function App() {
     yearsController.current = controller;
     const clockStart = Date.now();
     let timer = null;
-    let followup = null;
+
     const stillCurrent = () => yearsRequestId.current === id && !controller.signal.aborted;
 
     setYearsLoading(true);
@@ -283,15 +273,15 @@ export default function App() {
 
     const settle = () => {
       if (timer !== null) clearInterval(timer);
-      if (followup !== null) clearTimeout(followup);
+
       timer = null;
-      followup = null;
+
       if (yearsController.current === controller) yearsController.current = null;
     };
 
     const runAttempt = () => {
       api
-        .years({ signal: controller.signal, timeoutMs: YEARS_BOOTSTRAP_TIMEOUT_MS })
+        .years({ signal: controller.signal, timeoutMs: 12000, recover: true, passive: true })
         .then((result) => {
           if (!stillCurrent()) return;
           settle();
@@ -301,17 +291,6 @@ export default function App() {
         .catch((error) => {
           if (!stillCurrent()) return;
           if (error?.name === 'AbortError') return;
-          // Backend is seeding its first dataset (empty database, ingest
-          // running) or still initializing behind listen-first readiness:
-          // not a failure. Stay in warm-up on the original clock and
-          // schedule a single follow-up attempt.
-          if (error?.code === 'DATA_LOADING' || error?.code === 'DATA_SERVICE_STARTING') {
-            followup = setTimeout(() => {
-              if (!stillCurrent()) return;
-              runAttempt();
-            }, SEED_FOLLOWUP_MS);
-            return;
-          }
           settle();
           setYearsError(error);
           setYearsLoading(false);
@@ -322,7 +301,7 @@ export default function App() {
     return () => {
       controller.abort();
       if (timer !== null) clearInterval(timer);
-      if (followup !== null) clearTimeout(followup);
+
     };
   }, [dataVersion, yearsToken]);
 
@@ -340,8 +319,9 @@ export default function App() {
   const [countriesData, setCountriesData] = useState(null);
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     api
-      .countries({ includeAggregates: false })
+      .countries({ includeAggregates: false }, { signal: controller.signal, recover: true, passive: true, timeoutMs: 12000 })
       .then((result) => {
         if (cancelled) return;
         setCountriesData(result);
@@ -352,8 +332,9 @@ export default function App() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [dataVersion]);
+  }, [dataVersion, yearsToken]);
 
   // Metric/subject discovery (Phase 5): the backend /api/indicators catalog
   // is authoritative for which metrics and subjects exist. Hydration swaps
@@ -362,8 +343,9 @@ export default function App() {
   const [registryVersion, setRegistryVersion] = useState(0);
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     api
-      .indicators()
+      .indicators({ signal: controller.signal, recover: true, passive: true, timeoutMs: 12000 })
       .then((result) => {
         if (cancelled) return;
         if (hydrateRegistry(result)) setRegistryVersion((v) => v + 1);
@@ -373,8 +355,9 @@ export default function App() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [dataVersion]);
+  }, [dataVersion, yearsToken]);
 
   const eligibleCountries = useMemo(() => countriesData?.countries ?? [], [countriesData]);
   const availableYears = useMemo(() => yearsData?.years ?? [], [yearsData]);
@@ -704,7 +687,7 @@ export default function App() {
   // published a newer dataset while this tab was open — remount data views
   // exactly like a manual refresh does. No economics here: the fingerprint is
   // a backend-provided identity, and revalidation re-reads backend results.
-  const filtersReady = !yearsLoading && !yearsError && availableYears.length > 0;
+  const filtersReady = availableYears.length > 0;
   const view = effective.view;
 
   // Background TTL-refresh revalidation (R-04): GET /api/data-status is
@@ -759,7 +742,7 @@ export default function App() {
       // GET /api/years (an AUTO_REFRESH_PATHS member) so the server's existing
       // fire-and-forget maybeAutoRefresh engages. No new endpoint, no status
       // write, same 60 s watcher cadence — never a storm.
-      if (status?.refreshDue && !status?.inProgress) {
+      if (!passiveBootstrap && status?.refreshDue && !status?.inProgress) {
         try {
           const yController = new AbortController();
           const yTimeout = setTimeout(() => yController.abort(), 15000);
@@ -784,7 +767,7 @@ export default function App() {
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [filtersReady]);
+  }, [filtersReady, passiveBootstrap]);
 
   return (
     <div className="app">
@@ -858,16 +841,16 @@ export default function App() {
           only the rendering — the shared filter state stays intact for the
           views that use it. Loading/error notices still render everywhere.
         */}
-        {yearsLoading || yearsError ? (
+        {view !== 'status' && (yearsLoading || yearsError) && !availableYears.length ? (
           <div className="filterbar filterbar-compact" role="region" aria-label="Data service status">
-            {yearsLoading && yearsElapsed < WARMUP_THRESHOLD_S ? (
-              <BootstrapWarmup elapsedSec={yearsElapsed} />
+            {yearsLoading && yearsElapsed < CONNECTION_HINT_SECONDS ? (
+              <BootstrapWarmup />
             ) : null}
-            {yearsLoading && yearsElapsed >= WARMUP_THRESHOLD_S ? (
-              <BootstrapStillConnecting elapsedSec={yearsElapsed} onRetry={retryBootstrap} />
+            {yearsLoading && yearsElapsed >= CONNECTION_HINT_SECONDS ? (
+              <BootstrapStillConnecting onRetry={retryBootstrap} />
             ) : null}
             {!yearsLoading && yearsError ? (
-              <BootstrapError message={yearsError.message} elapsedSec={yearsElapsed} onRetry={retryBootstrap} />
+              <BootstrapError message={yearsError.message} onRetry={retryBootstrap} />
             ) : null}
           </div>
         ) : null}
@@ -1038,7 +1021,7 @@ export default function App() {
           {filtersReady && effective.country && view === 'audit' ? (
             <AuditSource year={effective.year} metricKey={effective.metric} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
-          {filtersReady && view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
+          {view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
         </main>
 
         <footer className="app-footer">
@@ -1046,7 +1029,12 @@ export default function App() {
             Source data: World Bank World Development Indicators. All ranks shown here are calculated by this
             application — the World Bank does not publish them.
           </p>
-          <a href="/public-data/">Public economic data API</a>
+          <nav aria-label="Data sources and documentation">
+            <a href="https://data.worldbank.org/">Official World Bank data</a>
+            <a href="https://datahelpdesk.worldbank.org/knowledgebase/articles/889392">World Bank Indicators API</a>
+            <a href="/public-data/">This project’s public API</a>
+            <a href="/methodology/">Methodology</a>
+          </nav>
         </footer>
       </div>
     </div>

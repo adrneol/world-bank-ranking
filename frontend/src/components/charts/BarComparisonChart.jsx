@@ -61,7 +61,7 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
               width={yAxisWidthFor(unit, narrow)}
               domain={[(minimum) => Math.min(0, minimum), (maximum) => Math.max(0, maximum)]}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(v) => formatTickValue(v, decimals, tickUnit) + (percentage ? '%' : '')}
+              tickFormatter={(v) => formatTickValue(v, decimals, percentage ? unit : tickUnit)}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip

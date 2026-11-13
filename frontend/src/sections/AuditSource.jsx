@@ -11,16 +11,21 @@ import { formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita', country, focusName = country ?? 'Selected economy' }) {
-  const depsKey = `audit:${metricKey}:${year ?? ''}:${country}`;
+  const depsKey = `audit:${metricKey}:${year ?? ''}:${country}:${subject}`;
   const { data, loading, error, retry } = useApi(
     async (signal) => {
-      const options = { signal };
-      const [metadata, observation, yearly] = await Promise.all([
-        api.metadata(options),
-        api.observations({ indicator: metricKey, year, country }, options),
-        api.focusYearly({ startYear: year, endYear: year, subject, country }, options),
-      ]);
-      return { metadata, observation, yearly };
+      const siblings = new AbortController();
+      const options = { signal: AbortSignal.any([signal, siblings.signal]), recover: true, passive: true, timeoutMs: 12000 };
+      try {
+        const [metadata, observation, yearly] = await Promise.all([
+          api.metadata(options),
+          api.observations({ indicator: metricKey, year, country }, options),
+          api.focusYearly({ startYear: year, endYear: year, subject, country }, options),
+        ]);
+        return { metadata, observation, yearly };
+      } finally {
+        siblings.abort();
+      }
     },
     depsKey,
     { enabled: year != null && metricKey != null },
