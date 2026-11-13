@@ -16,7 +16,7 @@ import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
 let stub = null;
 
 test.before(async () => {
-  stub = await startStubWorldBank({});
+  stub = await startStubWorldBank({ inProcess: true });
   useStubBaseUrl(stub.baseUrl);
   process.env.WB_RECOVERY_REPROBE_MS = '0';
   process.env.WB_RECOVERY_PROBE_TIMEOUT_MS = '5000';

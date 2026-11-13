@@ -32,6 +32,7 @@ let stub = null;
 
 test.before(async () => {
   stub = await startStubWorldBank({
+    inProcess: true,
     seriesRowsFor: (metricKey, baseRows) =>
       rowsTransform ? rowsTransform(metricKey, baseRows) : baseRows,
   });

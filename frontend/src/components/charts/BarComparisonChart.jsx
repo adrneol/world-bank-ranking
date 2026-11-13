@@ -21,7 +21,7 @@ import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
-export default function BarComparisonChart({ entries = [], series = null, unit = null, decimals = 0, height = null, scrollable = false }) {
+export default function BarComparisonChart({ entries = [], series = null, unit = null, decimals = 0, formatTooltip = null, tickUnit = unit, height = null, scrollable = false }) {
   const narrow = useIsNarrowChart();
   // Two shapes: single-series entries [{name, value}] or grouped rows
   // [{x, a, b}] with series [{key, label}] for A-vs-B comparisons.
@@ -52,11 +52,11 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
             <YAxis
               width={yAxisWidthFor(unit, narrow)}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(v) => formatTickValue(v, decimals, unit)}
+              tickFormatter={(v) => formatTickValue(v, decimals, tickUnit)}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip
-              formatter={(value, name) => [formatChartValue(value, decimals), name]}
+              formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
               contentStyle={{ fontSize: 12 }}
             />
             {isGrouped

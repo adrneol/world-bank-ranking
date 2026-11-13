@@ -107,7 +107,7 @@ export async function startStubWorldBank(options = {}) {
       (key) => snapshot.indicators[key].indicatorCode === code,
     ) ?? totalGdpMetricKeyForCode(code) ?? phase5MetricKeyForCode(code);
 
-  const server = http.createServer((req, res) => {
+  const respond = (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const params = Object.fromEntries(url.searchParams.entries());
     state.requests.push({ path: url.pathname, params });
@@ -204,10 +204,39 @@ export async function startStubWorldBank(options = {}) {
 
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('stub: unknown endpoint');
-  });
+  };
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}/v2`;
+  let baseUrl;
+  let close;
+  if (options.inProcess) {
+    // Substitute only the upstream transport. The real client still builds
+    // URLs, parses Fetch responses, and runs retry and publication logic.
+    const originalFetch = globalThis.fetch;
+    const origin = 'http://world-bank-fixture.invalid';
+    baseUrl = `${origin}/v2`;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.origin !== origin) {
+        if (['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) return originalFetch(input, init);
+        throw new Error('External fetch is disabled for this fixture');
+      }
+      init?.signal?.throwIfAborted();
+      return new Promise((resolve) => {
+        let status;
+        let headers;
+        respond({ url: url.pathname + url.search }, {
+          writeHead(code, values) { status = code; headers = values; },
+          end(body) { resolve(new Response(body, { status, headers })); },
+        });
+      });
+    };
+    close = () => { globalThis.fetch = originalFetch; };
+  } else {
+    const server = http.createServer(respond);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    baseUrl = `http://127.0.0.1:${server.address().port}/v2`;
+    close = () => new Promise((resolve) => server.close(resolve));
+  }
 
   return {
     baseUrl,
@@ -253,9 +282,7 @@ export async function startStubWorldBank(options = {}) {
     sendInvalidJson(next = true) {
       state.invalidJson = next;
     },
-    async close() {
-      await new Promise((resolve) => server.close(resolve));
-    },
+    close,
   };
 }
 

@@ -53,35 +53,26 @@ import {
 } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal, readableReason } from '../utils/format.js';
+import { compareCurrencySymbol, compareResultDecimals, compareResultParts, formatCompareResult } from '../utils/compareFormat.js';
 
 /**
  * Raw backend number in metric units → registry displayDecimals. GDP
  * per-capita pins 0, RATE/RATIO/FX pin 2, INDEX pins 1. Presentation only.
  */
+function isTotalGdp(metricKey) {
+  return subjectOf(metricKey) === 'gdp_total';
+}
+
 function formatValuePlain(value, metricKey) {
   return formatDecimal(value, metricDecimals(metricKey));
 }
 
-/** Compact headline amounts for total GDP; raw precision remains in evidence tables. */
-function formatResultAmount(value, unit, metricKey) {
-  if (value == null) return '—';
-  if (!String(metricKey).startsWith('total_')) return formatDecimal(value, metricDecimals(metricKey));
-  const n = Number(value);
-  const abs = Math.abs(n);
-  const [scale, suffix] = abs >= 1e12 ? [1e12, 'T'] : abs >= 1e9 ? [1e9, 'B'] : abs >= 1e6 ? [1e6, 'M'] : [1, ''];
-  const symbol = /international/i.test(unit ?? '') ? 'Int$' : '$';
-  const sign = n < 0 ? '−' : '';
-  return `${sign}${symbol}${formatDecimal(abs / scale, 2)}${suffix}`;
+function resultAmount(value, unit, metricKey, options) {
+  return formatCompareResult(value, unit, metricDecimals(metricKey), options);
 }
 
-/**
- * Decimals for a change/gap value: derived units (%, percentage points,
- * index points) pin 2 per backend convention; absolute changes reuse the
- * metric's own registry precision.
- */
 function changeDecimals(unit, metricKey) {
-  if (unit === '%' || unit === 'percentage points' || unit === 'index points') return 2;
-  return metricDecimals(metricKey);
+  return compareResultDecimals(unit, metricDecimals(metricKey));
 }
 
 function YearSelect({ id, label, years, value, onChange, hint, optional = false, disabled = false }) {
@@ -217,6 +208,11 @@ function EntityResultCard({ slot, entity, countries, aggregates, mode, metricKey
   );
 }
 
+function ResultValue({ value, unit, metricKey, signed = false }) {
+  const { amount, suffix } = compareResultParts(value, unit, metricDecimals(metricKey), { compact: isTotalGdp(metricKey), signed });
+  return <p className="result-value">{amount}{suffix && <span className="result-unit">{suffix}</span>}</p>;
+}
+
 function ChangeBlock({ title, change, metricKey }) {
   if (!change) return null;
   if (!change.computable) {
@@ -227,14 +223,10 @@ function ChangeBlock({ title, change, metricKey }) {
       </div>
     );
   }
-  const sign = change.value > 0 ? '+' : '';
   return (
     <div>
       <p className="lfl-label">{title}</p>
-      <p className="result-value">
-        {sign}
-        {formatResultAmount(change.value, change.unit, metricKey)} {!String(metricKey).startsWith('total_') ? <span className="result-unit">{change.unit}</span> : null}
-      </p>
+      <ResultValue value={change.value} unit={change.unit} metricKey={metricKey} signed />
     </div>
   );
 }
@@ -278,10 +270,7 @@ function ComparisonResult({ data, metricKey }) {
           <h3>
             Cross-rate <ProvenanceBadge kind="APP_DERIVED" />
           </h3>
-          <p className="result-value">
-            {formatDecimal(comparison.value, metricDecimals(metricKey))}{' '}
-            <span className="result-unit">{comparison.provenance?.outputUnit}</span>
-          </p>
+          <ResultValue value={comparison.value} unit={comparison.provenance?.outputUnit ?? comparison.unit} metricKey={metricKey} />
           <p className="footnote">
             {comparison.legs.a.iso3}: {formatValuePlain(comparison.legs.a.value, metricKey)} · {comparison.legs.b.iso3}:{' '}
             {formatValuePlain(comparison.legs.b.value, metricKey)} ({data.years.a})
@@ -325,7 +314,7 @@ function ComparisonResult({ data, metricKey }) {
                     <td className="num">{formatValuePlain(row.a, metricKey)}</td>
                     <td className="num">{formatValuePlain(row.b, metricKey)}</td>
                     <td className="num" title={row.gapReason ? readableReason(row.gapReason) : undefined}>
-                      {row.gap === null || row.gap === undefined ? '—' : formatValuePlain(row.gap, metricKey)}
+                      {row.gap === null || row.gap === undefined ? '—' : resultAmount(row.gap, row.unit ?? comparison.unit, metricKey)}
                     </td>
                   </tr>
                 );
@@ -338,7 +327,7 @@ function ComparisonResult({ data, metricKey }) {
         {years.length === 1 ? (
           <ChartCard
             title={`Level values — ${nameOf(results.a)} vs ${nameOf(results.b)}`}
-            unit={comparison.unit ?? unit}
+            unit={unit}
             derived={involvesDerived}
             summary={`${nameOf(results.a)} vs ${nameOf(results.b)} level values by year`}
           >
@@ -348,7 +337,7 @@ function ComparisonResult({ data, metricKey }) {
                 { key: 'A', label: nameOf(results.a) },
                 { key: 'B', label: nameOf(results.b) },
               ]}
-              unit={comparison.unit ?? unit}
+              unit={unit}
               decimals={metricDecimals(metricKey)}
             />
           </ChartCard>
@@ -379,12 +368,12 @@ function ComparisonResult({ data, metricKey }) {
                   <th scope="row">
                     {id} ({segment.start} → {segment.end})
                   </th>
-                  <td className="num">{segment.a?.computable ? formatValuePlain(segment.a.value, metricKey) : '—'}</td>
-                  <td className="num">{segment.b?.computable ? formatValuePlain(segment.b.value, metricKey) : '—'}</td>
+                  <td className="num">{segment.a?.computable ? resultAmount(segment.a.value, segment.a.unit ?? '%', metricKey) : '—'}</td>
+                  <td className="num">{segment.b?.computable ? resultAmount(segment.b.value, segment.b.unit ?? '%', metricKey) : '—'}</td>
                   <td className="num" title={segment.gap?.reason ? readableReason(segment.gap.reason) : undefined}>
                     {segment.gap?.value === null || segment.gap?.value === undefined
                       ? '—'
-                      : formatValuePlain(segment.gap.value, metricKey)}
+                      : resultAmount(segment.gap.value, segment.gap.unit ?? comparison.unit ?? 'percentage points', metricKey)}
                   </td>
                 </tr>
               );
@@ -416,10 +405,7 @@ function ComparisonResult({ data, metricKey }) {
           {gap?.value === null || gap?.value === undefined ? (
             <UnavailableState reason={gap?.reason} hint="Both sides need a valid, complete result for a gap." />
           ) : (
-            <p className="result-value">
-              {(gap.value > 0 ? '+' : '') + formatResultAmount(gap.value, gap.unit, metricKey)}{' '}
-              {!String(metricKey).startsWith('total_') ? <span className="result-unit">{gap.unit}</span> : null}
-            </p>
+            <ResultValue value={gap.value} unit={gap.unit ?? comparison.unit} metricKey={metricKey} signed />
           )}
         </article>
       </div>
@@ -436,7 +422,7 @@ function ComparisonResult({ data, metricKey }) {
 
 function intervalObservationCell(entry, metricKey, compact = false) {
   if (!entry?.available) return 'Missing';
-  const value = compact ? formatResultAmount(entry.value, entry.unit, metricKey) : formatValuePlain(entry.value, metricKey);
+  const value = compact ? resultAmount(entry.value, entry.unit, metricKey, { compact: isTotalGdp(metricKey) }) : formatValuePlain(entry.value, metricKey);
   if (!entry.complete) {
     const missing = entry.missingIso3?.length ? `: ${entry.missingIso3.join(', ')}` : entry.missingCount ? `: ${entry.missingCount} member${entry.missingCount === 1 ? '' : 's'} missing` : '';
     return `${value} · Partial coverage${missing}`;
@@ -515,10 +501,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
   const isUnavailablePeriodGrowth = interval.kind === 'unavailable' && operation === 'period_total_growth';
   const startObservation = interval.observations?.[slot]?.find((entry) => entry.year === interval.start);
   const endObservation = interval.observations?.[slot]?.find((entry) => entry.year === interval.end);
-  const showResult = (value, unit) => {
-    const amount = formatResultAmount(value, unit, metricKey);
-    return String(metricKey).startsWith('total_') || !unit ? amount : `${amount} ${unit}`;
-  };
+  const showResult = (value, unit) => resultAmount(value, unit, metricKey, { compact: isTotalGdp(metricKey) });
   const periodInputs = isPeriodGrowth ? result : null;
   return (
     <section className="compare-interval-entity" aria-label={`${label} interval details`}>
@@ -526,7 +509,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
       {interval.basisPeriod ? (
         <>
           <dl className="compare-detail-list">
-            <div><dt>{interval.start} → {interval.end} result</dt><dd>{result?.computable ? showResult(result.value, result.unit) : 'Unavailable'}</dd></div>
+            <div><dt>{interval.start} → {interval.end} result</dt><dd>{result?.computable ? showResult(result.value, result.unit ?? interval.unit) : 'Unavailable'}</dd></div>
             <div><dt>Required observations</dt><dd>{(interval.requiredObservationYears ?? []).join(', ') || 'None'}</dd></div>
             {result?.rank ? <div><dt>Application-derived position</dt><dd>{rankText(result, entity)}</dd></div> : null}
           </dl>
@@ -542,9 +525,9 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
       ) : isLevel ? (
         <>
           <dl className="compare-detail-list">
-            <div><dt>{interval.start} observation</dt><dd>{intervalObservationCell(startObservation, metricKey, true)} {String(metricKey).startsWith('total_') ? '' : startObservation?.unit ?? ''}</dd></div>
+            <div><dt>{interval.start} observation</dt><dd>{intervalObservationCell(startObservation, metricKey, true)}</dd></div>
             <div><dt>{interval.start} application-derived position</dt><dd>{rankText(startObservation, entity)}</dd></div>
-            <div><dt>{interval.end} observation</dt><dd>{intervalObservationCell(endObservation, metricKey, true)} {String(metricKey).startsWith('total_') ? '' : endObservation?.unit ?? ''}</dd></div>
+            <div><dt>{interval.end} observation</dt><dd>{intervalObservationCell(endObservation, metricKey, true)}</dd></div>
             <div><dt>{interval.end} application-derived position</dt><dd>{rankText(endObservation, entity)}</dd></div>
           </dl>
           <p className="footnote">Level reports the selected-series observation and application-derived country position at each endpoint. These positions are not official World Bank ranks.</p>
@@ -552,9 +535,9 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
       ) : isPeriodGrowth ? (
         <>
           <dl className="compare-detail-list">
-            <div><dt>Earlier period total {periodInputs?.periodStart?.period ? `[${periodInputs.periodStart.period.start}, ${periodInputs.periodStart.period.end})` : ''}</dt><dd>{showResult(periodInputs?.periodStart?.value, periodInputs?.periodStart?.unit ?? interval.unit)}</dd></div>
-            <div><dt>Later period total {periodInputs?.periodEnd?.period ? `[${periodInputs.periodEnd.period.start}, ${periodInputs.periodEnd.period.end})` : ''}</dt><dd>{showResult(periodInputs?.periodEnd?.value, periodInputs?.periodEnd?.unit ?? interval.unit)}</dd></div>
-            <div><dt>Period-total growth</dt><dd>{result?.computable ? showResult(result.value, result.unit) : 'Unavailable'}</dd></div>
+            <div><dt>Earlier period total {periodInputs?.periodStart?.period ? `[${periodInputs.periodStart.period.start}, ${periodInputs.periodStart.period.end})` : ''}</dt><dd>{showResult(periodInputs?.periodStart?.value, periodInputs?.periodStart?.unit)}</dd></div>
+            <div><dt>Later period total {periodInputs?.periodEnd?.period ? `[${periodInputs.periodEnd.period.start}, ${periodInputs.periodEnd.period.end})` : ''}</dt><dd>{showResult(periodInputs?.periodEnd?.value, periodInputs?.periodEnd?.unit)}</dd></div>
+            <div><dt>Period-total growth</dt><dd>{result?.computable ? showResult(result.value, result.unit ?? interval.unit) : 'Unavailable'}</dd></div>
           </dl>
           {!result?.computable ? <UnavailableState reason={result?.reason} hint={result?.description ?? 'A valid split-period total is required.'} /> : null}
           {result?.computable ? <p className="footnote">{describeIntervalResult(result, interval, operation, metricKey)}</p> : null}
@@ -573,7 +556,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
           <dl className="compare-detail-list">
             <div><dt>{interval.start} beginning observation</dt><dd>{intervalObservationCell(startObservation, metricKey)} {startObservation?.unit ?? ''}</dd></div>
             <div><dt>{interval.end} ending observation</dt><dd>{intervalObservationCell(endObservation, metricKey)} {endObservation?.unit ?? ''}</dd></div>
-            <div><dt>{operationLabel(operation)}</dt><dd>{result?.computable ? showResult(result.value, result.unit) : 'Unavailable'}</dd></div>
+            <div><dt>{operationLabel(operation)}</dt><dd>{result?.computable ? showResult(result.value, result.unit ?? interval.unit) : 'Unavailable'}</dd></div>
             {interval.kind === 'movement_period' ? <div><dt>Application-derived position</dt><dd>{rankText(result, entity)}</dd></div> : null}
             <div><dt>Required annual observations</dt><dd>{(interval.requiredObservationYears ?? interval.observations?.[slot]?.map((entry) => entry.year) ?? []).join(', ') || 'None'}</dd></div>
           </dl>
@@ -585,7 +568,7 @@ function IntervalEntityDetail({ slot, entity, result, interval, metricKey, label
           <dl className="compare-detail-list">
             <div><dt>{isPeriodComponent ? `Period total [${interval.start}, ${interval.end})` : `${interval.start} observation`}</dt><dd>{isPeriodComponent ? (result?.computable ? showResult(result.value, result.unit ?? interval.unit) : 'Unavailable') : `${intervalObservationCell(startObservation, metricKey)} ${startObservation?.unit ?? ''}`}</dd></div>
             {!isPeriodComponent ? <div><dt>{interval.end} observation</dt><dd>{`${intervalObservationCell(endObservation, metricKey)} ${endObservation?.unit ?? ''}`}</dd></div> : null}
-            <div><dt>{isPeriodComponent ? 'Period-total component' : operationLabelFromInterval(interval.kind)}</dt><dd>{result?.computable ? showResult(result.value, result.unit) : 'Unavailable'}</dd></div>
+            <div><dt>{isPeriodComponent ? 'Period-total component' : operationLabelFromInterval(interval.kind)}</dt><dd>{result?.computable ? showResult(result.value, result.unit ?? interval.unit) : 'Unavailable'}</dd></div>
           </dl>
           {!result?.computable ? <UnavailableState reason={result?.reason} hint={result?.description ?? 'The required observations are incomplete or the formula is not valid for these values.'} /> : null}
           {result?.computable ? <p className="footnote">{describeIntervalResult(result, interval, operation, metricKey)}</p> : null}
@@ -653,10 +636,11 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
   return (
     <div className="compare-intervals" aria-label="Interval-by-interval results">
       {intervals.map((interval) => {
-        const gap = interval.kind === 'level' ? interval.gap : interval.gap;
+        const gap = interval.gap;
+        const gapUnit = gap?.unit ?? interval.gapUnit;
         const gapText = interval.kind === 'level' && gap?.start
-          ? `${interval.start}: ${gap?.start?.value == null ? 'unavailable' : showIntervalGap(gap.start, metricKey)} · ${interval.end}: ${gap?.end?.value == null ? 'unavailable' : showIntervalGap(gap.end, metricKey)}`
-          : gap?.value == null ? 'Unavailable' : showIntervalGap(gap, metricKey);
+          ? `${interval.start}: ${gap?.start?.value == null ? 'unavailable' : showIntervalGap(gap.start, metricKey, gapUnit)} · ${interval.end}: ${gap?.end?.value == null ? 'unavailable' : showIntervalGap(gap.end, metricKey, gapUnit)}`
+          : gap?.value == null ? 'Unavailable' : showIntervalGap(gap, metricKey, gapUnit);
         const compareMethod = interval.kind === 'period_component'
           ? 'Period-total input for the selected growth analysis'
           : interval.kind === 'period_total_growth'
@@ -677,12 +661,12 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
             <section className="compare-interval-gap" aria-label={`${interval.label} comparison`}>
               <h4>Entity comparison</h4>
               {interval.kind === 'level' ? (
-                <p>{gapText} <span className="muted">({gap?.start?.unit ?? interval.gapUnit})</span></p>
+                <p>{gapText}</p>
               ) : (
-                <p><strong>{gapText}</strong> <span className="muted">({interval.gapUnit ?? gap?.unit ?? ''})</span></p>
+                <p><strong>{gapText}</strong></p>
               )}
               {gap?.value != null && interval.kind !== 'level' ? (
-                <p className="footnote">{gap.value > 0 ? `Entity A's result is higher by ${formatDecimal(Math.abs(gap.value), changeDecimals(interval.gapUnit, metricKey))} ${interval.gapUnit}.` : gap.value < 0 ? `Entity B's result is higher by ${formatDecimal(Math.abs(gap.value), changeDecimals(interval.gapUnit, metricKey))} ${interval.gapUnit}.` : 'The entity results are equal.'} This describes the selected measure only; it does not imply overall economic superiority.</p>
+                <p className="footnote">{gap.value > 0 ? `Entity A's result is higher by ${resultAmount(Math.abs(gap.value), gapUnit, metricKey)}.` : gap.value < 0 ? `Entity B's result is higher by ${resultAmount(Math.abs(gap.value), gapUnit, metricKey)}.` : 'The entity results are equal.'} This describes the selected measure only; it does not imply overall economic superiority.</p>
               ) : gap?.value == null && interval.kind !== 'level' ? <p className="footnote">No gap is calculated unless both entity results are valid and complete.</p> : null}
             </section>
             <IntervalObservations interval={interval} metricKey={metricKey} labelA={labelA} labelB={labelB} />
@@ -704,15 +688,14 @@ function IntervalAnalysis({ data, metricKey, countryNames, analysisLabel, chartT
           </article>
         );
       })}
-      <IntervalResultChart intervals={intervals} operation={data.operation} analysisLabel={analysisLabel} labelA={labelA} labelB={labelB} metric={metric} metricKey={metricKey} mode={data.mode} chartType={chartType} onChartType={onChartType} />
+      <IntervalResultChart intervals={intervals} operation={data.operation} analysisLabel={analysisLabel} labelA={labelA} labelB={labelB} metricKey={metricKey} mode={data.mode} chartType={chartType} onChartType={onChartType} />
     </div>
   );
 }
 
-function showIntervalGap(gap, metricKey) {
+function showIntervalGap(gap, metricKey, fallbackUnit) {
   if (gap?.value == null) return 'unavailable';
-  const amount = formatResultAmount(gap.value, gap.unit, metricKey);
-  return String(metricKey).startsWith('total_') || !gap.unit ? amount : `${amount} ${gap.unit}`;
+  return resultAmount(gap.value, gap.unit ?? fallbackUnit, metricKey, { compact: isTotalGdp(metricKey) });
 }
 
 function ChartTypeToggle({ value, onChange }) {
@@ -730,16 +713,18 @@ function ChartTypeToggle({ value, onChange }) {
   );
 }
 
-function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labelB, metric, metricKey, mode, chartType, onChartType }) {
+function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labelB, metricKey, mode, chartType, onChartType }) {
   const chartIntervals = intervals.filter((interval) => {
     if (interval.kind === 'level') return false;
     if (operation === 'period_total_growth') return interval.kind === 'period_total_growth';
     return interval.kind !== 'unavailable';
   });
   if (chartIntervals.length === 0) return null;
-  const units = new Set(chartIntervals.flatMap((interval) => [interval.a?.unit, interval.b?.unit]).filter(Boolean));
+  const units = new Set(chartIntervals.flatMap((interval) => [interval.a?.unit ?? interval.unit, interval.b?.unit ?? interval.unit]).filter(Boolean));
   if (units.size > 1) return null;
-  const unit = chartIntervals[0].a?.unit ?? chartIntervals[0].unit ?? metric.unitLong ?? metric.unit;
+  const unit = units.values().next().value ?? chartIntervals[0].unit ?? null;
+  const decimals = changeDecimals(unit, metricKey);
+  const formatTooltip = (value) => resultAmount(value, unit, metricKey);
   const title = analysisLabel ?? operationLabel(operation);
   const entries = chartIntervals.map((interval) => ({
     x: interval.label,
@@ -754,8 +739,8 @@ function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labe
     >
       <ChartTypeToggle value={chartType} onChange={onChartType} />
       {chartType === 'line'
-        ? <IntervalLineChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={unit === '%' ? 2 : metricDecimals(metricKey)} />
-        : <BarComparisonChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={unit === '%' ? 2 : metricDecimals(metricKey)} />}
+        ? <IntervalLineChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} formatTooltip={formatTooltip} />
+        : <BarComparisonChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} formatTooltip={formatTooltip} tickUnit={compareCurrencySymbol(unit) ? unit : null} />}
     </ChartCard>
   );
 }

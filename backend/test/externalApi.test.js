@@ -1,5 +1,5 @@
 /**
- * EXTERNAL SECTOR API TESTS (service + HTTP, read-only against stored vintage).
+ * EXTERNAL SECTOR API TESTS (service + HTTP, read-only against tracked fixtures).
  *
  * Verifies: 3/3/4 basis validation, S+1..E vs endpoint semantics, stock
  * never summed, intensity from legs, Observed/LFL universes, DESC
@@ -11,10 +11,14 @@ import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDb } from '../src/db/index.js';
+import { closeDb, getDb } from '../src/db/index.js';
+import { seedConfiguredDatabase } from './helpers/configuredDb.js';
 import { queryGet } from '../src/db/driver.js';
 import { createApp } from '../src/server.js';
 import { buildExternalMovement, listExternalCountryGroups } from '../src/services/externalMovementService.js';
+
+test.before(seedConfiguredDatabase);
+test.after(closeDb);
 
 function app() {
   return createApp({ db: getDb(), autoRefresh: false });

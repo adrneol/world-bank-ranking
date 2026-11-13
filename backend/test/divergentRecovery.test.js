@@ -8,10 +8,8 @@
  *     import, resolveDbMode() is asserted 'local', and recovery always
  *     receives an injected temp-file probe (createProbe). The production
  *     probe (defaultProbePrimary) would throw with the blanked config.
- *   - NO real local file: every handle is an explicitly-pathed temp SQLite
- *     file under os.tmpdir() (unique per run); the real
- *     backend/data/worldbank.db is only ever read via bare SELECTs (no
- *     initDatabase, no writes) to prove its fingerprint never changes.
+ *   - NO real local file: every handle uses a disposable SQLite database.
+ *     A separate configured fixture acts as a sentinel for unintended writes.
  *   - NO live World Bank API: the local stub serves all payloads.
  *
  * The tests exercise the REAL production reconciliation logic
@@ -26,12 +24,13 @@
  * 0 writes) and promotes.
  */
 
-import './isolation.js';
+import { isolation, PROTECTED_DATABASE } from './isolation.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import { startStubWorldBank, useStubBaseUrl } from './helpers/stubWorldBank.js';
 
@@ -57,20 +56,25 @@ let stub = null;
 
 test.before(async () => {
   stub = await startStubWorldBank({
+    inProcess: true,
     seriesRowsFor: (metricKey, baseRows) =>
       rowsTransform ? rowsTransform(metricKey, baseRows) : baseRows,
   });
   useStubBaseUrl(stub.baseUrl);
   assert.ok(
-    String(stub.baseUrl).startsWith('http://127.0.0.1'),
-    'stub World Bank must be loopback-only',
+    new URL(stub.baseUrl).hostname === 'world-bank-fixture.invalid',
+    'World Bank responses come from the in-process fixture',
   );
+  const { seedConfiguredDatabase } = await import('./helpers/configuredDb.js');
+  await seedConfiguredDatabase();
 });
 
 test.after(async () => {
   rowsTransform = null;
   await stub?.close();
   stub = null;
+  const { closeDb } = await import('../src/db/index.js');
+  closeDb();
 });
 
 // ---------------------------------------------------------------------------
@@ -86,7 +90,7 @@ async function createIsolatedDb(tag) {
     file.startsWith(os.tmpdir()),
     `isolated test database must live under os.tmpdir(): ${file}`,
   );
-  const handle = createClient({ url: `file:${file.replace(/\\/g, '/')}` });
+  const handle = createClient({ url: pathToFileURL(file).href });
   await initDatabase(handle, { localFile: true });
   return { handle, dir, file };
 }
@@ -123,14 +127,14 @@ async function contentDigest(db) {
   return JSON.stringify(rows);
 }
 
-/** Read-only fingerprint of the REAL local database (bare SELECTs only:
+/** Read-only fingerprint of the separate configured fixture (bare SELECTs only:
  * no initDatabase, no migrations, no writes — pure evidence). */
-async function readProductionFingerprint() {
+async function readConfiguredFixtureFingerprint() {
   const config = (await import('../src/config.js')).default;
   const { createClient } = await import('@libsql/client');
   const realFile = config.databaseFile;
   assert.ok(typeof realFile === 'string' && realFile.length > 0);
-  const handle = createClient({ url: `file:${String(realFile).replace(/\\/g, '/')}` });
+  const handle = createClient({ url: pathToFileURL(String(realFile)).href });
   try {
     const countRows = await handle.execute('SELECT COUNT(*) AS n FROM observations');
     let contentVersion = null;
@@ -268,7 +272,7 @@ test('8P positive: divergent fallback triggers catch-up, primary converges, prom
   const server = await import('../src/server.js');
   const { runIntegrityChecks } = await import('../src/services/integrity.js');
   const { compareDatasetContent } = repository;
-  const prodBefore = await readProductionFingerprint();
+  const prodBefore = await readConfiguredFixtureFingerprint();
   const previousActive = server.getActiveDbInfo();
   const primary = await createIsolatedDb(`primary-${Date.now()}`);
   const fallback = await createIsolatedDb(`fallback-${Date.now()}`);
@@ -375,9 +379,9 @@ test('8P positive: divergent fallback triggers catch-up, primary converges, prom
     assert.equal((await repository.refreshLockStatus(fallback.handle))?.locked, 0);
 
     // Production untouched.
-    const prodAfter = await readProductionFingerprint();
+    const prodAfter = await readConfiguredFixtureFingerprint();
     assert.deepEqual(prodAfter, prodBefore, 'real local database byte-content unchanged');
-    evidence('production-untouched', prodAfter);
+    evidence('configured-fixture-untouched', prodAfter);
   } finally {
     rowsTransform = null;
     stub.reset();
@@ -396,7 +400,7 @@ test('8P negative: failed catch-up rolls back atomically and blocks promotion', 
   const server = await import('../src/server.js');
   const { runIntegrityChecks } = await import('../src/services/integrity.js');
   const { compareDatasetContent } = repository;
-  const prodBefore = await readProductionFingerprint();
+  const prodBefore = await readConfiguredFixtureFingerprint();
   const previousActive = server.getActiveDbInfo();
   const primary = await createIsolatedDb(`negprimary-${Date.now()}`);
   const fallback = await createIsolatedDb(`negfallback-${Date.now()}`);
@@ -442,7 +446,7 @@ test('8P negative: failed catch-up rolls back atomically and blocks promotion', 
     // Re-open the same isolated temp file (production close semantics kept).
     const { createClient } = await import('@libsql/client');
     const { initDatabase } = await import('../src/db/index.js');
-    const reopened = createClient({ url: `file:${primary.file.replace(/\\/g, '/')}` });
+    const reopened = createClient({ url: pathToFileURL(primary.file).href });
     try {
       assert.equal(await contentDigest(reopened), primaryDigestBefore, 'no partial live-table publication');
       assert.equal((await repository.getDatasetState(reopened))?.contentVersion, 1, 'content_version unmoved');
@@ -462,7 +466,7 @@ test('8P negative: failed catch-up rolls back atomically and blocks promotion', 
     assert.equal(await contentDigest(fallback), fallbackDigestBefore, 'fallback unchanged');
     assert.equal((await repository.refreshLockStatus(fallback.handle))?.locked, 0);
 
-    const prodAfter = await readProductionFingerprint();
+    const prodAfter = await readConfiguredFixtureFingerprint();
     assert.deepEqual(prodAfter, prodBefore, 'real local database byte-content unchanged');
   } finally {
     rowsTransform = null;
@@ -481,7 +485,7 @@ test('8P regression: identical primary still recovers with 0 WB fetch and 0 writ
   const repository = await import('../src/db/repository.js');
   const server = await import('../src/server.js');
   const { compareDatasetContent } = repository;
-  const prodBefore = await readProductionFingerprint();
+  const prodBefore = await readConfiguredFixtureFingerprint();
   const previousActive = server.getActiveDbInfo();
   const primary = await createIsolatedDb(`twin-a-${Date.now()}`);
   const fallback = await createIsolatedDb(`twin-b-${Date.now()}`);
@@ -513,7 +517,7 @@ test('8P regression: identical primary still recovers with 0 WB fetch and 0 writ
     );
     assert.equal((await repository.getDatasetState(primary.handle))?.contentVersion, 1);
 
-    const prodAfter = await readProductionFingerprint();
+    const prodAfter = await readConfiguredFixtureFingerprint();
     assert.deepEqual(prodAfter, prodBefore, 'real local database byte-content unchanged');
   } finally {
     rowsTransform = null;
@@ -533,10 +537,7 @@ test('8P harness: remote endpoints disabled and temp paths isolated', async () =
   const { resolveDbMode } = await import('../src/db/index.js');
   assert.equal(config.tursoDatabaseUrl ?? '', '', 'TURSO_DATABASE_URL disabled in the isolated test process');
   assert.equal(resolveDbMode(), 'local', 'no code path resolves a remote backend');
-  assert.ok(
-    String(config.databaseFile).length > 0 &&
-      !String(config.databaseFile).startsWith(os.tmpdir()),
-    'real local file is a distinct path outside tmpdir',
-  );
+  assert.equal(config.databaseFile, isolation.databaseFile);
+  assert.notEqual(config.databaseFile, PROTECTED_DATABASE);
   assert.ok(!String(config.databaseFile).includes('wb-8p-'), 'test files never alias the real file');
 });

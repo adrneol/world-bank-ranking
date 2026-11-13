@@ -9,7 +9,7 @@
 
 import { createRoot } from 'react-dom/client';
 import { act } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import Compare from './sections/Compare.jsx';
 import EntityPicker from './components/EntityPicker.jsx';
@@ -307,6 +307,115 @@ describe('compare UI: observed and like-for-like', () => {
     ctx = null;
     document.body.innerHTML = '';
     hydrateRegistry(DEFAULT_REGISTRY);
+  });
+
+  it.each([true, false])('uses result units for Total GDP growth and gaps (intervals: %s)', async (intervals) => {
+    hydrateRegistry(DEFAULT_REGISTRY);
+    const response = payload({ partial: false });
+    response.operation = 'percent_change';
+    const comparison = response.results.comparison;
+    comparison.a = { computable: true, value: 25, unit: '%' };
+    comparison.b = { computable: true, value: 10, unit: '%' };
+    comparison.gap = { value: 15, unit: 'percentage points' };
+    comparison.unit = 'percentage points';
+    comparison.intervalResults = intervals ? [{
+      ...comparison.intervalResults[0],
+      a: comparison.a,
+      b: comparison.b,
+      gap: comparison.gap,
+      unit: '%',
+      gapUnit: 'percentage points',
+    }] : [];
+    const stub = stubFetch([['/api/entities', { entities: [] }], ['/api/compare', response]]);
+    const view = renderCompare({ entityB: 'country:USA', operation: 'percent_change', basisId: 'growth', yearC: 2005, yearB: null });
+    ctx = { ...view, stub };
+    await flushReact(act);
+    const text = view.container.textContent;
+    expect(text).not.toContain('$25.00');
+    expect(text).not.toContain('$15.00');
+    expect(text).toContain('25.00%');
+    expect(text).toContain('10.00%');
+    expect(text).toContain('15.00 percentage points');
+    if (intervals) {
+      expect(view.container.querySelector('[aria-label="A → B comparison"] strong').textContent).toBe('15.00 percentage points');
+      expect(view.container.querySelector('[aria-label="A → B annual observations"]').textContent).toContain('721,000,000,000.00');
+    } else {
+      expect([...view.container.querySelectorAll('.result-value')].map((node) => node.textContent)).toEqual([
+        '+25.00%', '+10.00%', '+15.00 percentage points',
+      ]);
+    }
+  });
+
+  it('shows the result unit in keyboard-accessible bar and line tooltips', async () => {
+    hydrateRegistry(DEFAULT_REGISTRY);
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) { this.callback = callback; }
+      observe(target) { this.callback([{ target, contentRect: { width: 600, height: 260 } }]); }
+      unobserve() {}
+      disconnect() {}
+    });
+    try {
+      const response = payload({ partial: false });
+      response.operation = 'cagr';
+      Object.assign(response.results.comparison.intervalResults[0], {
+        a: { computable: true, value: -7.25, unit: '%' },
+        b: { computable: true, value: 0, unit: '%' },
+        gap: { value: -7.25, unit: 'percentage points' },
+        unit: '%',
+        gapUnit: 'percentage points',
+      });
+      const stub = stubFetch([['/api/entities', { entities: [] }], ['/api/compare', response]]);
+      const view = renderCompare({ entityB: 'country:USA', operation: 'cagr', basisId: 'compare:cagr', yearC: 2005, yearB: null });
+      ctx = { ...view, stub };
+      await flushReact(act);
+      for (const type of ['Bar chart', 'Line chart']) {
+        const toggle = [...view.container.querySelectorAll('[aria-label="Chart type"] button')].find((button) => button.textContent === type);
+        expect(toggle).toBeTruthy();
+        act(() => toggle.click());
+        const surface = view.container.querySelector('svg[role="application"]');
+        expect(surface?.getAttribute('tabindex')).toBe('0');
+        await act(async () => {
+          surface.focus();
+          surface.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        });
+        const tooltip = view.container.querySelector('.recharts-tooltip-wrapper');
+        expect(tooltip?.textContent).toContain('-7.25%');
+        expect(tooltip?.textContent).toContain('0.00%');
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('labels segmented result table cells by their calculation units', async () => {
+    hydrateRegistry(DEFAULT_REGISTRY);
+    const response = payload({ partial: false });
+    response.operation = 'segmented_growth';
+    const comparison = response.results.comparison;
+    comparison.intervalResults = [];
+    comparison.unit = 'percentage points';
+    comparison.segments = {
+      AB: {
+        start: 2004, end: 2005,
+        a: { computable: true, value: -8.25, unit: '%' },
+        b: { computable: true, value: 0, unit: '%' },
+        gap: { value: -8.25, unit: 'percentage points' },
+      },
+      BC: {
+        start: 2005, end: 2006,
+        a: { computable: false, value: null, unit: '%' },
+        b: { computable: true, value: 3, unit: '%' },
+        gap: { value: null, unit: 'percentage points', reason: 'MISSING_REQUIRED_DATA' },
+      },
+    };
+    const stub = stubFetch([['/api/entities', { entities: [] }], ['/api/compare', response]]);
+    const view = renderCompare({ entityB: 'country:USA', operation: 'segmented_growth', basisId: 'compare:segmented_growth', yearC: 2006 });
+    ctx = { ...view, stub };
+    await flushReact(act);
+    const rows = view.container.querySelectorAll('[aria-label="Segmented growth"] tbody tr');
+    const values = [...rows].map((row) => [...row.querySelectorAll('td')].map((cell) => cell.textContent));
+    expect(values).toEqual([['-8.25%', '0.00%', '-8.25 percentage points'], ['—', '3.00%', '—']]);
+    expect(rows[1].lastElementChild.title).toBe('MISSING REQUIRED DATA');
   });
 
   it('renders Analysis → Metric → Basis → Comparison mode and all three year controls', async () => {

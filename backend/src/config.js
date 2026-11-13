@@ -18,13 +18,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** backend/ directory (the package root of this workspace). */
 export const BACKEND_ROOT = path.resolve(__dirname, '..');
 
-// Load backend/.env if present. Node >=20.12 provides process.loadEnvFile.
-// Absence of the file is fine: real environment variables take precedence and
-// the defaults below are used.
-try {
-  process.loadEnvFile(path.join(BACKEND_ROOT, '.env'));
-} catch {
-  // No .env file - fall back to defaults / real environment variables.
+// Tests configure their own fixtures and must not read a developer's .env.
+if (process.env.NODE_TEST_CONTEXT === undefined && process.env.NODE_ENV !== 'test') {
+  try {
+    process.loadEnvFile(path.join(BACKEND_ROOT, '.env'));
+  } catch {
+    // No .env file. Use the environment and defaults.
+  }
 }
 
 function str(name, fallback) {

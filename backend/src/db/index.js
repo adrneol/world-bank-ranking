@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@libsql/client';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import config, { BACKEND_ROOT } from '../config.js';
 import { queryExec } from './driver.js';
 
@@ -38,7 +38,7 @@ let dbDescriptor = null;
  * into the developer's working database.
  *
  * The test bootstrap (backend/test/isolation.js) redirects DATABASE_FILE to a
- * disposable per-process copy before `src/config.js` freezes the path. This
+ * disposable per-process fixture before `src/config.js` freezes the path. This
  * guard is the backstop for the case where that bootstrap did NOT run (for
  * example a single test file executed without the suite's --import hook):
  * the protected file is refused LOUDLY instead of being opened.
@@ -71,7 +71,7 @@ export function assertNotProtectedDatabase(file) {
     `Refusing to open the protected development database (${file}) in a test process. ` +
       'The repository database is a project artifact and must never be modified by tests. ' +
       'Run the suite with `npm test` (backend/package.json), which preloads ' +
-      'test/isolation.js and points DATABASE_FILE at a disposable copy, or set ' +
+      'test/isolation.js and points DATABASE_FILE at a disposable fixture, or set ' +
       'DATABASE_FILE to a disposable database yourself.',
   );
 }
@@ -209,7 +209,7 @@ export function getDb() {
   if (file !== ':memory:') {
     fs.mkdirSync(path.dirname(file), { recursive: true });
   }
-  db = createClient({ url: file === ':memory:' ? ':memory:' : `file:${file}` });
+  db = createClient({ url: file === ':memory:' ? ':memory:' : pathToFileURL(file).href });
   dbDescriptor = { mode: 'local', file };
   return db;
 }
@@ -270,7 +270,7 @@ export async function openExistingLocalDb() {
   try {
     if (file === ':memory:') return null;
     if (!fs.existsSync(file)) return null;
-    const handle = createClient({ url: `file:${file}` });
+    const handle = createClient({ url: pathToFileURL(file).href });
     await initDatabase(handle, { localFile: true });
     const count = await handle.execute('SELECT COUNT(*) AS n FROM observations');
     if (!count.rows[0] || Number(count.rows[0].n) === 0) {
@@ -300,7 +300,7 @@ export async function openExistingLocalDb() {
 export async function createMemoryDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-test-'));
   const file = path.join(dir, 'test.db');
-  const handle = createClient({ url: `file:${file.replace(/\\/g, '/')}` });
+  const handle = createClient({ url: pathToFileURL(file).href });
   await initDatabase(handle, { localFile: true });
   const origClose = handle.close.bind(handle);
   handle.close = () => {

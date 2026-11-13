@@ -64,6 +64,7 @@ function runChild(script, { env = {}, timeout = 30000 } = {}) {
       TURSO_DATABASE_URL: '',
       TURSO_AUTH_TOKEN: '',
       DB_MODE: 'local',
+      NODE_ENV: 'test',
       ...env,
     },
   });

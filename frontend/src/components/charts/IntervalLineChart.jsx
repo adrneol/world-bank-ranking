@@ -5,7 +5,7 @@ import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
 /** Line view for a small set of categorical interval results. */
-export default function IntervalLineChart({ entries = [], series = [], unit = null, decimals = 0 }) {
+export default function IntervalLineChart({ entries = [], series = [], unit = null, decimals = 0, formatTooltip = null }) {
   const narrow = useIsNarrowChart();
   if (entries.length === 0) return null;
   const colors = [CHART_COLORS.primary, CHART_COLORS.secondary];
@@ -24,7 +24,7 @@ export default function IntervalLineChart({ entries = [], series = [], unit = nu
             />
             <Tooltip
               labelFormatter={(label) => `Selected interval: ${label}`}
-              formatter={(value, name) => [formatChartValue(value, decimals), name]}
+              formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
               contentStyle={{ fontSize: 12 }}
             />
             {series.map((item, index) => (

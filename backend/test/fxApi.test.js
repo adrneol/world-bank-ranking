@@ -1,5 +1,5 @@
 /**
- * EXCHANGE RATE API TESTS (service + HTTP, read-only against stored vintage).
+ * EXCHANGE RATE API TESTS (service + HTTP, read-only against tracked fixtures).
  *
  * Verifies: 3 canonical bases (CAGR never a basis), endpoint-only periods,
  * t−1/t annual eligibility, LFL intersections, DESC competition, LOO median
@@ -10,10 +10,14 @@ import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDb } from '../src/db/index.js';
+import { closeDb, getDb } from '../src/db/index.js';
+import { seedConfiguredDatabase } from './helpers/configuredDb.js';
 import { queryGet } from '../src/db/driver.js';
 import { createApp } from '../src/server.js';
 import { buildFxMovement, listFxCountryGroups } from '../src/services/fxMovementService.js';
+
+test.before(seedConfiguredDatabase);
+test.after(closeDb);
 
 function app() {
   return createApp({ db: getDb(), autoRefresh: false });
@@ -62,26 +66,26 @@ test('Basis A: raw levels, never ranked/benchmarked', async () => {
   }
 });
 
-test('Basis B: annual change needs t−1 and t (India 2004 = 45.316/46.583 − 1)', async () => {
+test('Basis B: annual change needs t−1 and t (India 2004 = 45/43.5 − 1)', async () => {
   const db = getDb();
   const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_annual_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2003, 2004]);
-  const expected = (45.3164666666666 / 46.5832841666667 - 1) * 100;
+  const expected = (45 / 43.5 - 1) * 100;
   assert.ok(Math.abs(o.focus.value - expected) < 1e-9, `got ${o.focus.value}`);
   assert.equal(o.focus.gapUnit, 'percentage points');
 });
 
-test('Basis C: period change endpoints-only (India 2004→2014 ≈ +34.67%)', async () => {
+test('Basis C: period change endpoints-only (India 2004→2014 uses 45 and 60)', async () => {
   const db = getDb();
   const r = await buildFxMovement(db, { metricKey: 'fx_official', basis: 'fx_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2004, 2014]);
-  const expected = (61.0295144607843 / 45.3164666666666 - 1) * 100;
+  const expected = (60 / 45 - 1) * 100;
   assert.ok(Math.abs(o.focus.value - expected) < 1e-9, `got ${o.focus.value}`);
   // CAGR display-only secondary present, same ordering (no separate rank).
   assert.ok(o.focus.cagr !== undefined && o.focus.cagr !== null);
-  const cagrExpected = (Math.pow(61.0295144607843 / 45.3164666666666, 1 / 10) - 1) * 100;
+  const cagrExpected = (Math.pow(60 / 45, 1 / 10) - 1) * 100;
   assert.ok(Math.abs(o.focus.cagr - cagrExpected) < 1e-9);
 });
 

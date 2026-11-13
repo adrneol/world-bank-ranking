@@ -1,5 +1,5 @@
 /**
- * TRADE API TESTS (service + HTTP, read-only against stored vintage).
+ * TRADE API TESTS (service + HTTP, read-only against tracked fixtures).
  *
  * Verifies: 4+4 basis validation, inclusive S..E vs endpoint semantics,
  * CAGR gates, Observed/LFL universes, DESC competition ranking, LOO
@@ -11,10 +11,14 @@ import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDb } from '../src/db/index.js';
+import { closeDb, getDb } from '../src/db/index.js';
+import { seedConfiguredDatabase } from './helpers/configuredDb.js';
 import { queryGet } from '../src/db/driver.js';
 import { createApp } from '../src/server.js';
 import { buildTradeMovement, listTradeCountryGroups } from '../src/services/tradeMovementService.js';
+
+test.before(seedConfiguredDatabase);
+test.after(closeDb);
 
 function app() {
   return createApp({ db: getDb(), autoRefresh: false });

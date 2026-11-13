@@ -1,5 +1,5 @@
 /**
- * POPULATION API TESTS (service + HTTP, read-only against stored vintage).
+ * POPULATION API TESTS (service + HTTP, read-only against tracked fixtures).
  *
  * Verifies: 3 canonical bases (CAGR never a basis), endpoint-only periods,
  * stock never summed, Observed/LFL endpoint intersections, DESC competition,
@@ -10,10 +10,14 @@ import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDb } from '../src/db/index.js';
+import { closeDb, getDb } from '../src/db/index.js';
+import { seedConfiguredDatabase } from './helpers/configuredDb.js';
 import { createApp } from '../src/server.js';
 import { buildPopulationMovement, listPopulationCountryGroups } from '../src/services/populationMovementService.js';
 import { queryGet } from '../src/db/driver.js';
+
+test.before(seedConfiguredDatabase);
+test.after(closeDb);
 
 function app() {
   return createApp({ db: getDb(), autoRefresh: false });
@@ -63,12 +67,12 @@ test('Annual (India): raw stock, DESC rank, mean people gap', async () => {
   }
 });
 
-test('Change uses endpoints only: 1312277191 − 1135991513 = 176285678', async () => {
+test('Change uses endpoints only: 1,270,000,000 − 1,100,000,000 = 170,000,000', async () => {
   const db = getDb();
   const r = await buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_change', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
   assert.deepEqual(o.requiredYears, [2004, 2014]);
-  assert.ok(Math.abs(o.focus.value - 176285678) < 1, `got ${o.focus.value}`);
+  assert.ok(Math.abs(o.focus.value - 170_000_000) < 1, `got ${o.focus.value}`);
   assert.equal(o.focus.gapUnit, 'people');
 });
 
@@ -76,9 +80,9 @@ test('Growth uses endpoints only with CAGR secondary (same rank, no separate bas
   const db = getDb();
   const r = await buildPopulationMovement(db, { metricKey: 'population_total', basis: 'pop_period_growth', yearA: 2004, yearB: 2014, focusIso3: 'IND' });
   const o = r.observed[0];
-  const expected = (1312277191 / 1135991513 - 1) * 100;
+  const expected = (1_270_000_000 / 1_100_000_000 - 1) * 100;
   assert.ok(Math.abs(o.focus.value - expected) < 1e-9, `got ${o.focus.value}`);
-  const cagrExpected = (Math.pow(1312277191 / 1135991513, 1 / 10) - 1) * 100;
+  const cagrExpected = (Math.pow(1_270_000_000 / 1_100_000_000, 1 / 10) - 1) * 100;
   assert.ok(Math.abs(o.focus.cagr - cagrExpected) < 1e-9, 'CAGR display present');
   assert.equal(o.focus.gapUnit, 'percentage points');
 });

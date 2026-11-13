@@ -1,5 +1,5 @@
 /**
- * PRICES API TESTS (service + HTTP, read-only against stored vintage).
+ * PRICES API TESTS (service + HTTP, read-only against tracked fixtures).
  *
  * Verifies: basis validation, S+1..E vs endpoint semantics, Observed/LFL
  * universes, competition ranking, leave-one-out benchmark, group filter
@@ -10,9 +10,13 @@ import './isolation.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getDb } from '../src/db/index.js';
+import { closeDb, getDb } from '../src/db/index.js';
+import { seedConfiguredDatabase } from './helpers/configuredDb.js';
 import { createApp } from '../src/server.js';
 import { buildPricesMovement, listPriceCountryGroups } from '../src/services/pricesMovementService.js';
+
+test.before(seedConfiguredDatabase);
+test.after(closeDb);
 
 function app() {
   return createApp({ db: getDb(), autoRefresh: false });
@@ -66,9 +70,8 @@ test('CPI Index period change 2004→2024 (India, full precision)', async () => 
   assert.equal(r.kind, 'period');
   const obs = r.observed[0];
   assert.equal(obs.period, '2004→2024');
-  assert.ok(obs.focus.value > 250 && obs.focus.value < 270, `got ${obs.focus.value}`);
-  // Full-precision check against raw DB values (63.3536 / 227.6032).
-  assert.ok(Math.abs(obs.focus.value - 259.2584183) < 0.01, `got ${obs.focus.value}`);
+  const expected = (227.603278134168 / 60 - 1) * 100;
+  assert.ok(Math.abs(obs.focus.value - expected) < 1e-9, `got ${obs.focus.value}`);
   assert.ok(obs.focus.rank >= 1 && obs.focus.rank <= obs.eligibleCount);
   // Benchmark excludes focus: recompute from ranking list.
   const others = obs.ranking.filter((x) => x.iso3 !== 'IND').map((x) => x.value);
@@ -94,7 +97,7 @@ test('CPI annual basis carries no rank (unranked by design)', async () => {
 
 // ---------- CPI Inflation average + cumulative ----------
 
-test('CPI Inflation average 2004→2014 ≈ 8.27% (full precision)', async () => {
+test('CPI Inflation average 2004→2014 is 8.2% on the fixture (full precision)', async () => {
   const db = getDb();
   const r = await buildPricesMovement(db, {
     metricKey: 'inflation_cpi',
@@ -104,7 +107,7 @@ test('CPI Inflation average 2004→2014 ≈ 8.27% (full precision)', async () =>
     focusIso3: 'IND',
   });
   const obs = r.observed[0];
-  assert.ok(Math.abs(obs.focus.value - 8.2711) < 0.02, `got ${obs.focus.value}`);
+  assert.ok(Math.abs(obs.focus.value - 8.2) < 1e-9, `got ${obs.focus.value}`);
 });
 
 test('CPI Inflation cumulative 2004→2014 ≈ CPI period change (validation relationship)', async () => {

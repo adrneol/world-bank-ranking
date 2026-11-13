@@ -18,7 +18,7 @@ process.env.WB_RETRY_BASE_MS = '20';
 let stub = null;
 
 test.before(async () => {
-  stub = await startStubWorldBank({});
+  stub = await startStubWorldBank({ inProcess: true });
   useStubBaseUrl(stub.baseUrl);
 });
 
