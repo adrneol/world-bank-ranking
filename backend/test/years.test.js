@@ -225,7 +225,9 @@ test('6. successful publish advances the generation and refreshes years', async 
     stub.reset();
     rowsTransform = (metricKey, baseRows) => {
       if (metricKey !== 'nominal_current') return baseRows;
-      return [...baseRows, { date: '2026', value: '9999.99', countryiso3code: 'IND' }];
+      const india = baseRows.find(row => row.countryiso3code === 'IND');
+      assert.ok(india, 'the fixture supplies an India row with canonical indicator identity');
+      return [...baseRows, { ...india, date: '2026', value: '9999.99' }];
     };
     const changed = await refreshData({ db, startYear: 2024, endYear: 2026, trigger: 'test-years-change' });
     assert.equal(changed.status, 'success');

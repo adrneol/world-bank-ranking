@@ -459,7 +459,7 @@ export const api = {
       options,
     ),
   populationGroups: (options) => get('/api/population/country-groups', {}, options),
-  dataStatus: (options) => get('/api/data-status', {}, options),
+  dataStatus: (options) => get('/api/data-status', {}, { ...options, passive: true }),
   integrity: (options) => get('/api/integrity', {}, options),
   // Default-country geolocation (Phase 3 UX default only): resolves the
   // requester's eligible ISO3 once, or null when unavailable. Transport

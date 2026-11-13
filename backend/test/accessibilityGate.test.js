@@ -38,7 +38,7 @@ test('SearchableSelect keeps its accessible contract (Phase-3 preservation)', ()
     controls.includes("event.key === 'Escape' && open"),
     'Escape closes from the trigger button',
   );
-  assert.ok(controls.includes('buttonRef.current?.focus()'), 'focus returns to the trigger');
+  assert.ok(controls.includes('buttonRef.current?.focus({ preventScroll: true })'), 'focus returns to the trigger without jumping');
   // Phase-3 architecture must not have been restored to inline popovers.
   assert.ok(controls.includes('createPortal'), 'portal rendering retained');
   assert.ok(read('components/popover.js').includes('computePopoverPlacement'), 'flip placement retained');

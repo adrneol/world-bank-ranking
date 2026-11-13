@@ -907,7 +907,9 @@ export default function Compare({
   // WEIGHTED_RATIO (resolved from legs) only.
   const groupOffered = supportsGroupValues(canonicalMetricKey);
 
-  const aggregatesQuery = useApi((signal) => api.entities({ type: 'aggregate', pageSize: 200 }, { signal }), 'compare:aggregates', {});
+  const aggregatesQuery = useApi((signal) => api.entities({ type: 'aggregate', pageSize: 200 }, {
+    signal, recover: true, passive: true, timeoutMs: 12000,
+  }), 'compare:aggregates');
   const aggregates = aggregatesQuery.data?.entities ?? [];
 
   // Every visible selection is sent when the chosen analysis can use it.
@@ -944,7 +946,7 @@ export default function Compare({
           operation: effectiveOperation,
           groupMode,
         },
-        { signal },
+        { signal, recover: true, passive: true, timeoutMs: 12000 },
       ),
     depsKey,
     { enabled: canFetch },

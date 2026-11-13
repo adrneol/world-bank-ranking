@@ -382,8 +382,8 @@ async function startStatusServer(db) {
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
     base,
-    async status() {
-      const res = await fetch(`${base}/api/data-status`);
+    async status(path = '/api/data-status') {
+      const res = await fetch(base + path);
       assert.equal(res.status, 200);
       return res.json();
     },
@@ -392,6 +392,27 @@ async function startStatusServer(db) {
     },
   };
 }
+
+test('public and passive status verify a cold generation without persisting integrity metadata', async () => {
+  const { db, repository } = await seedDb();
+  const svc = await startStatusServer(db);
+  try {
+    const before = await repository.getDatasetState(db);
+    assert.equal(before.integrityVerifiedContentVersion, null);
+    const publicStatus = await svc.status('/api/public/data-status');
+    const passiveStatus = await svc.status('/api/data-status?readOnly=1');
+    assert.equal(publicStatus.integrity.passed, true);
+    assert.deepEqual(passiveStatus.integrity, publicStatus.integrity);
+    assert.equal((await svc.status('/api/integrity')).passed, true);
+    assert.deepEqual(await repository.getDatasetState(db), before);
+    const regularStatus = await svc.status();
+    assert.deepEqual(regularStatus.integrity, publicStatus.integrity);
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, before.contentVersion);
+  } finally {
+    await svc.close();
+    db.close();
+  }
+});
 
 test('status serves metadata fingerprint + years + merged integrity, marks verified', async () => {
   const { db, repository } = await seedDb();

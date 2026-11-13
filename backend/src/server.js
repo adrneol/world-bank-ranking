@@ -41,7 +41,6 @@ import {
   countAllCountries,
   countEligibleCountries,
   countObservations,
-  EXPENSIVE_CHECK_NAMES,
   getCountry,
   getDatasetFingerprint,
   getDatasetState,
@@ -784,7 +783,8 @@ function httpError(status, message, code = null) {
 
 function parseYear(value, name) {
   if (value === undefined || value === null || value === '') return undefined;
-  const n = Number.parseInt(String(value), 10);
+  const n = typeof value === 'number' ? value
+    : typeof value === 'string' && /^\d{4}$/.test(value) ? Number(value) : NaN;
   const thisYear = new Date().getFullYear();
   if (!Number.isInteger(n) || n < 1960 || n > thisYear + 1) {
     throw httpError(400, `Invalid ${name}: expected an integer year between 1960 and ${thisYear + 1}.`, 'INVALID_YEAR');
@@ -1067,6 +1067,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     }
     if (!previous && publicBudgets.size >= 2048) publicBudgets.delete(publicBudgets.keys().next().value);
     publicBudgets.set(key, { minute, count: count + 1 });
+    req.publicCatalogRead = true;
     next();
   };
   const publicRead = (path, handler) => {
@@ -1455,7 +1456,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- Prices country-group discovery (dynamic, no hardcoding) ----------
-  app.get('/api/prices/country-groups', ah(async (req, res) => {
+  publicRead('/api/prices/country-groups', ah(async (req, res) => {
     const result = await listPriceCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -1516,7 +1517,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- Trade country-group discovery (dynamic, no hardcoding) ----------
-  app.get('/api/trade/country-groups', ah(async (req, res) => {
+  publicRead('/api/trade/country-groups', ah(async (req, res) => {
     const result = await listTradeCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -1577,7 +1578,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- Capital Flow country-group discovery (dynamic, no hardcoding) ----------
-  app.get('/api/capital/country-groups', ah(async (req, res) => {
+  publicRead('/api/capital/country-groups', ah(async (req, res) => {
     const result = await listCapitalCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -1638,7 +1639,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- Exchange Rate country-group discovery (dynamic, no hardcoding) ----------
-  app.get('/api/fx/country-groups', ah(async (req, res) => {
+  publicRead('/api/fx/country-groups', ah(async (req, res) => {
     const result = await listFxCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -1699,7 +1700,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- External Sector country-group discovery (dynamic, no hardcoding) ----------
-  app.get('/api/external/country-groups', ah(async (req, res) => {
+  publicRead('/api/external/country-groups', ah(async (req, res) => {
     const result = await listExternalCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -1760,7 +1761,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   }));
 
   // ---------- Population country-group discovery (dynamic, no hardcoding) ----------
-  app.get('/api/population/country-groups', ah(async (req, res) => {
+  publicRead('/api/population/country-groups', ah(async (req, res) => {
     const result = await listPopulationCountryGroups(handle());
     res.json({ ...result, methodology: methodologyBlock() });
   }));
@@ -2036,7 +2037,8 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
         // Record that this exact content generation passed, conditional on
         // the version being unchanged since the verification ran. Best
         // effort: never break the status response.
-        if (!expensive.fromCache && passed) {
+        const canPersist = !req.publicCatalogRead && req.query.readOnly !== '1';
+        if (canPersist && passed && (!expensive.fromCache || state.integrityVerifiedContentVersion !== state.contentVersion)) {
           try {
             await markIntegrityVerified(h, state.contentVersion, expensive.report.checks);
           } catch {
@@ -2172,22 +2174,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
 
   // ---------- integrity ----------
   app.get('/api/integrity', ah(async (req, res) => {
-    const h = handle();
-    const report = await runIntegrityChecks(h);
-    // An explicit on-demand validation that passes records the verified
-    // content generation (conditional on the version being unchanged since
-    // the scan). Best effort; the report itself is unaffected.
-    if (report.passed) {
-      try {
-        const state = await getDatasetState(h);
-        if (state) {
-          const expensive = report.checks.filter((c) => EXPENSIVE_CHECK_NAMES.includes(c.check));
-          await markIntegrityVerified(h, state.contentVersion, expensive);
-        }
-      } catch {
-        // Diagnostic write only.
-      }
-    }
+    const report = await runIntegrityChecks(handle());
     res.json({ ...report, methodology: methodologyBlock() });
   }));
 

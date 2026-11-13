@@ -341,7 +341,7 @@ test('3/9/19. transport failure on GET fails over; fallback serves; status repor
     assert.equal(getActiveDbInfo().provider, 'sqlite');
     assert.equal(getActiveDbInfo().isFallback, true);
     // Further analytical GETs serve from fallback; validation runs once.
-    for (const path of ['/api/countries', '/api/indicators', '/api/data-status']) {
+    for (const path of ['/api/countries', '/api/indicators', '/api/data-status', '/api/public/years', '/api/public/data-status']) {
       const res = await fetch(`${base}${path}`);
       assert.equal(res.status, 200, path);
     }
@@ -928,7 +928,7 @@ test('8L-logs: failover emits the full terminal state sequence', async () => {
     assert.equal(outcome.failedOver, true);
     const text = lines.join('\n');
     assert.ok(text.includes('Primary database unavailable: Turso (production)'), 'unavailable line');
-    assert.ok(text.includes('Reason: SERVER_ERROR: Server returned HTTP status 503'), 'reason line');
+    assert.ok(text.includes('Reason: transport failure detected'), 'sanitized reason line');
     assert.ok(text.includes('Fallback enabled: yes'), 'policy line');
     assert.ok(text.includes('Valid local backup found: yes'), 'validation line');
     assert.ok(text.includes('Switching to: Local SQLite (production fallback)'), 'switch line');

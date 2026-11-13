@@ -125,6 +125,36 @@
       "/api/public/data-status",
       "Serving data and source freshness",
       "Use the reported vintage, check time and publication time for their separate meanings."
+    ],
+    [
+      "/api/public/prices/country-groups",
+      "prices Movement group filters",
+      "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
+    ],
+    [
+      "/api/public/trade/country-groups",
+      "trade Movement group filters",
+      "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
+    ],
+    [
+      "/api/public/capital/country-groups",
+      "capital Movement group filters",
+      "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
+    ],
+    [
+      "/api/public/fx/country-groups",
+      "fx Movement group filters",
+      "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
+    ],
+    [
+      "/api/public/external/country-groups",
+      "external Movement group filters",
+      "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
+    ],
+    [
+      "/api/public/population/country-groups",
+      "population Movement group filters",
+      "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
     ]
   ]
 }

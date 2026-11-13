@@ -74,6 +74,6 @@ test('Phase 7C-4.4: tooltips keep full precision; ticks may compact', () => {
   assert.equal(formatChartValue(0.721648483526777, 2), '0.72');
   assert.equal(formatChartValue(83.669281580941, 2), '83.67');
   assert.equal(formatChartValue(null, 2), '—');
-  assert.equal(formatTickValue(3956067115771.63, 0), '4.0T');
+  assert.equal(formatTickValue(3956067115771.63, 0), '4T');
   assert.equal(formatTickValue(2.43, 2), '2.43');
 });

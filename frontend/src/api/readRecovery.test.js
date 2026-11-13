@@ -26,7 +26,7 @@ describe('bounded read recovery', () => {
     expect(calls).toBe(2);
   });
 
-  it.each([[401, 1], [503, 4]])('ends HTTP %s after %s attempts', async (status, attempts) => {
+  it.each([[401, 1], [403, 1], [429, 1], [503, 4]])('ends HTTP %s after %s attempts', async (status, attempts) => {
     vi.useFakeTimers();
     stub = stubFetch([['/api/data-status', () => errorResponse(status, 'ERROR', 'Unavailable')]]);
     const result = api.dataStatus({ recover: true }).catch(error => error);

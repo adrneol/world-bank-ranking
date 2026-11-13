@@ -45,7 +45,7 @@ test('a hung backend produces a retryable TIMEOUT error, not a pending promise',
   const { api } = await import('../../frontend/src/api/client.js');
   await assert.rejects(api.dataStatus({ timeoutMs: 50 }), (error) => {
     assert.equal(error?.code, 'TIMEOUT');
-    assert.match(error?.message ?? '', /longer than expected/);
+    assert.match(error?.message ?? '', /did not respond in time/);
     return true;
   });
 });
