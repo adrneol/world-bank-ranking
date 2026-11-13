@@ -968,6 +968,20 @@ export async function getCountryObservationsRange(db, indicatorId, iso3, startYe
   );
 }
 
+/** Bounded country history, with a predecessor only for the real GDP leg. */
+export async function getFocusHistoryRows(db, country, metricKeys, startYear, endYear, needsPredecessor) {
+  const selectors = metricKeys.map(() => '?').join(', ');
+  return queryAll(db, `
+    SELECT i.metric_key AS metricKey, i.code, o.year, o.value, o.value_raw AS valueRaw,
+           o.wb_last_updated AS vintage
+      FROM indicators i
+      JOIN observations o ON o.indicator_id = i.id
+     WHERE i.metric_key IN (${selectors}) AND o.country_id = ?
+       AND o.year BETWEEN CASE WHEN ? AND i.metric_key = 'total_constant' THEN ? ELSE ? END AND ?
+     ORDER BY i.metric_key, o.year
+  `, [...metricKeys, country, Number(needsPredecessor), startYear - 1, startYear, endYear]);
+}
+
 /** How many eligible entities hold a valid value for indicator+year. */
 export async function countEligibleObservations(db, indicatorId, year) {
   const row = await queryGet(

@@ -78,8 +78,10 @@ export function SearchableSelect({
   const rootRef = useRef(null);
   const buttonRef = useRef(null);
   const inputRef = useRef(null);
+  const listRef = useRef(null);
   const popoverRef = useRef(null);
   const listId = useId();
+  const valueId = useId();
   // Flatten once per options identity: option arrays are rebuilt by callers,
   // so every derived list below reads this single memoized flattening
   // instead of re-walking the tree on each render.
@@ -103,6 +105,7 @@ export function SearchableSelect({
   const showFilter = searchable && fullOptionCount > minFilter;
 
   function closeMenu() {
+    setQuery('');
     setOpen(false);
     setPlacement(null);
   }
@@ -121,9 +124,8 @@ export function SearchableSelect({
   function commit(item) {
     if (!item || item.disabled) return;
     closeMenu();
-    setQuery('');
     if (item.value !== value) onChange?.(item.value);
-    buttonRef.current?.focus();
+    buttonRef.current?.focus({ preventScroll: true });
   }
 
   // Measure the trigger and place the popover before paint (no flash), then
@@ -205,12 +207,12 @@ export function SearchableSelect({
 
   // Focus the filter box on open (after the portalled popover has mounted).
   useEffect(() => {
-    if (open && placement) inputRef.current?.focus();
+    if (open && placement) (inputRef.current ?? listRef.current)?.focus({ preventScroll: true });
   }, [open, placement]);
 
   function move(delta) {
     if (navigable.length === 0) return;
-    setActiveIndex((prev) => (prev + delta + navigable.length) % navigable.length);
+    setActiveIndex((prev) => (Math.min(prev, navigable.length - 1) + delta + navigable.length) % navigable.length);
   }
 
   function handleListKeyDown(event) {
@@ -226,13 +228,16 @@ export function SearchableSelect({
     } else if (event.key === 'End') {
       event.preventDefault();
       setActiveIndex(navigable.length - 1);
-    } else if (event.key === 'Enter') {
+    } else if (event.key === 'Enter' || (event.key === ' ' && event.currentTarget === listRef.current)) {
       event.preventDefault();
-      commit(navigable[safeIndex] ?? null);
+      commit(navigable[safeIndex]?.item);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       closeMenu();
-      buttonRef.current?.focus();
+      buttonRef.current?.focus({ preventScroll: true });
+    } else if (event.key === 'Tab') {
+      closeMenu();
+      buttonRef.current?.focus({ preventScroll: true });
     }
   }
 
@@ -243,7 +248,13 @@ export function SearchableSelect({
   useEffect(() => {
     if (!open || !activeId) return;
     if (!placement) return;
-    document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' });
+    const list = listRef.current;
+    const option = document.getElementById(activeId);
+    if (!list || !option) return;
+    const viewport = list.getBoundingClientRect();
+    const row = option.getBoundingClientRect();
+    if (row.top < viewport.top) list.scrollTop -= viewport.top - row.top;
+    if (row.bottom > viewport.bottom) list.scrollTop += row.bottom - viewport.bottom;
   }, [open, activeId, placement]);
 
   const portalNode = open ? getComboPortal() : null;
@@ -271,22 +282,28 @@ export function SearchableSelect({
             ref={inputRef}
             type="search"
             className="combo-filter"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-activedescendant={activeId}
+            aria-autocomplete="list"
             value={query}
             placeholder="Type to filter…"
             aria-label={`Filter ${typeof label === 'string' ? label : 'options'}`}
             autoComplete="off"
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
             onKeyDown={handleListKeyDown}
           />
         ) : null}
         <ul
+          ref={listRef}
           className="combo-list"
           role="listbox"
           id={listId}
-          aria-activedescendant={activeId}
-          aria-label={typeof label === 'string' ? label : undefined}
+          aria-activedescendant={showFilter ? undefined : activeId}
+          aria-label={ariaLabel ?? (typeof label === 'string' ? label : undefined)}
           tabIndex={showFilter ? undefined : 0}
-          onKeyDown={showFilter ? undefined : handleListKeyDown}
+          onKeyDown={handleListKeyDown}
         >
           {rows.length === 0 ? (
             <li className="combo-empty" role="presentation">
@@ -317,7 +334,7 @@ export function SearchableSelect({
                   </li>
                 );
               }
-              const navIndex = navigable.indexOf(item);
+              const navIndex = navigable.indexOf(row);
               const active = navIndex === safeIndex;
               const selectedRow = item.value === value;
               return (
@@ -336,6 +353,7 @@ export function SearchableSelect({
                     event.preventDefault();
                     commit(item);
                   }}
+                  onClick={(event) => { if (event.detail === 0) commit(item); }}
                   onMouseEnter={() => setActiveIndex(navIndex)}
                 >
                   <span className="combo-label">{item.label}</span>
@@ -364,6 +382,8 @@ export function SearchableSelect({
           className="combo-button"
           aria-haspopup="listbox"
           aria-expanded={open}
+          aria-controls={open && popoverReady ? listId : undefined}
+          aria-describedby={selected ? valueId : undefined}
           aria-label={ariaLabel ?? (typeof label === 'string' ? label : undefined)}
           disabled={disabled}
           onClick={() => {
@@ -382,7 +402,7 @@ export function SearchableSelect({
             }
           }}
         >
-          <span className="combo-value">{selected ? selected.label : <span className="muted">{placeholder}</span>}</span>
+          <span className="combo-value" id={valueId}>{selected ? selected.label : placeholder}</span>
           <span className="combo-chevron" aria-hidden="true">
             ▾
           </span>

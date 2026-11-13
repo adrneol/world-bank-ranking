@@ -17,7 +17,8 @@
 
 import { api } from '../api/client.js';
 import ChartCard from '../components/charts/ChartCard.jsx';
-import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
+import AnnualChart from '../components/charts/AnnualChart.jsx';
+import { AnalyticalTable, MeasurementHeading } from '../components/AnalyticalTable.jsx';
 import { metricCapabilities, metricDecimals, metricLabel, metricTitle } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal, formatYoy } from '../utils/format.js';
@@ -87,16 +88,16 @@ function RatePanel({ metricKey, country, focusName, startYear, endYear, realSubj
         {focusName} annual inflation beside annual real GDP growth (constant-price GDP year-over-year change).
         Read across a row for one year; read down a column for history.
       </p>
-      <div className="table-scroll" role="region" aria-label="Inflation and real growth by year" tabIndex={0}>
+      <AnalyticalTable label="Inflation and real growth by year">
         <table className="table table-compact">
           <thead>
             <tr>
               <th scope="col">Year</th>
               <th scope="col" className="num">
-                {metricLabel(metricKey)} (%)
+                <MeasurementHeading label={metricLabel(metricKey)} unit="annual %" />
               </th>
               <th scope="col" className="num">
-                Real GDP growth (%)
+                <MeasurementHeading label="Real GDP growth" unit="annual % · derived" />
               </th>
             </tr>
           </thead>
@@ -114,7 +115,7 @@ function RatePanel({ metricKey, country, focusName, startYear, endYear, realSubj
             })}
           </tbody>
         </table>
-      </div>
+      </AnalyticalTable>
       <p>
         Change {startYear} → {endYear}:
       </p>
@@ -124,7 +125,7 @@ function RatePanel({ metricKey, country, focusName, startYear, endYear, realSubj
         unit="annual %"
         summary={`${focusName} ${title} by year; the table above lists every value`}
       >
-        <TimeSeriesChart
+        <AnnualChart
           series={[{ label: title, points: years.map((year) => ({ x: year, y: rateRows.get(year)?.indiaValue ?? null })) }]}
           unit="annual %"
           decimals={metricDecimals(metricKey)}
@@ -152,7 +153,7 @@ function IndexPanel({ metricKey, country, focusName, startYear, endYear }) {
   if (index.error || change.error) {
     return <UnavailableState reason="index data could not be loaded" hint="Retry or pick another period." />;
   }
-  const rows = (index.data?.rows ?? []).filter((r) => r[metricKey]?.available);
+  const rows = index.data?.rows ?? [];
   const pt = change.data?.results?.comparison;
   return (
     <div className="insight" aria-label={`${title} change`}>
@@ -170,7 +171,7 @@ function IndexPanel({ metricKey, country, focusName, startYear, endYear }) {
           unit="index points (2010 = 100)"
           summary={`${focusName} ${title} by year; within-entity movement only, never a cross-country rank`}
         >
-          <TimeSeriesChart
+          <AnnualChart
             series={[{ label: title, points: (index.data?.rows ?? []).map((r) => ({ x: r.year, y: r[metricKey]?.available ? r[metricKey].indiaValue : null })) }]}
             unit="index points"
             decimals={metricDecimals(metricKey)}
@@ -178,13 +179,13 @@ function IndexPanel({ metricKey, country, focusName, startYear, endYear }) {
         </ChartCard>
       ) : null}
       {rows.length > 0 ? (
-        <div className="table-scroll" role="region" aria-label="Index by year" tabIndex={0}>
+        <AnalyticalTable label="Index by year">
           <table className="table table-compact">
             <thead>
               <tr>
                 <th scope="col">Year</th>
                 <th scope="col" className="num">
-                  Index (2010 = 100)
+                  <MeasurementHeading label="CPI index" unit="2010 = 100" />
                 </th>
               </tr>
             </thead>
@@ -192,12 +193,12 @@ function IndexPanel({ metricKey, country, focusName, startYear, endYear }) {
               {rows.map((r) => (
                 <tr key={r.year}>
                   <th scope="row">{r.year}</th>
-                  <td className="num">{r[metricKey].indiaValueDisplay?.formatted ?? formatDecimal(r[metricKey].indiaValue, metricDecimals(metricKey))}</td>
+                  <td className="num">{r[metricKey]?.available ? (r[metricKey].indiaValueDisplay?.formatted ?? formatDecimal(r[metricKey].indiaValue, metricDecimals(metricKey))) : <span aria-label="Missing observation">—</span>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </AnalyticalTable>
       ) : null}
       <MethodologyPanel
         indicatorCode={index.data?.metricInfo?.[metricKey]?.indicatorCode}
@@ -215,8 +216,8 @@ function FxPanel({ metricKey, country, focusName, startYear, endYear, onCompareE
   if (fx.error) {
     return <UnavailableState reason="exchange-rate data could not be loaded" hint="Retry or pick another period." />;
   }
-  const rows = (fx.data?.rows ?? []).filter((r) => r[metricKey]?.available);
-  const latest = rows[rows.length - 1]?.[metricKey] ?? null;
+  const rows = fx.data?.rows ?? [];
+  const latest = rows.findLast((row) => row[metricKey]?.available)?.[metricKey] ?? null;
   return (
     <div className="insight" aria-label={`${title} movement`}>
       <h3>{title}</h3>
@@ -232,16 +233,16 @@ function FxPanel({ metricKey, country, focusName, startYear, endYear, onCompareE
         </p>
       ) : null}
       {rows.length > 0 ? (
-        <div className="table-scroll" role="region" aria-label="Quoted rate by year" tabIndex={0}>
+        <AnalyticalTable label="Quoted rate by year">
           <table className="table table-compact">
             <thead>
               <tr>
                 <th scope="col">Year</th>
                 <th scope="col" className="num">
-                  LCU per US$
+                  <MeasurementHeading label="Official exchange rate" unit="LCU per US$ · period average" />
                 </th>
                 <th scope="col" className="num">
-                  Annual movement
+                  <MeasurementHeading label="Annual movement" unit="% · derived" />
                 </th>
               </tr>
             </thead>
@@ -249,13 +250,13 @@ function FxPanel({ metricKey, country, focusName, startYear, endYear, onCompareE
               {rows.map((r) => (
                 <tr key={r.year}>
                   <th scope="row">{r.year}</th>
-                  <td className="num">{r[metricKey].indiaValueDisplay?.formatted ?? formatDecimal(r[metricKey].indiaValue, metricDecimals(metricKey))}</td>
-                  <td className="num">{formatYoy(r[metricKey].indiaYoY, r[metricKey].indiaYoYDisplay)}</td>
+                  <td className="num">{r[metricKey]?.available ? (r[metricKey].indiaValueDisplay?.formatted ?? formatDecimal(r[metricKey].indiaValue, metricDecimals(metricKey))) : <span aria-label="Missing observation">—</span>}</td>
+                  <td className="num">{formatYoy(r[metricKey]?.indiaYoY, r[metricKey]?.indiaYoYDisplay)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </AnalyticalTable>
       ) : null}
       {(fx.data?.rows ?? []).length > 0 ? (
         <ChartCard
@@ -263,7 +264,7 @@ function FxPanel({ metricKey, country, focusName, startYear, endYear, onCompareE
           unit="LCU per US$"
           summary={`${focusName} quoted rate by year; a rise is depreciation, a fall is appreciation`}
         >
-          <TimeSeriesChart
+          <AnnualChart
             series={[{ label: title, points: (fx.data?.rows ?? []).map((r) => ({ x: r.year, y: r[metricKey]?.available ? r[metricKey].indiaValue : null })) }]}
             unit="LCU per US$"
             decimals={metricDecimals(metricKey)}

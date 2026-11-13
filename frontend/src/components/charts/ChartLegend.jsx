@@ -12,20 +12,22 @@
  * second series stays distinguishable without color alone.
  */
 
-export default function ChartLegend({ items }) {
+import AnnualSeriesMarker from './AnnualSeriesMarker.jsx';
+
+export default function ChartLegend({ items, type }) {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
     <ul className="chart-legend-html" aria-label="Chart legend">
       {items.map((item, index) => (
         <li key={`${item?.label ?? 'series'}-${index}`} className="chart-legend-item">
-          <span
+          {type ? <AnnualSeriesMarker type={type} {...item} /> : <span
             className="chart-legend-swatch"
             aria-hidden="true"
             style={{
               borderTopColor: item?.color ?? '#101828',
               borderTopStyle: item?.dashed ? 'dashed' : 'solid',
             }}
-          />
+          />}
           <span>{item?.label ?? `Series ${index + 1}`}</span>
         </li>
       ))}

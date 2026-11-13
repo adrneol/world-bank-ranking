@@ -16,7 +16,7 @@
 
 import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
-import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
+import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { isPricesMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -946,7 +946,7 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
               unit={unit}
               source="World Bank WDI; calculated by this application"
             >
-              <BarComparisonChart entries={observedChart.entries} series={series} unit={unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={observedChart.entries} series={series} unit={unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 
@@ -961,7 +961,7 @@ export default function PricesMovement({ availableYears, yearA, yearB, yearMid =
               unit={unit}
               source="World Bank WDI; calculated by this application"
             >
-              <BarComparisonChart entries={lflChart.entries} series={series} unit={unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={lflChart.entries} series={series} unit={unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 

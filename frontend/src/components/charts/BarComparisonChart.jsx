@@ -15,44 +15,53 @@
  */
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { toBarEntries } from './chartData.js';
+import { useId } from 'react';
+import { plotMinWidth, toBarEntries } from './chartData.js';
 import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
-import { formatChartValue, formatTickValue } from './chartFormat.js';
+import { formatChartValue, formatTickValue, isPercentageUnit } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
+import { AnnualPercentagePattern } from './AnnualSeriesMarker.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
 export default function BarComparisonChart({ entries = [], series = null, unit = null, decimals = 0, formatTooltip = null, tickUnit = unit, height = null, scrollable = false }) {
   const narrow = useIsNarrowChart();
+  const pattern = useId();
   // Two shapes: single-series entries [{name, value}] or grouped rows
   // [{x, a, b}] with series [{key, label}] for A-vs-B comparisons.
   const isGrouped = Array.isArray(series) && series.length > 0;
   const single = isGrouped ? [] : toBarEntries(entries);
   const rows = isGrouped ? entries : single;
   if (rows.length === 0) return null;
-  const fills = [CHART_COLORS.primary, CHART_COLORS.secondary];
+  const fills = [CHART_COLORS.primary, CHART_COLORS.secondary, CHART_COLORS.tertiary];
+  const percentage = isPercentageUnit(unit);
+  const fillFor = index => percentage ? `url(#${pattern}-${index % fills.length})` : fills[index % fills.length];
   const legendItems = isGrouped
-    ? series.map((s, i) => ({ label: s.label ?? s.key, color: fills[i % fills.length], dashed: false }))
+    ? series.map((s, i) => ({ label: s.label ?? s.key, color: fills[i % fills.length], percentage }))
     : null;
   return (
     <>
       <div className={scrollable ? 'chart-plot-scroll' : undefined} role={scrollable ? 'region' : undefined} aria-label={scrollable ? 'Scrollable chart plot' : undefined} tabIndex={scrollable ? 0 : undefined}>
-      <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${Math.max(480, rows.length * 52 + 96)}px` } : {}) }}>
+      <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${plotMinWidth(rows.length)}px` } : {}) }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }} barCategoryGap="28%">
+            {percentage ? <defs>{fills.slice(0, isGrouped ? series.length : 1).map((color, index) => (
+              <AnnualPercentagePattern key={color} color={color} id={`${pattern}-${index}`} />
+            ))}</defs> : null}
             <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
             <XAxis
               dataKey={isGrouped ? 'x' : 'name'}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
               tickLine={false}
-              interval={0}
+              interval={rows.length > 40 ? Math.ceil(rows.length / 30) - 1 : rows.length > 4 && !scrollable ? "preserveStartEnd" : 0}
               angle={scrollable ? 0 : rows.length > 8 ? -28 : 0}
               textAnchor={scrollable ? 'middle' : rows.length > 8 ? 'end' : 'middle'}
               height={scrollable ? 30 : rows.length > 8 ? 52 : 30}
             />
             <YAxis
               width={yAxisWidthFor(unit, narrow)}
+              domain={[(minimum) => Math.min(0, minimum), (maximum) => Math.max(0, maximum)]}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(v) => formatTickValue(v, decimals, tickUnit)}
+              tickFormatter={(v) => formatTickValue(v, decimals, tickUnit) + (percentage ? '%' : '')}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip
@@ -61,16 +70,17 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
             />
             {isGrouped
               ? series.map((s, i) => (
-                <Bar key={s.key} dataKey={s.key} name={s.label ?? s.key} fill={fills[i % fills.length]} maxBarSize={scrollable ? 32 : 44} isAnimationActive={false} />
+                <Bar key={s.key} dataKey={s.key} name={s.label ?? s.key} fill={fillFor(i)} maxBarSize={scrollable ? 32 : 44} isAnimationActive={false} />
               ))
               : (
-                <Bar dataKey="value" name="Value" fill={CHART_COLORS.primary} maxBarSize={64} isAnimationActive={false} />
+                <Bar dataKey="value" name="Value" fill={fillFor(0)} maxBarSize={64} isAnimationActive={false} />
               )}
           </BarChart>
         </ResponsiveContainer>
       </div>
       </div>
-      <ChartLegend items={legendItems} />
+      {scrollable ? <p className="chart-scroll-note">Scroll the plot to see more years.</p> : null}
+      <ChartLegend type="bar" items={legendItems} />
     </>
   );
 }

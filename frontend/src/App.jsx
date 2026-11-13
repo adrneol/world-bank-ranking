@@ -704,7 +704,7 @@ export default function App() {
       // A successful manual refresh advances the published generation: adopt
       // it so the background watcher below does not "rediscover" it.
       if (summary.status === 'success' && summary.runId != null) {
-        knownGeneration.current = { runId: summary.runId, lastSuccessAt: null, maxFetchedAt: null, observationCount: null };
+        knownGeneration.current = { ...knownGeneration.current, runId: summary.runId, lastSuccessAt: null, maxFetchedAt: null, observationCount: null };
       }
     }
     setDataVersion((v) => v + 1);
@@ -749,17 +749,21 @@ export default function App() {
       }
       if (cancelled) return;
       const next = fingerprintOf(status);
-      if (!next || (next.runId === null && !next.lastSuccessAt)) return;
+      if (!next || (!next.provider && next.runId === null && !next.lastSuccessAt)) return;
       const prev = knownGeneration.current;
       if (!prev) {
         knownGeneration.current = next;
-      } else if (isNewerGeneration(prev, next)) {
+      } else if (isNewerGeneration(prev, next) || (prev.provider && next.provider && prev.provider !== next.provider)) {
         knownGeneration.current = next;
         setRefreshNotice(
-          `Background refresh published a newer dataset${next.runId != null ? ` (run #${next.runId})` : ''} — all views were updated automatically.`,
+          prev.provider && next.provider && prev.provider !== next.provider
+            ? 'The serving database changed. Analytical views were reloaded.'
+            : `Background refresh published a newer dataset${next.runId != null ? ` (run #${next.runId})` : ''} — all views were updated automatically.`,
         );
         setDataVersion((v) => v + 1);
         return;
+      } else if (!prev.provider && next.provider) {
+        knownGeneration.current = { ...prev, provider: next.provider };
       }
       // Phase 8E narrow TTL engagement: /api/data-status is deliberately
       // side-effect free, so a tab sitting only on the Status page would
@@ -958,7 +962,7 @@ export default function App() {
           ) : null}
           {filtersReady && view === 'overview' ? (
             <>
-              <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={availableYears} onCompareEntities={openCompareWith} />
+              <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={availableYears} metricYears={yearsData?.perMetric} onCompareEntities={openCompareWith} />
               <YearComparison year={effective.year} subject={effective.subject} country={effective.country} />
             </>
           ) : null}

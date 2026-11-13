@@ -6,10 +6,11 @@
 
 import { Fragment } from 'react';
 import { api } from '../api/client.js';
-import { metricKeysForSubject, metricLabel, subjectLabel } from '../config/metrics.js';
+import { METRICS, metricKeysForSubject, subjectLabel } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatRank, formatYoy } from '../utils/format.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
+import { AnalyticalTable, MeasurementHeading } from '../components/AnalyticalTable.jsx';
 
 function MetricCell({ cell }) {
   if (!cell || !cell.available) {
@@ -27,7 +28,9 @@ function MetricCell({ cell }) {
   return (
     <>
       <td className="num" title={cell.indiaValueRaw != null ? `Raw: ${cell.indiaValueRaw} ${cell.unit ?? ''}` : undefined}>
-        {display}
+        {cell.indiaValueRaw != null ? (
+          <details className="history-value"><summary>{display}</summary><span>Exact value: {cell.indiaValueRaw}</span></details>
+        ) : display}
       </td>
       <td className="num" title={cell.indiaYoYReason ?? undefined}>
         {formatYoy(cell.indiaYoY, cell.indiaYoYDisplay)}
@@ -58,24 +61,26 @@ export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_cap
     >
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="yearly data" />
       {!loading && !error && rows.length > 0 ? (
-        <div className="table-scroll" role="region" aria-label={`${displayName} yearly data table`} tabIndex={0}>
+        <AnalyticalTable label={`${displayName} yearly data table`}>
           <table className="table table-yearly">
             <caption className="sr-only">
               {displayName} {subjectLabel(subject)} by year for all {keys.length} World Bank indicators
             </caption>
+            <colgroup span={1} />
+            {keys.map((key) => <colgroup key={key} span={3} />)}
             <thead>
               <tr>
-                <th scope="col" className="sticky-col">
+                <th scope="col" rowSpan={2} className="sticky-col">
                   Year
                 </th>
                 {keys.map((key) => (
                   <th scope="colgroup" colSpan={3} key={key} className="metric-group">
-                    {metricLabel(key)}
+                    <MeasurementHeading label={METRICS[key]?.title.split(' — ')[0]}
+                      unit={`${METRICS[key]?.unitLong ?? METRICS[key]?.unit}${subject === 'gdp_per_capita' ? ' per person' : ''}`} />
                   </th>
                 ))}
               </tr>
               <tr>
-                <th scope="col" className="sticky-col" aria-label="Year" />
                 {keys.map((key) => (
                   <Fragment key={key}>
                     <th scope="col" className="num">
@@ -104,12 +109,12 @@ export default function YearlyTable({ startYear, endYear, subject = 'gdp_per_cap
               ))}
             </tbody>
           </table>
-        </div>
+        </AnalyticalTable>
       ) : null}
       {!loading && !error && rows.length > 0 ? (
         <p className="footnote">
           Ranks read as “position among eligible countries with a valid observation for that year and indicator” — not
-          “out of all countries in the world”. Hover a value for its full raw precision.
+          “out of all countries in the world”. Expand a value for its full raw precision.
         </p>
       ) : null}
     </Section>

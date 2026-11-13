@@ -346,7 +346,7 @@ describe('compare UI: observed and like-for-like', () => {
     }
   });
 
-  it('shows the result unit in keyboard-accessible bar and line tooltips', async () => {
+  it('shows the result unit in keyboard-accessible bar and point tooltips', async () => {
     hydrateRegistry(DEFAULT_REGISTRY);
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback) { this.callback = callback; }
@@ -358,7 +358,7 @@ describe('compare UI: observed and like-for-like', () => {
       const response = payload({ partial: false });
       response.operation = 'cagr';
       Object.assign(response.results.comparison.intervalResults[0], {
-        a: { computable: true, value: -7.25, unit: '%' },
+        a: { computable: true, value: -7.251234, unit: '%' },
         b: { computable: true, value: 0, unit: '%' },
         gap: { value: -7.25, unit: 'percentage points' },
         unit: '%',
@@ -368,7 +368,7 @@ describe('compare UI: observed and like-for-like', () => {
       const view = renderCompare({ entityB: 'country:USA', operation: 'cagr', basisId: 'compare:cagr', yearC: 2005, yearB: null });
       ctx = { ...view, stub };
       await flushReact(act);
-      for (const type of ['Bar chart', 'Line chart']) {
+      for (const type of ['Bar chart', 'Point chart']) {
         const toggle = [...view.container.querySelectorAll('[aria-label="Chart type"] button')].find((button) => button.textContent === type);
         expect(toggle).toBeTruthy();
         act(() => toggle.click());
@@ -381,7 +381,10 @@ describe('compare UI: observed and like-for-like', () => {
         const tooltip = view.container.querySelector('.recharts-tooltip-wrapper');
         expect(tooltip?.textContent).toContain('-7.25%');
         expect(tooltip?.textContent).toContain('0.00%');
+        expect(tooltip?.textContent).not.toContain('7.251234');
+        expect(view.container.querySelector('.chart-legend-html svg ' + (type === 'Bar chart' ? 'pattern' : 'circle'))).toBeTruthy();
       }
+      expect(view.container.textContent).toContain('-7.251234');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -745,7 +748,7 @@ describe('compare UI: observed and like-for-like', () => {
     expect(view.container.querySelector('.chart-note')).toBeNull();
     act(() => view.container.querySelector('.chart-type-toggle button:last-child').click());
     await flushReact(act);
-    expect(view.container.querySelector('.chart-type-toggle [aria-pressed="true"]')?.textContent).toBe('Line chart');
+    expect(view.container.querySelector('.chart-type-toggle [aria-pressed="true"]')?.textContent).toBe('Point chart');
     expect(view.container.querySelector('.chart-note')).toBeTruthy();
     expect(view.container.textContent).toContain('they do not represent a continuous annual trajectory');
     expect(view.container.textContent).toContain('82,000,000,000.00 current US$');

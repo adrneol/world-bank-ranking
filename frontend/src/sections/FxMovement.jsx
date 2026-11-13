@@ -13,7 +13,7 @@
 
 import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
-import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
+import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { isFxMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -907,7 +907,7 @@ export default function FxMovement({ availableYears, yearA, yearB, yearMid = nul
               unit={unit}
               source="World Bank WDI"
             >
-              <BarComparisonChart entries={levelChart.map((e) => ({ name: e.name, value: e.value }))} unit={unit} decimals={2} />
+              <AnnualOrCategoricalChart entries={levelChart.map((e) => ({ name: e.name, value: e.value }))} unit={unit} decimals={2} />
             </ChartCard>
           ) : null}
 
@@ -924,7 +924,7 @@ export default function FxMovement({ availableYears, yearA, yearB, yearMid = nul
                   unit="Nominal FX change vs USD (%)"
                   source="World Bank WDI; calculated by this application"
                 >
-                  <BarComparisonChart entries={observedChart.entries} series={series} unit="Nominal FX change vs USD (%)" decimals={2} />
+                  <AnnualOrCategoricalChart entries={observedChart.entries} series={series} unit="Nominal FX change vs USD (%)" decimals={2} />
                 </ChartCard>
               ) : null}
 
@@ -939,7 +939,7 @@ export default function FxMovement({ availableYears, yearA, yearB, yearMid = nul
                   unit="Nominal FX change vs USD (%)"
                   source="World Bank WDI; calculated by this application"
                 >
-                  <BarComparisonChart entries={lflChart.entries} series={series} unit="Nominal FX change vs USD (%)" decimals={2} />
+                  <AnnualOrCategoricalChart entries={lflChart.entries} series={series} unit="Nominal FX change vs USD (%)" decimals={2} />
                 </ChartCard>
               ) : null}
             </>

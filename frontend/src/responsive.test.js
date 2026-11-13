@@ -78,9 +78,9 @@ describe('responsive architecture pins', () => {
     expect(block('.brand-row > div')).toContain('min-width: 0');
   });
 
-  it('overview context controls wrap without page overflow', () => {
-    expect(block('.context-series')).toContain('flex-wrap: wrap');
-    expect(block('.context-toggle')).toContain('min-height: 2.5rem');
-    expect(css).not.toMatch(/\.context-series[^}]*overflow-x/);
+  it('overview controls and the active legend wrap without widening the page', () => {
+    expect(block('.annual-toolbar {')).toContain('flex-wrap: wrap');
+    expect(block('.annual-legend {')).toContain('flex-wrap: wrap');
+    expect(block('.annual-series-menu {')).toContain('max-width: 100%');
   });
 });

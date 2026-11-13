@@ -296,6 +296,8 @@ export const api = {
   // analytical fields as /api/india/gdp-ranking, which remains as an alias.
   focusYearly: ({ startYear, endYear, country, subject } = {}, options) =>
     get('/api/focus/yearly', { startYear, endYear, country, subject }, options),
+  focusHistory: ({ startYear, endYear, country, series } = {}, options) =>
+    get('/api/focus/history', { startYear, endYear, country, series: [...new Set(series ?? [])].sort().join(',') }, options),
   ranking: ({ indicator, year, page, pageSize, search, country } = {}, options) =>
     get('/api/ranking', { indicator, year, page, pageSize, search, country }, options),
   rankVerify: ({ indicator, year, country, neighbors } = {}, options) =>

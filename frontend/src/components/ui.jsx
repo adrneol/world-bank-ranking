@@ -1,3 +1,4 @@
+import { AnalyticalTable, MeasurementHeading } from './AnalyticalTable.jsx';
 /**
  * Shared presentational components: section shell, async-state blocks,
  * pagination controls and labeled form controls.
@@ -113,9 +114,7 @@ export function Field({ label, htmlFor, children, hint }) {
   });
   return (
     <div className="field">
-      <span className="field-label" id={labelId}>
-        {label}
-      </span>
+      {label != null ? <span className="field-label" id={labelId}>{label}</span> : null}
       {associated}
       {hint ? <span className="field-hint">{hint}</span> : null}
     </div>
@@ -266,7 +265,7 @@ export function ChartDataFallback({ label = 'chart values', regionName = null, c
   return (
     <details className="chart-data-fallback">
       <summary>View {label} as a table</summary>
-      <div className="table-scroll" role="region" aria-label={regionName ?? label} tabIndex={0}>
+      <AnalyticalTable label={regionName ?? label} freezeYear={columns[0]?.header === 'Year'}>
         <table className="table table-compact">
           <thead>
             <tr>
@@ -277,7 +276,7 @@ export function ChartDataFallback({ label = 'chart values', regionName = null, c
                   </th>
                 ) : (
                   <th key={i} scope="col" className={col.numeric === false ? undefined : 'num'}>
-                    {col.header}
+                    <MeasurementHeading label={col.header} unit={col.unit} color={col.color} />
                   </th>
                 ),
               )}
@@ -301,7 +300,7 @@ export function ChartDataFallback({ label = 'chart values', regionName = null, c
             ))}
           </tbody>
         </table>
-      </div>
+      </AnalyticalTable>
     </details>
   );
 }

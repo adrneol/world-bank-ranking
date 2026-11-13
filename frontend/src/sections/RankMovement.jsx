@@ -9,7 +9,7 @@
 
 import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
-import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
+import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { METRICS, SUBJECTS, activeRegistryVersion, isCapitalMetricKey, isExternalMetricKey, isFxMetricKey, isPopulationMetricKey, isPricesMetricKey, isTradeMetricKey, metricDecimals, metricKeysForSubject, movementBasisOptions, subjectOf } from '../config/metrics.js';
 import PricesMovement from './PricesMovement.jsx';
@@ -1094,7 +1094,7 @@ function ThreeYearResults({ data, focusIso = 'IND', focusName = 'India' }) {
           unit={data.metric?.unit}
           summary={`${data.focus?.name ?? 'Focus'} level values ${focusValues3.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
         >
-          <BarComparisonChart
+          <AnnualOrCategoricalChart
             entries={focusValues3.map((p) => ({ name: String(p.year), value: p.value }))}
             unit={data.metric?.unit}
             decimals={decimals3}
@@ -2440,7 +2440,7 @@ function GrowthResults({ data, focusIso = 'IND', focusName = 'India' }) {
           unit="%"
           summary={`${focusName} interval changes: ${intervals.filter(({ block }) => block?.available).map(({ block, label }) => `${label} ${block.indiaGrowthDisplay ?? ''}`).join('; ')}`}
         >
-          <BarComparisonChart
+          <AnnualOrCategoricalChart
             entries={intervals.filter(({ block }) => block?.available && block?.indiaGrowthPercent != null).map(({ block, label }) => ({ name: label, value: block.indiaGrowthPercent }))}
             unit="%"
             decimals={2}
@@ -2829,7 +2829,7 @@ function PeriodSummary({ metricKey, yearA, yearB, country, focusName, operation 
                   unit={data.unit}
                   summary={`Annual stored observations composing the period for ${focusName}`}
                 >
-                  <BarComparisonChart
+                  <AnnualOrCategoricalChart
                     entries={annualBars}
                     unit={data.unit}
                     decimals={metricDecimals(metricKey)}
@@ -3256,7 +3256,7 @@ export default function RankMovement({ availableYears, yearA, yearB, yearMid = n
                   unit={data.metric?.unit}
                   summary={`${focusName} level values ${points.map((p) => `${p.year}: ${p.value}`).join(', ')}`}
                 >
-                  <BarComparisonChart
+                  <AnnualOrCategoricalChart
                     entries={points.map((p) => ({ name: String(p.year), value: p.value }))}
                     unit={data.metric?.unit}
                     decimals={metricDecimals(metricKey)}

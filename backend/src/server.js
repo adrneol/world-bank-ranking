@@ -67,6 +67,7 @@ import { buildCompareResponse, buildGroupEvaluation } from './services/entityCom
 import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
 import { buildFullRanking } from './services/fullRanking.js';
+import { buildFocusHistory } from './services/focusHistory.js';
 import { buildIndiaYearlyRows } from './services/indiaYearly.js';
 import { runIntegrityChecks } from './services/integrity.js';
 import {
@@ -1115,6 +1116,25 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   });
   app.get('/api/india/gdp-ranking', handleYearly);
   app.get('/api/focus/yearly', handleYearly);
+
+  // History is a bounded read of one serving snapshot, without rank work or
+  // TTL engagement. The existing yearly endpoints retain their full contract.
+  app.get('/api/focus/history', ah(async (req, res) => {
+    const { startYear, endYear, country, series } = req.query;
+    if (![startYear, endYear].every((year) => typeof year === 'string' && /^\d{4}$/.test(year))) {
+      throw httpError(400, 'History requires startYear and endYear as four-digit years.', 'INVALID_YEAR');
+    }
+    if (typeof series !== 'string' || series.length > 256 || (country !== undefined && typeof country !== 'string')) {
+      throw httpError(400, 'Provide a country and comma-separated registered series.', 'INVALID_INDICATOR');
+    }
+    const data = await buildFocusHistory(handle(), {
+      startYear: Number(startYear), endYear: Number(endYear),
+      country: parseCountry(country), series: series.split(','),
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(data);
+  }));
+
 
   // ---------- full level ranking ----------
   app.get('/api/ranking', ah(async (req, res) => {

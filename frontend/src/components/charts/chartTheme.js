@@ -36,4 +36,14 @@ export function yAxisWidthFor(unit, narrow) {
   return long ? 88 : 72;
 }
 
+const percentageDashes = ['6 4', '2 4', '10 4'];
+
+export function annualStroke({ percentage, colorIndex = 0, primary }) {
+  return {
+    strokeWidth: primary ? 2.5 : percentage ? 2 : 1.8,
+    strokeDasharray: percentage ? percentageDashes[colorIndex % percentageDashes.length] : undefined,
+    strokeLinecap: 'round',
+  };
+}
+
 export default { CHART_COLORS, CHART_HEIGHT, yAxisWidthFor };

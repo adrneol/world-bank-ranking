@@ -1,10 +1,10 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
-import { formatChartValue, formatTickValue } from './chartFormat.js';
+import { formatChartValue, formatTickValue, isPercentageUnit } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 
-/** Line view for a small set of categorical interval results. */
+/** Point view for categorical interval results. Uses the line renderer without connecting categories. */
 export default function IntervalLineChart({ entries = [], series = [], unit = null, decimals = 0, formatTooltip = null }) {
   const narrow = useIsNarrowChart();
   if (entries.length === 0) return null;
@@ -19,11 +19,10 @@ export default function IntervalLineChart({ entries = [], series = [], unit = nu
             <YAxis
               width={yAxisWidthFor(unit, narrow)}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
-              tickFormatter={(value) => formatTickValue(value, decimals)}
+              tickFormatter={(value) => formatTickValue(value, decimals) + (isPercentageUnit(unit) ? '%' : '')}
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip
-              labelFormatter={(label) => `Selected interval: ${label}`}
               formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
               contentStyle={{ fontSize: 12 }}
             />
@@ -34,8 +33,7 @@ export default function IntervalLineChart({ entries = [], series = [], unit = nu
                 dataKey={item.key}
                 name={item.label ?? item.key}
                 stroke={colors[index % colors.length]}
-                strokeWidth={2}
-                strokeDasharray={index === 1 ? '6 3' : undefined}
+                strokeWidth={0}
                 dot={{ r: 4, fill: colors[index % colors.length] }}
                 activeDot={{ r: 5 }}
                 connectNulls={false}
@@ -45,8 +43,8 @@ export default function IntervalLineChart({ entries = [], series = [], unit = nu
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <ChartLegend items={series.map((item, index) => ({ label: item.label ?? item.key, color: colors[index % colors.length], dashed: index === 1 }))} />
-      <p className="chart-note">Intervals are separate categories. Connecting marks compare their results; they do not represent a continuous annual trajectory.</p>
+      <ChartLegend type="point" items={series.map((item, index) => ({ label: item.label ?? item.key, color: colors[index % colors.length] }))} />
+      <p className="chart-note">Intervals are separate categories. The markers are unconnected because they do not represent a continuous annual trajectory.</p>
     </>
   );
 }

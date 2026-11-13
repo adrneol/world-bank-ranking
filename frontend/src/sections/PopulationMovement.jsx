@@ -16,7 +16,7 @@
 
 import { Fragment, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
-import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
+import { AnnualOrCategoricalChart } from '../components/charts/AnnualChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { isPopulationMetricKey } from '../config/metrics.js';
 import { useApi } from '../hooks/useApi.js';
@@ -941,7 +941,7 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
               unit={isGrowth ? 'Population growth (%)' : unit}
               source="World Bank WDI; calculated by this application"
             >
-              <BarComparisonChart entries={observedChart.entries} series={series} unit={isGrowth ? 'Population growth (%)' : unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={observedChart.entries} series={series} unit={isGrowth ? 'Population growth (%)' : unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 
@@ -956,7 +956,7 @@ export default function PopulationMovement({ availableYears, yearA, yearB, yearM
               unit={isGrowth ? 'Population growth (%)' : unit}
               source="World Bank WDI; calculated by this application"
             >
-              <BarComparisonChart entries={lflChart.entries} series={series} unit={isGrowth ? 'Population growth (%)' : unit} decimals={decimals} />
+              <AnnualOrCategoricalChart entries={lflChart.entries} series={series} unit={isGrowth ? 'Population growth (%)' : unit} decimals={decimals} />
             </ChartCard>
           ) : null}
 

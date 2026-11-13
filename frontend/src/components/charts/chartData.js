@@ -66,4 +66,39 @@ export function toBarEntries(entries) {
   }));
 }
 
+export function recentWindow(years, count) {
+  const to = years.at(-1);
+  return { from: years.find((year) => year >= to - count + 1) ?? years[0], to };
+}
+
+export function calendarYears(from, to) {
+  return Array.from({ length: Math.max(0, to - from + 1) }, (_, offset) => from + offset);
+}
+
+export function annualSeries(entries, measures) {
+  const byYear = new Map(entries.map((entry) => [Number(entry.x ?? entry.name), entry]));
+  const years = [...byYear.keys()];
+  const calendar = years.length ? calendarYears(Math.min(...years), Math.max(...years)) : [];
+  return measures.map(({ key, label }) => ({
+    id: key, label, points: calendar.map((x) => ({ x, y: byYear.get(x)?.[key] ?? null })),
+  }));
+}
+
+export function scaleDetailFor(rows, keys) {
+  const values = rows.flatMap((row) => keys.map((key) => row[key])).filter(Number.isFinite);
+  if (values.length < 2) return null;
+  const nonzero = values.filter((value) => value !== 0).map(Math.abs);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const largest = Math.max(Math.abs(low), Math.abs(high));
+  if (nonzero.length && largest / Math.min(...nonzero) >= 1000) return low > 0 ? 'log' : 'signed-detail';
+  if (low !== high && (high - low) / largest < 0.01) return 'detail';
+  if (low <= 0 && high >= 0 && low !== high && (low === 0 || high === 0)) return 'detail';
+  return null;
+}
+
+export function plotMinWidth(count) {
+  return Math.min(3600, Math.max(420, count * 42 + 96));
+}
+
 export default { sortPoints, alignSeries, hasAnyPoint, toBarEntries };

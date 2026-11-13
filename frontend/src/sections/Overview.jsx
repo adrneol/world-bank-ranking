@@ -15,7 +15,7 @@ import { StatusBlock } from '../components/ui.jsx';
 import SubjectInsight from './SubjectInsight.jsx';
 import OverviewHistory from './OverviewHistory.jsx';
 
-export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country = 'IND', focusName = 'India', availableYears = [], onCompareEntities = null }) {
+export default function Overview({ year, subject = 'gdp_per_capita', metricKey = null, country = 'IND', focusName = 'India', availableYears = [], metricYears = null, onCompareEntities = null }) {
   const keys = metricKeysForSubject(subject);
   const depsKey = `overview:${year ?? ''}:${subject}:${country}`;
   const { data, loading, error, retry } = useApi(
@@ -27,24 +27,7 @@ export default function Overview({ year, subject = 'gdp_per_capita', metricKey =
   const row = data?.rows?.[0] ?? null;
   const empty = !loading && !error && !row;
   const displayName = data?.focus?.name ?? focusName;
-  // History line for the primary metric over all stored years (existing
-  // focus/yearly range — raw annual values verbatim, gaps stay gaps).
   const historyKey = metricKey ?? keys[0];
-  const historyYears = [...(availableYears ?? [])].sort((a, b) => a - b);
-  const histDepsKey = `overview-hist:${historyKey}:${subject}:${country}:${historyYears[0] ?? ''}:${historyYears[historyYears.length - 1] ?? ''}`;
-  const hist = useApi(
-    (signal) =>
-      api.focusYearly(
-        { startYear: historyYears[0], endYear: historyYears[historyYears.length - 1], subject, country },
-        { signal },
-      ),
-    histDepsKey,
-    { enabled: historyYears.length > 1 && historyKey != null },
-  );
-  const historyMeta = METRICS[historyKey];
-  const historyPoints = (hist.data?.rows ?? []).map((r) => ({ x: r.year, y: r[historyKey]?.indiaValue ?? null }));
-  const historyHasData = historyPoints.some((p) => Number.isFinite(p.y));
-  const historySummary = `Annual ${historyMeta?.shortTitle ?? historyKey} for ${displayName}, ${historyYears[0] ?? '—'} to ${historyYears[historyYears.length - 1] ?? '—'}`;
 
   return (
     <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
@@ -85,18 +68,9 @@ export default function Overview({ year, subject = 'gdp_per_capita', metricKey =
             Rank calculated from World Bank WDI observations. The {keys.length} {subjectLabel(subject)} series use different
             units and are never combined or scored against each other.
           </p>
-          {historyHasData ? (
-            <OverviewHistory
-              key={`${country}:${subject}:${historyKey}`}
-              country={country}
-              displayName={displayName}
-              historyKey={historyKey}
-              historyMeta={historyMeta}
-              historyRows={hist.data?.rows ?? []}
-              windowStart={historyYears[0] ?? null}
-              windowEnd={historyYears[historyYears.length - 1] ?? null}
-              summary={historySummary}
-            />
+          {historyKey && availableYears.length > 0 ? (
+            <OverviewHistory country={country} displayName={displayName} historyKey={historyKey}
+              availableYears={availableYears} metricYears={metricYears} />
           ) : null}
           <SubjectInsight
             metricKey={metricKey ?? keys[0]}

@@ -2625,7 +2625,7 @@ hr.ddivider {
   margin-top: 0.35rem;
 }
 
-.chart-type-toggle {
+.segmented-control {
   display: inline-flex;
   gap: 0.25rem;
   margin: 0 0 0.75rem;
@@ -2635,7 +2635,7 @@ hr.ddivider {
   background: var(--surface-subtle, #f7f7f4);
 }
 
-.chart-type-toggle button {
+.segmented-control button {
   min-height: 2rem;
   padding: 0.35rem 0.65rem;
   border: 0;
@@ -2647,14 +2647,14 @@ hr.ddivider {
   cursor: pointer;
 }
 
-.chart-type-toggle button[aria-pressed="true"] {
+.segmented-control button[aria-pressed="true"] {
   background: var(--surface, #fff);
   color: var(--text-strong, #101828);
   box-shadow: 0 1px 3px rgb(16 24 40 / 12%);
   font-weight: 650;
 }
 
-.chart-type-toggle button:focus-visible {
+.segmented-control button:focus-visible {
   outline: 2px solid var(--focus, #2a7f6f);
   outline-offset: 2px;
 }
@@ -2908,54 +2908,6 @@ hr.ddivider {
 
 .chart-plot .recharts-wrapper:focus-visible,
 .chart-plot .recharts-surface:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Overview context-series control: compact chip checkboxes in the site's
-   control language. Fieldset/legend carry the accessible name; the row
-   wraps on narrow screens and each chip keeps a tappable target. */
-.context-series {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 0.75rem;
-  margin: 1rem 0 0.25rem;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-}
-
-.context-series legend {
-  font-size: 0.82rem;
-  font-weight: 650;
-  color: var(--muted);
-  padding: 0;
-}
-
-.context-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.35rem 0.8rem;
-  min-height: 2.5rem;
-  cursor: pointer;
-  max-width: 100%;
-}
-
-.context-toggle input {
-  width: 1rem;
-  height: 1rem;
-  margin: 0;
-  flex: none;
-  accent-color: var(--accent);
-}
-
-.context-toggle:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -3280,3 +3232,314 @@ hr.ddivider {
     padding-right: 0.4rem;
   }
 }
+
+/* Keep both scroll axes on one focusable region. The entire header group
+   sticks as one unit, so wrapped/multirow headings need no height offsets. */
+.analytical-table {
+  max-block-size: min(62vh, 32rem);
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+  isolation: isolate;
+  scrollbar-gutter: stable;
+}
+
+.analytical-table:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.analytical-table .table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.analytical-table .table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 3;
+}
+
+.analytical-table .table thead th {
+  position: static;
+  white-space: normal;
+}
+
+.analytical-table.freeze-year .table tbody th:first-child,
+.analytical-table.freeze-year .table thead tr:first-child th:first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  min-width: 3.1rem;
+  box-shadow: 1px 0 var(--line);
+  z-index: 2;
+}
+
+.analytical-table.freeze-year .table tbody th:first-child {
+  background: var(--surface);
+}
+
+.analytical-table.freeze-year .table thead tr:first-child th:first-child {
+  z-index: 4;
+}
+
+.measurement-heading {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 7rem;
+  max-width: 14rem;
+}
+
+.measurement-unit {
+  color: var(--muted);
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.history-controls, .history-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.45rem 0.6rem;
+  margin-block: 0.5rem;
+}
+
+.history-controls .chart-period-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 23rem);
+}
+
+.history-presets button {
+  min-height: 2.75rem;
+}
+
+.history-presets button {
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.3rem 0.55rem;
+}
+
+.history-presets button[aria-pressed="true"] {
+  border-color: var(--accent);
+  font-weight: 650;
+}
+
+.history-scale {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.history-scale {
+  width: fit-content;
+  margin-block: 0.4rem;
+}
+
+.history-value {
+  min-width: 6rem;
+}
+
+.history-value span {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chart-scroll-note {
+  display: none;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-block: 0.4rem;
+}
+
+.chart-card { container-type: inline-size; }
+@container (max-width: 40rem) {
+  .chart-scroll-note { display: block; }
+}
+
+@media (max-width: 480px) {
+  .analytical-table .table :is(th, td) { padding-inline: 0.45rem; }
+}
+
+/* The plot grid has independent axis rails and a single central scroller.
+   Grid lines and labels use the same calculated coordinates. */
+.annual-plot-layout {
+  display: grid;
+  grid-template-columns: clamp(3.6rem, 10vw, 6.2rem) minmax(0, 1fr);
+  min-width: 0;
+  margin-block: 0.8rem;
+}
+
+.annual-plot-layout.has-right-axis {
+  grid-template-columns: clamp(3.6rem, 10vw, 6.2rem) minmax(0, 1fr) clamp(3.6rem, 10vw, 6.2rem);
+}
+
+.annual-plot-instructions {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0 0 0.4rem;
+}
+
+.annual-range { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.55rem; }
+.annual-range > span { font-weight: 600; }
+.annual-range .segmented-control, .annual-toolbar .segmented-control { margin: 0; }
+
+.annual-plot-center { position: relative; min-width: 0; }
+
+.annual-axis-rail { min-width: 0; }
+
+.annual-axis-region {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--surface);
+}
+
+.annual-axis-region svg,
+.annual-region-svg,
+.annual-timeline { display: block; }
+
+.annual-axis-unit {
+  position: absolute;
+  inset: 0.25rem auto 0 0;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--muted);
+  font-size: 0.67rem;
+  max-height: calc(100% - 0.5rem);
+  overflow-wrap: anywhere;
+}
+
+.annual-axis-right .annual-axis-unit {
+  inset: 0.25rem 0 0 auto;
+  transform: none;
+}
+
+.annual-axis-region text,
+.annual-timeline text {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.annual-grid-line { stroke: var(--line); stroke-width: 1; }
+.annual-zero-line { stroke: var(--muted); stroke-width: 1; opacity: 0.72; }
+.annual-cursor { stroke: var(--accent); stroke-dasharray: 3 3; }
+
+.annual-plot-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x pan-y;
+}
+
+.annual-plot-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.annual-plot-strip { min-width: 100%; }
+
+.annual-tooltip {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: 0.3rem;
+  inset-inline-end: 0.2rem;
+  width: min(15.75rem, 100% - 0.4rem);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.76rem;
+  line-height: 1.3;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+
+.annual-tooltip[data-side="start"] { inset-inline: 0.2rem auto; }
+.annual-tooltip dl { display: grid; gap: 0.18rem; margin: 0.3rem 0 0; }
+.annual-tooltip dl > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.35rem;
+  border-inline-start: 2px solid var(--series-color, var(--line));
+  padding-inline-start: 0.3rem;
+}
+.annual-tooltip dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 480px) {
+  .annual-tooltip { font-size: 0.65rem; padding: 0.3rem; }
+  .annual-tooltip dl { gap: 0.12rem; }
+}
+
+.annual-toolbar {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+
+.annual-toolbar .history-controls { flex: 1 1 100%; }
+.annual-series-menu { min-width: 7rem; max-width: 100%; }
+.annual-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.35rem; padding: 0; }
+.annual-legend li { display: flex; gap: 0.3rem; align-items: center; font-size: 0.78rem; }
+.annual-series-swatch { display: inline-block; color: var(--series-color); }
+.annual-legend strong { display: inline-flex; align-items: center; gap: 0.28rem; padding-inline: 0.35rem; }
+.annual-legend small { color: var(--muted); font-weight: 500; }
+.annual-evidence { margin-block: 0.65rem; }
+
+.measurement-heading .annual-series-swatch {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 50%;
+  background: currentColor;
+  margin-inline-end: 0.3rem;
+}
+.combo-filter { font-size: max(1rem, 16px); }
+
+.annual-legend { list-style: none; margin-block: 0.5rem 0.65rem; }
+.annual-legend li { min-width: 0; max-width: 100%; }
+.annual-legend button {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2rem;
+  max-width: 100%;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.25rem 0.45rem;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.annual-legend button:hover { border-color: var(--accent); }
+.annual-legend button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.annual-legend-remove { color: var(--muted); font-size: 1rem; line-height: 1; }
+@media (pointer: coarse) {
+  .annual-legend button { min-height: 2.25rem; }
+  .annual-series-menu button, .segmented-control button { min-height: 2.75rem; }
+}
+
+.annual-plot-instructions p { margin: 0.35rem 0; }
+.annual-axis-bounds { grid-column: 1 / -1; font-size: 0.8rem; color: var(--muted); }
+.annual-axis-bounds summary { cursor: pointer; }
+.annual-axis-bounds ul { margin-block: 0.35rem; padding-inline-start: 1.25rem; }
+
+.annual-series-marker { display: block; flex: none; }
+.annual-axis-key {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.25rem 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.annual-axis-key > span { display: inline-flex; align-items: center; gap: 0.3rem; }
+.annual-axis-key .annual-series-marker { color: var(--ink); }

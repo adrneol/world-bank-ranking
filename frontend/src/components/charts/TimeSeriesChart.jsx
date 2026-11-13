@@ -15,7 +15,7 @@
  */
 
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { alignSeries } from './chartData.js';
+import { alignSeries, plotMinWidth } from './chartData.js';
 import { CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
 import { formatChartValue, formatTickValue } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
@@ -29,7 +29,7 @@ const DASHES = [undefined, '6 3', '2 2'];
 // subtle fades, prefers-reduced-motion must be trivially honored, and
 // analytical charts must render deterministically.
 
-export default function TimeSeriesChart({ series = [], unit = null, decimals = 0, zeroLine = false, height = null, scrollable = false }) {
+export default function TimeSeriesChart({ series = [], unit = null, decimals = 0, zeroLine = false, height = null, scrollable = false, scale = 'linear', formatTooltip = null, domain = ['auto', 'auto'] }) {
   const narrow = useIsNarrowChart();
   const { keys, rows, labels } = alignSeries(series);
   if (rows.length === 0) return null;
@@ -52,7 +52,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
   return (
     <>
       <div className={scrollable ? 'chart-plot-scroll' : undefined} role={scrollable ? 'region' : undefined} aria-label={scrollable ? 'Scrollable chart plot' : undefined} tabIndex={scrollable ? 0 : undefined}>
-      <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${Math.max(480, rows.length * 52 + 96)}px` } : {}) }}>
+      <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${plotMinWidth(rows.length)}px` } : {}) }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }}>
             <CartesianGrid stroke={CHART_COLORS.grid} strokeDasharray="3 3" vertical={false} />
@@ -61,6 +61,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
               type="number"
               domain={['dataMin', 'dataMax']}
               tickCount={tickCount}
+              allowDecimals={false}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
               tickFormatter={(x) => String(x)}
             />
@@ -68,11 +69,12 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
               width={yAxisWidthFor(unit, narrow)}
               tick={{ fontSize: 11, fill: CHART_COLORS.muted }}
               tickFormatter={(v) => formatTickValue(v, decimals, unit)}
-              domain={['auto', 'auto']}
-              label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
+              scale={scale}
+              domain={scale !== 'linear' ? ['dataMin', 'dataMax'] : domain}
+              label={unit ? { value: scale === 'linear' ? unit : `${unit} · ${scale === 'log' ? 'log' : 'signed log'}`, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip
-              formatter={(value, name) => [formatChartValue(value, decimals), name]}
+              formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
               labelFormatter={(x) => `Year ${x}`}
               contentStyle={{ fontSize: 12 }}
             />
@@ -80,13 +82,13 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
             {keys.map((key, i) => (
               <Line
                 key={key}
-                type="monotone"
+                type="linear"
                 dataKey={key}
                 name={labels[i] || `Series ${i + 1}`}
                 stroke={STROKES[i % STROKES.length]}
                 strokeWidth={2}
                 strokeDasharray={DASHES[i % DASHES.length]}
-                dot={{ r: 2, fill: STROKES[i % STROKES.length] }}
+                dot={rows.length <= 25 ? { r: 2, fill: STROKES[i % STROKES.length] } : false}
                 activeDot={{ r: 4 }}
                 connectNulls={false}
                 isAnimationActive={false}
@@ -96,6 +98,7 @@ export default function TimeSeriesChart({ series = [], unit = null, decimals = 0
         </ResponsiveContainer>
       </div>
       </div>
+      {scrollable ? <p className="chart-scroll-note">Scroll the plot to see more years.</p> : null}
       <ChartLegend items={legendItems} />
     </>
   );

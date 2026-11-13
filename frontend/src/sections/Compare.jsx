@@ -23,8 +23,11 @@ import EntityPicker from '../components/EntityPicker.jsx';
 import BarComparisonChart from '../components/charts/BarComparisonChart.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import IntervalLineChart from '../components/charts/IntervalLineChart.jsx';
-import SlopeChart from '../components/charts/SlopeChart.jsx';
-import TimeSeriesChart from '../components/charts/TimeSeriesChart.jsx';
+import AnnualChart from '../components/charts/AnnualChart.jsx';
+import { ChartTypeToggle, HistoryWindowControls } from '../components/charts/ChartControls.jsx';
+import { calendarYears, scaleDetailFor } from '../components/charts/chartData.js';
+import { formatAnnualReadout } from '../components/charts/chartFormat.js';
+import { AnalyticalTable, MeasurementHeading } from '../components/AnalyticalTable.jsx';
 import { entityDisplayName, entityToSpec, parseEntitySpecString } from '../components/entities.js';
 import { SearchableSelect } from '../components/controls.jsx';
 import MetricPicker from '../components/MetricPicker.jsx';
@@ -289,19 +292,19 @@ function ComparisonResult({ data, metricKey }) {
       <>
       <details className="compare-evidence">
         <summary>Observations and calculations</summary>
-      <div className="table-scroll" role="region" aria-label="Level comparison by year" tabIndex={0}>
+      <AnalyticalTable label="Level comparison by year">
           <table className="table">
             <thead>
               <tr>
                 <th scope="col">Year</th>
                 <th scope="col" className="num">
-                  A
+                  <MeasurementHeading label="A" unit={unit} />
                 </th>
                 <th scope="col" className="num">
-                  B
+                  <MeasurementHeading label="B" unit={unit} />
                 </th>
                 <th scope="col" className="num">
-                  Gap (A − B)
+                  <MeasurementHeading label="Gap (A − B)" unit={comparison.unit ?? unit} />
                 </th>
               </tr>
             </thead>
@@ -311,8 +314,8 @@ function ComparisonResult({ data, metricKey }) {
                 return (
                   <tr key={year}>
                     <th scope="row">{year}</th>
-                    <td className="num">{formatValuePlain(row.a, metricKey)}</td>
-                    <td className="num">{formatValuePlain(row.b, metricKey)}</td>
+                    <td className="num"><CompareObservationValue value={row.a} metricKey={metricKey} /></td>
+                    <td className="num"><CompareObservationValue value={row.b} metricKey={metricKey} /></td>
                     <td className="num" title={row.gapReason ? readableReason(row.gapReason) : undefined}>
                       {row.gap === null || row.gap === undefined ? '—' : resultAmount(row.gap, row.unit ?? comparison.unit, metricKey)}
                     </td>
@@ -322,7 +325,7 @@ function ComparisonResult({ data, metricKey }) {
             </tbody>
           </table>
           <p className="footnote">Gap unit: {comparison.unit ?? unit}. Missing legs stay missing.</p>
-        </div>
+        </AnalyticalTable>
         </details>
         {years.length === 1 ? (
           <ChartCard
@@ -339,7 +342,9 @@ function ComparisonResult({ data, metricKey }) {
               ]}
               unit={unit}
               decimals={metricDecimals(metricKey)}
+              formatTooltip={(value) => formatAnnualReadout(value, unit, metricDecimals(metricKey))}
             />
+            <CompareScaleDetail entries={barRows} labelA={nameOf(results.a)} labelB={nameOf(results.b)} unit={unit} />
           </ChartCard>
         ) : null}
       </>
@@ -350,7 +355,7 @@ function ComparisonResult({ data, metricKey }) {
     const segments = comparison.segments ?? {};
     const ids = Object.keys(segments);
     return (
-      <div className="table-scroll" role="region" aria-label="Segmented growth" tabIndex={0}>
+      <AnalyticalTable label="Segmented growth" freezeYear={false}>
         <table className="table">
           <thead>
             <tr>
@@ -383,7 +388,7 @@ function ComparisonResult({ data, metricKey }) {
         <p className="footnote">
           Gap unit: {comparison.unit ?? 'percentage points'}. Every segment uses the same universe and the same required years.
         </p>
-      </div>
+      </AnalyticalTable>
     );
   }
 
@@ -476,9 +481,9 @@ function IntervalObservations({ interval, metricKey, labelA, labelB }) {
   return (
     <details className="compare-interval-inputs">
       <summary>Show {years.length} required annual observation{years.length === 1 ? '' : 's'} and coverage</summary>
-      <div className="table-scroll compare-interval-table" role="region" aria-label={`${interval.label} annual observations`} tabIndex={0}>
+      <AnalyticalTable className="compare-interval-table" label={`${interval.label} annual observations`}>
         <table className="table">
-          <thead><tr><th scope="col">Year</th><th scope="col">{labelA}</th><th scope="col">{labelB}</th></tr></thead>
+          <thead><tr><th scope="col">Year</th><th scope="col"><MeasurementHeading label={labelA} unit={aByYear.values().next().value?.unit} /></th><th scope="col"><MeasurementHeading label={labelB} unit={bByYear.values().next().value?.unit} /></th></tr></thead>
           <tbody>{years.map((year) => (
             <tr key={year}>
               <th scope="row">{year}</th>
@@ -487,7 +492,7 @@ function IntervalObservations({ interval, metricKey, labelA, labelB }) {
             </tr>
           ))}</tbody>
         </table>
-      </div>
+      </AnalyticalTable>
       <p className="footnote">Missing observations remain missing; partial group coverage is identified and blocks derived results.</p>
     </details>
   );
@@ -698,21 +703,6 @@ function showIntervalGap(gap, metricKey, fallbackUnit) {
   return resultAmount(gap.value, gap.unit ?? fallbackUnit, metricKey, { compact: isTotalGdp(metricKey) });
 }
 
-function ChartTypeToggle({ value, onChange }) {
-  return (
-    <div className="chart-type-toggle" role="group" aria-label="Chart type">
-      {[
-        { id: 'bar', label: 'Bar chart' },
-        { id: 'line', label: 'Line chart' },
-      ].map((item) => (
-        <button key={item.id} type="button" aria-pressed={value === item.id} onClick={() => onChange(item.id)}>
-          {item.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labelB, metricKey, mode, chartType, onChartType }) {
   const chartIntervals = intervals.filter((interval) => {
     if (interval.kind === 'level') return false;
@@ -724,7 +714,7 @@ function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labe
   if (units.size > 1) return null;
   const unit = units.values().next().value ?? chartIntervals[0].unit ?? null;
   const decimals = changeDecimals(unit, metricKey);
-  const formatTooltip = (value) => resultAmount(value, unit, metricKey);
+  const formatTooltip = (value) => formatAnnualReadout(value, unit, decimals);
   const title = analysisLabel ?? operationLabel(operation);
   const entries = chartIntervals.map((interval) => ({
     x: interval.label,
@@ -737,10 +727,14 @@ function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labe
       unit={unit}
       summary={`${title} for ${labelA} and ${labelB}, ${mode === 'like_for_like' ? 'like-for-like' : 'observed'}, by interval`}
     >
-      <ChartTypeToggle value={chartType} onChange={onChartType} />
+      <ChartTypeToggle value={chartType} onChange={onChartType} lineLabel="Point chart" />
       {chartType === 'line'
         ? <IntervalLineChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} formatTooltip={formatTooltip} />
         : <BarComparisonChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} formatTooltip={formatTooltip} tickUnit={compareCurrencySymbol(unit) ? unit : null} />}
+      <CompareScaleDetail entries={entries} labelA={labelA} labelB={labelB} unit={unit} />
+      <ChartDataFallback label="interval values" columns={[{ header: 'Interval' },
+        { header: labelA, unit }, { header: labelB, unit }]}
+        rows={entries.map(({ x, A, B }) => [x, exactChartValue(A), exactChartValue(B)])} />
     </ChartCard>
   );
 }
@@ -756,128 +750,71 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
   if (seriesA.length < 2 && seriesB.length < 2) return null;
   const metric = data.metric ?? {};
   const unit = metric.unitLong ?? metric.unit ?? null;
+  const basis = subjectOf(metricKey) === 'gdp_per_capita' ? `${unit} per person` : unit;
   const decimals = metricDecimals(metricKey);
   const mode = data.mode ?? data.groupMode ?? 'observed';
   const labelA = countryNames(data.entities?.a);
   const labelB = countryNames(data.entities?.b);
   const observedYears = [...new Set([...seriesA, ...seriesB].map((point) => point.year))].filter(Number.isInteger).sort((a, b) => a - b);
   const first = observedYears[0];
-  const last = observedYears[observedYears.length - 1];
-  const allYears = Number.isInteger(first) && Number.isInteger(last)
-    ? Array.from({ length: last - first + 1 }, (_, i) => first + i)
-    : observedYears;
+  const last = observedYears.at(-1);
+  if (first == null || first === last) return null;
+  const allYears = calendarYears(first, last);
   const requestedYears = [data.years?.a, data.years?.b, data.years?.c].filter(Number.isInteger);
-  const defaultFrom = requestedYears.length ? Math.max(first, Math.min(...requestedYears)) : first;
-  const defaultTo = requestedYears.length ? Math.min(last, Math.max(...requestedYears)) : last;
-  const rangeKey = JSON.stringify([data.entities?.a?.id ?? data.entities?.a?.iso3, data.entities?.b?.id ?? data.entities?.b?.iso3, data.metric?.key, data.basis, data.operation, data.years]);
-  const activeRange = chartRange?.key === rangeKey ? chartRange : { key: rangeKey, from: defaultFrom, to: defaultTo };
-  const chartFrom = activeRange.from;
-  const chartTo = activeRange.to;
-  const rangeError = chartFrom > chartTo ? 'From year must be earlier than or equal to To year.' : !allYears.some((year) => year >= chartFrom && year <= chartTo) ? 'No observations are available in this chart period.' : '';
-  const setRange = (next) => setChartRange({ key: rangeKey, from: next.from, to: next.to });
-  const visibleA = seriesA.filter((point) => point.year >= chartFrom && point.year <= chartTo);
-  const visibleB = seriesB.filter((point) => point.year >= chartFrom && point.year <= chartTo);
+  const defaultFrom = requestedYears.length ? Math.min(last, Math.max(first, Math.min(...requestedYears))) : first;
+  const defaultTo = requestedYears.length ? Math.max(first, Math.min(last, Math.max(...requestedYears))) : last;
+  const rangeKey = JSON.stringify([data.entities?.a?.id ?? data.entities?.a?.iso3, data.entities?.b?.id ?? data.entities?.b?.iso3, data.metric?.key, data.basis, mode, data.years]);
+  const activeRange = chartRange?.key === rangeKey ? chartRange : { from: defaultFrom, to: defaultTo };
+  const { from, to } = activeRange;
+  const visibleYears = calendarYears(from, to);
+  const mapA = new Map(seriesA.map((point) => [point.year, point]));
+  const mapB = new Map(seriesB.map((point) => [point.year, point]));
   const title = `${labelA} vs ${labelB}`;
-  const summary = `${title} — stored observations, ${chartFrom} to ${chartTo} (${mode === 'like_for_like' ? 'like-for-like' : 'observed'})`;
-  const toSeries = (points) => visibleYears.map((year) => ({ x: year, y: valueAt(points, year) }));
-  const cell = (v) => (v === null || v === undefined ? '—' : formatValuePlain(v, metricKey));
-  const visibleYears = allYears.filter((year) => year >= chartFrom && year <= chartTo);
-  const valueAt = (points, year) => points.find((p) => p.year === year)?.value ?? null;
-  const rows = visibleYears
-    .map((year) => [
-      String(year),
-      cell(valueAt(seriesA, year)),
-      cell(valueAt(seriesB, year)),
-    ]);
-
-  if (seriesA.length === 2 && seriesB.length === 2 && data.operation !== 'level') {
-    const at = (points, year) => points.find((p) => p.year === year)?.value ?? null;
-    return (
-      <>
-        <ChartCard title={title} unit={unit} summary={summary}>
-          <SlopeChart
-            items={[
-              { label: labelA, start: at(seriesA, first), end: at(seriesA, last) },
-              { label: labelB, start: at(seriesB, first), end: at(seriesB, last) },
-            ]}
-            startLabel={String(first)}
-            endLabel={String(last)}
-            unit={unit}
-            decimals={decimals}
-          />
-        </ChartCard>
-        <ChartDataFallback
-          label="trajectory endpoint values"
-          regionName="Trajectory endpoint stored observations"
-          columns={[{ header: 'Year' }, { header: labelA }, { header: labelB }]}
-          rows={rows}
-        />
-      </>
-    );
-  }
-
-  const entries = visibleYears.map((year) => ({
-      x: String(year),
-      A: valueAt(seriesA, year),
-      B: valueAt(seriesB, year),
-    }));
+  const summary = `${title} — stored observations, ${from} to ${to} (${mode === 'like_for_like' ? 'like-for-like' : 'observed'})`;
+  const plots = [{ id: 'A', label: labelA, map: mapA }, { id: 'B', label: labelB, map: mapB }]
+    .map(({ id, label, map }) => ({ id, label, points: visibleYears.map((x) => ({ x, y: map.get(x)?.value ?? null })) }));
+  const rows = visibleYears.map((year) => [String(year), ...[mapA, mapB].map((map, index) => {
+    const value = map.get(year)?.value;
+    if (!Number.isFinite(value)) return <span key={index} aria-label="Missing observation">—</span>;
+    return <CompareObservationValue key={index} value={value} metricKey={metricKey} />;
+  })]);
   return (
     <>
-      <ChartCard title={title} unit={unit} summary={summary}>
-        <ChartPeriodControls
-          years={allYears}
-          from={chartFrom}
-          to={chartTo}
-          onChange={setRange}
-          error={rangeError}
-        />
-        <p className="chart-period-caption">Displayed period: {chartFrom}–{chartTo}</p>
-        <ChartTypeToggle value={chartType} onChange={onChartType} />
-        {chartType === 'line'
-          ? <TimeSeriesChart
-            series={[
-              { label: labelA, points: toSeries(visibleA) },
-              { label: labelB, points: toSeries(visibleB) },
-            ]}
-            unit={unit}
-            decimals={decimals}
-            scrollable
+      <ChartCard title={title} unit={basis} summary={summary}>
+        <HistoryWindowControls years={allYears} from={from} to={to} idPrefix="cmp-chart"
+          onChange={(next) => setChartRange({ key: rangeKey, ...next })} reset={() => setChartRange(null)} />
+        <p className="chart-period-caption">Displayed period: {from}–{to}. This window changes the chart and its evidence only.</p>
+        <AnnualChart series={plots} unit={basis} decimals={decimals} chartType={chartType} onChartType={onChartType}
           />
-          : <BarComparisonChart entries={entries} series={[{ key: 'A', label: labelA }, { key: 'B', label: labelB }]} unit={unit} decimals={decimals} scrollable />}
       </ChartCard>
-      <ChartDataFallback
-        label="trajectory values"
-        regionName="Trajectory stored observations by year"
-        columns={[{ header: 'Year' }, { header: labelA }, { header: labelB }]}
-        rows={rows}
-      />
+      <ChartDataFallback label="trajectory values" regionName="Trajectory stored observations by year"
+        columns={[{ header: 'Year' }, { header: labelA, unit: basis }, { header: labelB, unit: basis }]} rows={rows} />
     </>
   );
 }
 
-function ChartPeriodControls({ years, from, to, onChange, error }) {
+function CompareObservationValue({ value, metricKey }) {
+  const rounded = formatValuePlain(value, metricKey);
+  if (!Number.isFinite(value) || Number(value.toFixed(metricDecimals(metricKey))) === value) return rounded;
+  return <details className="history-value"><summary>{rounded}</summary><span>Exact value: {exactChartValue(value)}</span></details>;
+}
+
+function CompareScaleDetail({ entries, labelA, labelB, unit }) {
+  if (!scaleDetailFor(entries, ['A', 'B'])) return null;
   return (
-    <div className="chart-period-controls" aria-label="Chart period filter">
-      <p className="chart-period-label">Chart period</p>
-      <SearchableSelect
-        id="cmp-chart-from"
-        label="From year"
-        value={String(from)}
-        options={years.filter((year) => year <= to).map((year) => ({ value: String(year), label: String(year) }))}
-        onChange={(value) => onChange({ from: Number(value), to })}
-        placeholder="From year"
-      />
-      <SearchableSelect
-        id="cmp-chart-to"
-        label="To year"
-        value={String(to)}
-        options={years.filter((year) => year >= from).map((year) => ({ value: String(year), label: String(year) }))}
-        onChange={(value) => onChange({ from, to: Number(value) })}
-        placeholder="To year"
-      />
-      {error ? <p className="chart-period-error" role="alert">{error}</p> : null}
-    </div>
+    <details className="chart-scale-detail">
+      <summary>Inspect exact comparison values</summary>
+      <p className="chart-note">The chart uses a common scale. The table gives the exact amounts, including values
+        too small to distinguish on a zero-based bar chart.</p>
+      <ChartDataFallback label="exact comparison values"
+        columns={[{ header: 'Period' }, { header: labelA, unit }, { header: labelB, unit }]}
+        rows={entries.map(({ x, A, B }) => [x, exactChartValue(A), exactChartValue(B)])} />
+    </details>
   );
+}
+
+function exactChartValue(value) {
+  return value == null ? '—' : Number(value).toLocaleString('en-US', { maximumSignificantDigits: 21 });
 }
 
 export default function Compare({
