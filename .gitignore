@@ -40,3 +40,6 @@ PROJECT_REQUIREMENTS.md
 # Private planning/audit document (author's working notes; intentionally
 # untracked and never committed)
 /audit+pruposedSolution.txt
+
+# Local AI coding agent skills and configuration
+.agents/
