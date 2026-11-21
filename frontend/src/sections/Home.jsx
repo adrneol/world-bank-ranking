@@ -42,7 +42,6 @@ export default function Home({ sourceName, onOpenView, onOpenSubject }) {
   return (
     <div role="tabpanel" id="panel-home" aria-labelledby="tab-home">
       <div className="insight home-hero" aria-label="Introduction">
-        <p className="eyebrow eyebrow-dark">Transparent · Reproducible · World Bank WDI</p>
         <h2 className="analysis-title">Quality analysis of World Bank raw data — with the methods shown</h2>
         <p>
           This site investigates economies through World Bank World Development Indicators raw

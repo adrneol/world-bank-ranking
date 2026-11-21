@@ -7,6 +7,8 @@
  * environment before any src import; this file runs in its own process.
  */
 
+process.env.PUBLIC_READ_API_ENABLED = '1';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 

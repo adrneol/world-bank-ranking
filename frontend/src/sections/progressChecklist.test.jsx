@@ -118,7 +118,7 @@ describe('refresh progress checklist', () => {
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     expect(container.textContent).toContain('Label nominal_current');
-    expect(container.textContent).toContain('Updated');
+    expect(container.textContent).toContain('Changed · staged');
     expect(container.textContent).toContain('Label nominal_constant');
     expect(container.textContent).toContain('Checked · unchanged');
     expect(container.querySelectorAll('[data-run-state="published"], [data-run-state="unchanged"]')).toHaveLength(2);
@@ -137,7 +137,7 @@ describe('refresh progress checklist', () => {
             metricKeys: KEYS,
             labels: LABELS,
             steps: [
-              step('nominal_current', 'unchanged'),
+              step('nominal_current', 'published'),
               step('nominal_constant', 'failed', { error: 'boom' }),
             ],
           },
@@ -148,10 +148,15 @@ describe('refresh progress checklist', () => {
     const { container, cleanup } = renderSection(<DataStatus onRefreshed={() => {}} />);
     await flushReact(act);
     expect(container.textContent).toContain('Label nominal_constant');
-    expect(container.textContent).toContain('Failed: boom');
+    const failedRow = container.querySelector('[data-run-state="failed"]');
+    expect(failedRow.textContent).toContain('Failed');
+    expect(failedRow.querySelector('button').textContent).toBe('View failure details');
+    expect(failedRow.querySelector('dialog').open).toBe(false);
+    expect(failedRow.querySelector('dialog pre').textContent).toBe('boom');
     expect(container.textContent).toContain('No result recorded');
     expect(container.querySelectorAll('[data-run-state="failed"]')).toHaveLength(1);
     expect(container.textContent).toContain('rolled back — the previous valid dataset remains available');
+    expect(container.querySelector('[data-run-state="published"]').textContent).toContain('Changed · staged');
     expect(container.textContent).toContain('Run history (1)');
     cleanup();
   });

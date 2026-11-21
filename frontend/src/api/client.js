@@ -294,7 +294,7 @@ function requestShared(url, { headers, signal, timeoutMs, recover = false }) {
 }
 
 const get = (path, params, options) => {
-  const { recover, passive, signal, timeoutMs } = options ?? {};
+  const { recover, passive = true, signal, timeoutMs } = options ?? {};
   const query = passive ? { ...params, readOnly: 1 } : params;
   if (!recover) return request(path, { params: query, signal, timeoutMs });
   if (signal?.aborted) return Promise.reject(callerAbortError(signal));
@@ -304,6 +304,7 @@ const get = (path, params, options) => {
 };
 
 export const api = {
+  capabilities: (options) => get('/api/capabilities', {}, options),
   health: (options) => get('/api/health', {}, options),
   years: (options) => get('/api/years', {}, options),
   indiaRanking: ({ startYear, endYear, country, subject } = {}, options) =>

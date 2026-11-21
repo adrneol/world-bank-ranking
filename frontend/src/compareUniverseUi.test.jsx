@@ -822,6 +822,30 @@ describe('compare UI: observed and like-for-like', () => {
     expect(stub.calls.filter((href) => href.includes('/api/observations')).length).toBe(0);
   });
 
+  it('keeps Group available and restores its membership across type changes', async () => {
+    let selected = { kind: 'custom_group', members: ['USA'], label: 'Peers' };
+    const stub = stubFetch([['/api/groups/evaluate', { memberCount: 1 }]]);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let allowed = true;
+    const render = () => root.render(<EntityPicker id="stable" label="Entity A" countries={COUNTRIES.countries}
+      allowGroups={allowed} value={selected} metricKey="total_current" onChange={next => { selected = next; render(); }} />);
+    act(render);
+    ctx = { stub, cleanup: () => { act(() => root.unmount()); container.remove(); } };
+    await flushReact(act);
+    allowed = false;
+    act(render);
+    expect(container.querySelector('.group-editor-trigger')).toBeTruthy();
+    expect(container.textContent).toContain('does not support custom-group calculations');
+    const tab = label => [...container.querySelectorAll('[role="tab"]')].find(button => button.textContent === label);
+    act(() => tab('Country').click());
+    expect(tab('Group')).toBeTruthy();
+    act(() => tab('Group').click());
+    expect(selected.members).toEqual(['USA']);
+    expect(selected.label).toBe('Peers');
+  });
+
   it('sends the selected CPI Basis, canonical metric and mapped calculation to Compare', async () => {
     hydrateRegistry(PRICES_REGISTRY);
     const stub = stubFetch([

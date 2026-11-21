@@ -130,7 +130,7 @@ export default function NavDrawer({
             ×
           </button>
         </div>
-        <p className="navdrawer-sub">Data workspaces. Informational pages stay in the header.</p>
+        <p className="navdrawer-sub">Research workspaces and project information.</p>
         <ul className="navdrawer-list" aria-labelledby="navdrawer-title">
           {destinations.map((destination, index) => {
             const selected = destination.id === active;

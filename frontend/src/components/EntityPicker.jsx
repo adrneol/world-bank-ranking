@@ -153,20 +153,23 @@ function GroupBuilder({ countries, value, onChange, id, metricKey }) {
   </div>;
 }
 
-export default function EntityPicker({ id, label, value, countries = [], aggregates = [], allowGroups = true, metricKey = null, onChange }) {
+export default function EntityPicker({ id, label, value, countries = [], aggregates = [], aggregateError, allowGroups = true, metricKey = null, onChange }) {
   const [kindChoice, setKindChoice] = useState(null);
+  const [selections, setSelections] = useState({});
   const kind = value?.kind ?? kindChoice ?? 'country';
-  const tabs = allowGroups || kind === 'custom_group' ? KIND_TABS : KIND_TABS.filter(tab => tab.id !== 'custom_group');
+  const tabs = KIND_TABS;
 
   function selectKind(nextKind) {
     if (nextKind === kind) return;
+    setSelections(previous => ({ ...previous, [kind]: value }));
     setKindChoice(nextKind);
-    onChange(nextKind === 'custom_group' ? { kind: nextKind, members: [], label: null } : null);
+    onChange(selections[nextKind] ?? (nextKind === 'custom_group' ? { kind: nextKind, members: [], label: null } : null));
   }
 
   return (
     <div className="entity-picker">
       <SubTabs options={tabs} active={kind} onChange={selectKind} label={label + ' type'} />
+      {!allowGroups && kind === 'custom_group' ? <p className="status" role="status">This measure does not support custom-group calculations. Membership can still be reviewed and edited.</p> : null}
       {kind === 'country' ? (
         <SearchableSelect
           id={id}
@@ -178,14 +181,17 @@ export default function EntityPicker({ id, label, value, countries = [], aggrega
         />
       ) : null}
       {kind === 'wb_aggregate' ? (
+        <>
+        {aggregateError ? <p role="status">Aggregate registry unavailable. {aggregateError.message}</p> : null}
         <SearchableSelect
           id={id}
           label={label}
           value={value?.iso3 ?? ''}
           placeholder="Select a World Bank aggregate…"
-          options={(aggregates ?? []).map((a) => ({ value: a.iso3, label: `${a.name} (${a.iso3})`, hint: 'World Bank aggregate' }))}
+          options={(aggregates ?? []).map((a) => ({ value: a.iso3, label: `${a.name} (${a.iso3})`, hint: a.hasData === false ? 'No stored observations for this measure' : 'World Bank aggregate' }))}
           onChange={(iso3) => onChange({ kind: 'wb_aggregate', iso3 })}
         />
+        </>
       ) : null}
       {kind === 'custom_group' ? (
         <div className="field">

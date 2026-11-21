@@ -15,10 +15,10 @@
  */
 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { useId } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { plotMinWidth, toBarEntries } from './chartData.js';
 import { chartTooltipStyle, CHART_COLORS, yAxisWidthFor } from './chartTheme.js';
-import { formatChartValue, formatTickValue, isPercentageUnit } from './chartFormat.js';
+import { formatAnnualReadout, formatTickValue, isPercentageUnit } from './chartFormat.js';
 import ChartLegend from './ChartLegend.jsx';
 import { AnnualPercentagePattern } from './AnnualSeriesMarker.jsx';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
@@ -26,6 +26,25 @@ import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 export default function BarComparisonChart({ entries = [], series = null, unit = null, decimals = 0, formatTooltip = null, tickUnit = unit, height = null, scrollable = false }) {
   const narrow = useIsNarrowChart();
   const pattern = useId();
+  const chart = useRef(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const inspectionKey = JSON.stringify([entries, series, unit]);
+  useEffect(() => {
+    const outside = event => {
+      if (!event.composedPath?.().includes(chart.current) && !chart.current?.contains(event.target)) {
+        setDismissed(true); setPinned(false);
+      }
+    };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, []);
+  useEffect(() => { setDismissed(true); setPinned(false); }, [inspectionKey]);
+  const dismiss = () => {
+    setDismissed(true);
+    setPinned(false);
+    chart.current?.querySelector('[tabindex="0"]')?.focus({ preventScroll: true });
+  };
   // Two shapes: single-series entries [{name, value}] or grouped rows
   // [{x, a, b}] with series [{key, label}] for A-vs-B comparisons.
   const isGrouped = Array.isArray(series) && series.length > 0;
@@ -40,7 +59,10 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
     : null;
   return (
     <>
-      <div className={scrollable ? 'chart-plot-scroll' : undefined} role={scrollable ? 'region' : undefined} aria-label={scrollable ? 'Scrollable chart plot' : undefined} tabIndex={scrollable ? 0 : undefined}>
+      <div ref={chart} data-inspection={pinned ? 'pinned' : 'hover'} data-dismissed={dismissed} onClick={event => { if (!event.target.closest('button')) { setDismissed(false); setPinned(true); } }} onPointerMove={event => { if (event.pointerType === 'mouse' && !pinned && !event.target.closest('button')) setDismissed(false); }}
+        onPointerLeave={event => { if (event.pointerType === 'mouse' && !pinned) setDismissed(true); }}
+        onKeyDown={event => { if (event.key === 'Escape') { setDismissed(true); setPinned(false); } else if (event.key.startsWith('Arrow')) setDismissed(false); }}
+        className={scrollable ? 'chart-plot-scroll' : undefined} role={scrollable ? 'region' : undefined} aria-label={scrollable ? 'Scrollable chart plot' : undefined} tabIndex={scrollable ? 0 : undefined}>
       <div className={`chart-plot${scrollable ? ' chart-plot-wide' : ''}`} style={{ ...(Number.isFinite(height) ? { height } : {}), ...(scrollable ? { '--chart-min-width': `${plotMinWidth(rows.length)}px` } : {}) }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 4 }} barCategoryGap="28%">
@@ -65,7 +87,13 @@ export default function BarComparisonChart({ entries = [], series = null, unit =
               label={unit ? { value: unit, angle: -90, position: 'insideLeft', fontSize: 11, fill: CHART_COLORS.muted } : undefined}
             />
             <Tooltip
-              formatter={(value, name) => [formatTooltip ? formatTooltip(value) : formatChartValue(value, decimals), name]}
+              trigger={pinned ? 'click' : 'hover'}
+              active={dismissed ? false : undefined}
+              wrapperStyle={{ pointerEvents: 'auto' }}
+              content={({ active, label, payload }) => active && payload?.length ? <div className="period-tooltip" style={chartTooltipStyle}>
+                <strong>{label}</strong><button type="button" aria-label="Close chart values" onClick={dismiss}>×</button>
+                <dl>{payload.map(item => <div key={item.dataKey}><dt>{item.name}</dt><dd>{formatTooltip ? formatTooltip(item.value) : formatAnnualReadout(item.value, unit, decimals)}</dd></div>)}</dl>
+              </div> : null}
               contentStyle={chartTooltipStyle}
             />
             {isGrouped

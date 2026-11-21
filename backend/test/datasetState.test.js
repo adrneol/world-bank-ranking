@@ -13,6 +13,8 @@
  *   partial/failed   leave the row exactly as before (atomic rollback)
  */
 
+process.env.PUBLIC_READ_API_ENABLED = '1';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -403,6 +405,10 @@ test('public and passive status verify a cold generation without persisting inte
     const passiveStatus = await svc.status('/api/data-status?readOnly=1');
     assert.equal(publicStatus.integrity.passed, true);
     assert.deepEqual(passiveStatus.integrity, publicStatus.integrity);
+    await svc.status('/API/PUBLIC/DATA-STATUS/');
+    const head = await fetch(svc.base + '/api/public/data-status/', { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    await head.arrayBuffer();
     assert.equal((await svc.status('/api/integrity')).passed, true);
     assert.deepEqual(await repository.getDatasetState(db), before);
     const regularStatus = await svc.status();

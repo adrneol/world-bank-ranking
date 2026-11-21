@@ -82,6 +82,7 @@ function PlotMarks({ plot, geometry, selected, from, to }) {
 export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale = 'linear', label = 'Annual observations', domainMode = 'auto' }) {
   const narrow = useIsNarrowChart();
   const scroller = useRef(null);
+  const layout = useRef(null);
   const frame = useRef(null);
   const previousGeometry = useRef(null);
   const hint = useId();
@@ -91,7 +92,23 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
   const [scroll, setScroll] = useState(0);
   const [active, setActive] = useState(null);
   const [inspection, setInspection] = useState(null);
+  const gesture = useRef(null);
+  const ignoreClickUntil = useRef(0);
   const height = narrow ? 264 : 350;
+  const selectionKey = JSON.stringify([type, scale, domainMode, years,
+    regions.map(region => [region.unit, region.series.map(item => [item.id, item.label, item.values])])]);
+  useEffect(() => {
+    setActive(null);
+    setInspection(null);
+  }, [selectionKey]);
+  useEffect(() => {
+    if (inspection !== 'selected' && inspection !== 'keyboard') return undefined;
+    const dismissOutside = event => {
+      if (!event.composedPath?.().includes(layout.current) && !layout.current?.contains(event.target)) { setActive(null); setInspection(null); }
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    return () => document.removeEventListener('pointerdown', dismissOutside);
+  }, [inspection]);
 
   useEffect(() => {
     const element = scroller.current;
@@ -146,6 +163,7 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
   const mixed = plots.length === 2 && !isPercentageUnit(plots[0].unit) && isPercentageUnit(plots[1].unit);
   const selected = active == null ? null : Math.min(active, years.length - 1);
   const visibleX = selected == null ? null : geometry.x(selected) - viewLeft;
+  const selectedSlotVisible = visibleX != null && visibleX + geometry.step / 2 >= 0 && visibleX - geometry.step / 2 <= viewport;
   const readout = selected == null ? [] : plots.flatMap((plot) => plot.series.map((series) => ({
     ...series, display: formatAnnualReadout(series.values[selected], series.unit ?? plot.unit, series.decimals ?? plot.decimals),
   })));
@@ -168,7 +186,20 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
   const pointAt = (event, input) => {
     const rect = event.currentTarget.getBoundingClientRect();
     setInspection(input);
+    if (scroller.current) setScroll(scroller.current.scrollLeft);
     choose(Math.floor((event.clientX - rect.left) / geometry.step));
+  };
+  const startTouch = event => {
+    if (event.pointerType === 'mouse') return;
+    gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, scroll: scroller.current?.scrollLeft ?? 0 };
+  };
+  const endTouch = event => {
+    const start = gesture.current;
+    gesture.current = null;
+    if (!start || start.id !== event.pointerId) return;
+    ignoreClickUntil.current = Date.now() + 500;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 8 &&
+      Math.abs((scroller.current?.scrollLeft ?? 0) - start.scroll) < 2) pointAt(event, 'selected');
   };
   const onScroll = () => {
     if (frame.current != null) return;
@@ -178,7 +209,7 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
     });
   };
 
-  return <div className={'annual-plot-layout' + (plots[1] ? ' has-right-axis' : '')}>
+  return <div ref={layout} className={'annual-plot-layout' + (plots[1] ? ' has-right-axis' : '')}>
     <div className="annual-plot-instructions">
       <p id={hint}>{domainMode === 'auto' ? 'Auto scales to visible years. Use Fixed to compare slopes across windows.' : 'Fixed scales to the selected period.'}{' '}
         <span>Scroll or use arrow keys to inspect years.</span></p>
@@ -194,8 +225,10 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
       <div className="annual-plot-scroll" role="region" aria-label={label} aria-describedby={mixed ? `${hint} ${axisKey}` : hint}
         tabIndex={0} ref={scroller} onKeyDown={onKeyDown} onScroll={onScroll}>
         <div className="annual-plot-strip" style={{ width: geometry.width }}
-          onPointerMove={(event) => { if (event.pointerType === 'mouse') pointAt(event, 'hover'); }}
-          onClick={(event) => pointAt(event, 'selected')}
+          onPointerDown={startTouch} onPointerUp={endTouch}
+          onPointerCancel={() => { gesture.current = null; ignoreClickUntil.current = Date.now() + 500; }}
+          onPointerMove={(event) => { if (event.pointerType === 'mouse' && inspection !== 'selected') pointAt(event, 'hover'); }}
+          onClick={(event) => { if (Date.now() >= ignoreClickUntil.current) pointAt(event, 'selected'); }}
           onPointerLeave={() => { if (inspection === 'hover') setActive(null); }}>
           <svg className="annual-region-svg" width={geometry.width} height={height} aria-hidden="true">
             <defs><clipPath id={clipId}><rect width={geometry.width} height={height} /></clipPath></defs>
@@ -219,10 +252,13 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
           </svg>
         </div>
       </div>
-      {visibleX != null && visibleX >= 0 && visibleX <= viewport ? (
+      {selectedSlotVisible ? (
         <div className="annual-tooltip" data-side={visibleX < viewport / 2 ? 'end' : 'start'}
+          data-pinned={inspection !== 'hover'}
           role={inspection === 'hover' ? undefined : 'status'}>
           <strong>{years[selected]}</strong>
+          {inspection !== 'hover' ? <button type="button" className="tooltip-close" aria-label="Close chart values"
+            onClick={() => { setActive(null); setInspection(null); scroller.current?.focus({ preventScroll: true }); }}>×</button> : null}
           <dl>{readout.map((item) => <div key={item.id} style={{ '--series-color': item.color }}>
             <dt>{item.label}</dt><dd>{item.display}</dd>
           </div>)}</dl>

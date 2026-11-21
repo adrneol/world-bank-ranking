@@ -1,3 +1,4 @@
+import { AnalyticalTable } from '../components/AnalyticalTable.jsx';
 /**
  * Selected-year comparison across the active subject's four metrics.
  * Reuses the yearly endpoint for a single year so the numbers are identical
@@ -30,7 +31,7 @@ export default function YearComparison({ year, subject = 'gdp_per_capita', count
     >
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="year comparison" />
       {!loading && !error && row ? (
-        <div className="table-scroll" role="region" aria-label="Metric comparison" tabIndex={0}>
+        <AnalyticalTable label="Metric comparison">
           <table className="table">
             <caption className="sr-only">{keys.length}-metric comparison for {year}</caption>
             <thead>
@@ -77,7 +78,7 @@ export default function YearComparison({ year, subject = 'gdp_per_capita', count
               })}
             </tbody>
           </table>
-        </div>
+        </AnalyticalTable>
       ) : null}
     </Section>
   );

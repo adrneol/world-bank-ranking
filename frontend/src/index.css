@@ -1512,7 +1512,8 @@ hr.ddivider {
   /* Wraps on narrow viewports instead of forcing horizontal overflow:
      "+12 positions (moved up)" must never stretch past the screen. */
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
   min-width: 0;
   max-width: 100%;
 }
@@ -3302,7 +3303,6 @@ hr.ddivider {
 .analytical-table.freeze-year .table thead tr:first-child th:first-child {
   position: sticky;
   inset-inline-start: 0;
-  min-width: 3.1rem;
   box-shadow: 1px 0 var(--line);
   z-index: 2;
 }
@@ -3487,6 +3487,8 @@ hr.ddivider {
   padding-inline-start: 0.3rem;
 }
 .annual-tooltip dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.annual-tooltip dt { min-inline-size: 0; }
+.annual-tooltip dl { max-block-size: min(16rem, 45dvh); overflow: auto; }
 
 @media (max-width: 480px) {
   .annual-tooltip { font-size: 0.65rem; padding: 0.3rem; }
@@ -3728,7 +3730,7 @@ hr.ddivider {
 .refresh-outcome::before { content: '✓'; color: var(--ok); margin-inline-end: 0.5rem; }
 .timeline-navigation { display: flex; justify-content: flex-end; gap: 0.4rem; }
 .timeline-navigation button { min-inline-size: 2.75rem; min-block-size: 2.75rem; }
-.trajectory-evidence .table { min-inline-size: 32rem; table-layout: fixed; }
+.trajectory-evidence .table { min-inline-size: 32rem; table-layout: auto; }
 .trajectory-evidence th:first-child { inline-size: 4.4rem; }
 .trajectory-evidence .measurement-heading { max-inline-size: none; }
 .trajectory-value { font-variant-numeric: tabular-nums; }
@@ -3738,3 +3740,69 @@ hr.ddivider {
 .trajectory-value[open] summary::after { content: '−'; }
 .trajectory-exact { display: block; white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
 .trajectory-missing { padding-inline-end: 2rem; }
+.annual-tooltip[data-pinned="true"] { pointer-events: auto; padding-inline-end: 2.8rem; }
+.tooltip-close { position: absolute; inset: 0.15rem 0.15rem auto auto; border: 0; background: transparent; color: var(--ink); min-inline-size: 2.5rem; min-block-size: 2.5rem; cursor: pointer; }
+.period-tooltip { padding: 0.65rem; border: 1px solid var(--line); border-radius: var(--radius-sm); max-inline-size: min(20rem, 75vw); }
+.period-tooltip button { margin-inline-start: 0.8rem; border: 0; color: var(--ink); background: transparent; cursor: pointer; min-inline-size: 2rem; min-block-size: 2rem; }
+.period-tooltip dl { margin: 0.3rem 0 0; }
+.period-tooltip dl > div { display: flex; justify-content: space-between; gap: 0.6rem; }
+.period-tooltip dd { margin: 0; }
+.period-chart-evidence .table { min-inline-size: 30rem; }
+.period-chart-evidence .table :is(th, td):first-child { inline-size: 8rem; white-space: nowrap; }
+.table-scroll { scrollbar-width: auto; scrollbar-color: var(--control-line) var(--surface-subtle); }
+.table-scroll::-webkit-scrollbar { inline-size: 12px; block-size: 12px; }
+.table-scroll::-webkit-scrollbar-thumb { background: var(--control-line); border: 2px solid var(--surface-subtle); border-radius: 4px; }
+.analytical-table-shell { min-inline-size: 0; }
+.table-scroll-actions { display: flex; justify-content: flex-end; gap: 0.3rem; margin-block: 0.25rem; }
+.table-scroll-actions button { min-inline-size: 2.75rem; min-block-size: 2.5rem; padding: 0.2rem; }
+@media (max-width: 640px) {
+  .mainnav > .tabs { display: none; }
+  .header-actions .mainnav { width: auto; overflow: visible; }
+  .navdrawer-trigger { max-inline-size: 100%; white-space: normal; }
+}
+.public-document { max-inline-size: 72rem; margin: auto; padding: clamp(1rem, 4vw, 3rem); }
+.public-document header { display: flex; justify-content: space-between; align-items: center; padding-block: 0.6rem 1.4rem; border-bottom: 2px solid var(--navy); }
+.public-document header a { color: var(--ink); font-family: var(--serif); font-size: 1.2rem; }
+.public-document header button { min-inline-size: 2.75rem; min-block-size: 2.75rem; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.public-document h1 { font: 650 clamp(1.8rem, 4vw, 2.6rem) var(--serif); }
+.public-document p { max-inline-size: 74ch; line-height: 1.65; }
+.public-document nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; padding-block: 1rem; border-block: 1px solid var(--line); }
+.public-document a { color: var(--accent); text-underline-offset: 0.2em; overflow-wrap: anywhere; }
+.public-document code { overflow-wrap: anywhere; white-space: normal; }
+.public-endpoints > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; padding-block: 0.9rem; border-bottom: 1px solid var(--line); }
+.public-endpoints dt strong { display: block; margin-block-start: 0.25rem; font-weight: 500; color: var(--muted); }
+.public-endpoints dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .public-endpoints > div { grid-template-columns: 1fr; gap: 0.35rem; } }
+#home-families .cards, #methodology .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); column-gap: 2rem; row-gap: 0; }
+#home-families .family-card, #methodology .family-card { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 1rem 0; background: transparent; }
+#home-families .family-card h3, #methodology .family-card h3 { font: 600 1.2rem var(--serif); }
+#home-families .family-card .btn, #methodology .family-card .btn { align-self: flex-start; inline-size: fit-content; min-block-size: 2.75rem; padding: 0.25rem 0; border: 0; background: transparent; color: var(--accent); text-align: start; text-decoration: underline; text-underline-offset: 0.25em; }
+.home-hero { border: 0; background: transparent; padding-inline: 0; }
+#about-project .insight { border: 0; padding-inline: 0; background: transparent; }
+#about-project .facts { border-block: 1px solid var(--line); padding-block: 1rem; }
+
+/* Intrinsic semantic columns stay readable; the named region owns overflow. */
+.table :is(th, td)[data-column-kind="year"] { min-inline-size: 4.75rem; white-space: nowrap; }
+.analytical-table.freeze-year .table :is(tbody, thead) th:first-child[data-column-kind="year"] { min-inline-size: 4.75rem; white-space: nowrap; }
+.table :is(th, td)[data-column-kind="rank"] { min-inline-size: 4.25rem; white-space: nowrap; }
+.table :is(th, td)[data-column-kind="iso3"] { min-inline-size: 4.5rem; white-space: nowrap; }
+.table :is(th, td)[data-column-kind="period"] { min-inline-size: 8.5rem; white-space: nowrap; }
+.table :is(th, td)[data-column-kind="timestamp"] { min-inline-size: 12.5rem; white-space: nowrap; }
+.table :is(th, td)[data-column-kind="country"] { min-inline-size: 12rem; }
+.table :is(th, td)[data-column-kind="metric"] { min-inline-size: 12rem; }
+.table :is(th, td)[data-column-kind="unit"] { min-inline-size: 7rem; }
+.table :is(th, td)[data-column-kind="status"] { min-inline-size: 9rem; }
+.table :is(th, td)[data-column-kind="description"] { min-inline-size: 12rem; }
+.table :is(th, td)[data-column-kind="number"], .table :is(th, td)[data-column-kind="rate"] { min-inline-size: 7rem; white-space: nowrap; }
+.table .trajectory-exact { white-space: normal; overflow-wrap: anywhere; }
+.refresh-history-table tbody .run-identity, .refresh-history-table thead th:first-child { position: sticky; inset-inline-start: 0; background: var(--surface); z-index: 2; }
+.refresh-history-table thead th:first-child { background: var(--table-head); z-index: 4; }
+.run-identity small { display: block; color: var(--muted); font-weight: 400; }
+.failure-summary { display: block; max-inline-size: 17rem; }
+.failure-details-trigger { display: block; min-block-size: 2.75rem; margin-block-start: 0.3rem; white-space: nowrap; }
+.failure-details { inline-size: min(54rem, calc(100vw - 2rem)); max-inline-size: calc(100vw - 2rem); max-block-size: calc(100dvh - 2rem); padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink); background: var(--surface); }
+.failure-details::backdrop { background: rgb(0 0 0 / 0.55); }
+.failure-details header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+.failure-details header h3 { margin: 0.4rem 0; }
+.failure-details-scroll { max-block-size: min(55dvh, 24rem); overflow: auto; overscroll-behavior: contain; margin-block: 0.75rem; padding: 0.75rem; border: 1px solid var(--line); }
+.failure-details-scroll pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; font: 0.85rem/1.6 var(--mono); margin: 0; }

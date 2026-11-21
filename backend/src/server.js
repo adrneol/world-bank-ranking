@@ -917,7 +917,7 @@ function requireRefreshAuth(req) {
 
 /**
  * Minimal refresh-specific abuse protection (manual POST /api/data/refresh
- * only — ranking/data GET endpoints are never limited). In-memory sliding
+ * only; analytical reads have their separate shared budget). In-memory sliding
  * window per client IP; intentionally dependency-free. Returns the
  * Retry-After seconds when the caller is over budget, else null.
  */
@@ -971,6 +971,9 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   app.disable('x-powered-by');
   app.use(cors(corsOptions()));
   app.use(express.json({ limit: '64kb' }));
+  // Match Express's default case-insensitive, optional-trailing-slash routes.
+  // Authorization/read-only/budget middleware must recognize every route variant.
+  const routePath = req => req.path.toLowerCase().replace(/\/+$/, '');
 
   // ---------- readiness gate (Phase 8G) ----------
   // Before initialization completes, every /api route EXCEPT /api/health
@@ -979,9 +982,13 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // process-state check: no database work, no scans, no writes. Placed
   // before the TTL middleware so nothing auto-triggers pre-ready.
   app.use((req, res, next) => {
+    const path = routePath(req);
+    if (!config.publicReadApiEnabled && /^\/api\/public(?:\/|$)/.test(path)) {
+      return res.status(404).json({ error: { message: `Unknown endpoint: ${req.method} ${req.path}`, code: 'NOT_FOUND' } });
+    }
     if (getServiceReadiness().ready) return next();
-    if (req.path === '/api/health') return next();
-    if (!req.path.startsWith('/api/')) return next();
+    if (path === '/api/health' || path === '/api/capabilities') return next();
+    if (!path.startsWith('/api/')) return next();
     res.status(503).json({
       error: {
         message: 'Data service is starting. It will be ready shortly.',
@@ -991,6 +998,34 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       state: getServiceReadiness().state,
     });
   });
+
+  // Budget legacy reads before TTL checks as well as their published aliases.
+  // The paths are registered synchronously below before requests can arrive.
+  const publicReadPaths = new Set(['/api/india/gdp-ranking', '/api/integrity', '/api/geo/country']);
+  const publicBudgets = new Map();
+  const limitPublicRead = (req, res, next) => {
+    if (req.readBudgetCounted) return next();
+    const minute = Math.floor(Date.now() / 60000);
+    const key = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    const previous = publicBudgets.get(key);
+    const count = previous?.minute === minute ? previous.count : 0;
+    if (count >= 60) {
+      res.setHeader('Retry-After', String(60 - Math.floor(Date.now() / 1000) % 60));
+      return res.status(429).json({ error: { code: 'PUBLIC_READ_RATE_LIMITED', message: 'Public read request limit reached. Retry after the indicated delay.' } });
+    }
+    if (!previous && publicBudgets.size >= 2048) publicBudgets.delete(publicBudgets.keys().next().value);
+    publicBudgets.set(key, { minute, count: count + 1 });
+    req.readBudgetCounted = true;
+    req.publicCatalogRead = routePath(req).startsWith('/api/public/');
+    next();
+  };
+  // Runtime publication state is available even while data is starting.
+  // It reads configuration only, shares read abuse protection and is never cached.
+  app.get('/api/capabilities', limitPublicRead, (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ publicReadApiEnabled: config.publicReadApiEnabled });
+  });
+  app.use((req, res, next) => ['GET', 'HEAD'].includes(req.method) && publicReadPaths.has(routePath(req)) ? limitPublicRead(req, res, next) : next());
 
   // ---------- automatic TTL refresh ----------
   // Fire-and-forget: when the cache is empty or stale, a background refresh
@@ -1055,24 +1090,15 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
 
   // Public catalog routes reuse the same validators and response handlers.
   // Their exact paths are outside the legacy UI's automatic TTL trigger list.
-  const publicBudgets = new Map();
-  const limitPublicRead = (req, res, next) => {
-    const minute = Math.floor(Date.now() / 60000);
-    const key = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-    const previous = publicBudgets.get(key);
-    const count = previous?.minute === minute ? previous.count : 0;
-    if (count >= 60) {
-      res.setHeader('Retry-After', String(60 - Math.floor(Date.now() / 1000) % 60));
-      return res.status(429).json({ error: { code: 'PUBLIC_READ_RATE_LIMITED', message: 'Public read request limit reached. Retry after the indicated delay.' } });
-    }
-    if (!previous && publicBudgets.size >= 2048) publicBudgets.delete(publicBudgets.keys().next().value);
-    publicBudgets.set(key, { minute, count: count + 1 });
-    req.publicCatalogRead = true;
-    next();
-  };
   const publicRead = (path, handler) => {
-    app.get(path, handler);
-    app.get(path.replace('/api/', '/api/public/'), limitPublicRead, handler);
+    publicReadPaths.add(path);
+    app.get(path, limitPublicRead, handler);
+    if (config.publicReadApiEnabled) {
+      const alias = path.replace('/api/', '/api/public/');
+      publicReadPaths.add(alias);
+      // Bind passive semantics to the actual registered alias, including HEAD.
+      app.get(alias, (req, res, next) => { req.publicCatalogRead = true; next(); }, limitPublicRead, handler);
+    }
   };
 
   // ---------- default-country geolocation ----------
@@ -1876,6 +1902,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       countries: rows.map((c) => ({
         id: c.id,
         iso3: c.iso3,
+        iso2: c.iso2 ?? null,
         name: c.name,
         region: c.region,
         regionId: c.region_id,
@@ -1959,6 +1986,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
 
   // ---------- data status ----------
   publicRead('/api/data-status', ah(async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
     const h = handle();
     const target = activeTargetOf(shared);
     const cache = await getCacheStatus(h);
@@ -2128,6 +2156,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       : null;
     res.json({
       ...cache,
+      capabilities: { publicReadApiEnabled: config.publicReadApiEnabled },
       // Authoritative upstream World Bank vintage: MAX(wb_last_updated)
       // across stored observations (each row carries the WDI `lastupdated`
       // from its own retrieval). Distinct from lastSuccessAt below, which

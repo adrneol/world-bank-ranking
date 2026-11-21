@@ -114,20 +114,25 @@ function triggerLabel(container) {
 
 async function goBack() {
   await act(async () => {
-    window.history.back();
-    // jsdom fires popstate as a separate task; yield long enough for it.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await traverseHistory(() => window.history.back());
   });
   await flushReact(act);
 }
 
 async function goForward() {
   await act(async () => {
-    window.history.forward();
-    // jsdom fires popstate as a separate task; yield long enough for it.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await traverseHistory(() => window.history.forward());
   });
   await flushReact(act);
+}
+
+function traverseHistory(action) {
+  return new Promise((resolve, reject) => {
+    const complete = () => { clearTimeout(timeout); resolve(); };
+    const timeout = setTimeout(() => { window.removeEventListener('popstate', complete); reject(new Error('History traversal did not emit popstate')); }, 5000);
+    window.addEventListener('popstate', complete, { once: true });
+    action();
+  });
 }
 
 async function pickCombo(container, buttonId, optionText) {

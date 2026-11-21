@@ -19,6 +19,9 @@ function isolateTestDatabase() {
   process.env.TURSO_DATABASE_URL = '';
   process.env.TURSO_AUTH_TOKEN = '';
   process.env.REFRESH_ADMIN_TOKEN = '';
+  // Fixture suites exercise the published route matrix explicitly. Product
+  // defaults are tested in fresh child processes by publicApiSwitch.test.js.
+  process.env.PUBLIC_READ_API_ENABLED ??= '1';
   process.env.DB_MODE = 'local';
   process.env.WORLD_BANK_API_BASE_URL = 'http://127.0.0.1:9/v2';
   process.env.GEO_PROVIDER_URL = 'http://127.0.0.1:9/{ip}';

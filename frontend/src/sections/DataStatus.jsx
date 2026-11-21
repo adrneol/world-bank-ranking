@@ -32,6 +32,7 @@ import {
 } from '../utils/format.js';
 import { BootstrapStillConnecting } from '../components/BootstrapStatus.jsx';
 import IndicatorMonitor from '../components/IndicatorMonitor.jsx';
+import RefreshHistory from '../components/RefreshHistory.jsx';
 import { Section, StatusBlock } from '../components/ui.jsx';
 
 /** Full refreshes stream dozens of indicator payloads; bound the POST at 10 min. */
@@ -473,7 +474,8 @@ export default function DataStatus({ onRefreshed }) {
                 onToggle={(event) => setDetailsOpen(event.target.open)}
               >
                 <summary>Indicator results and timestamps</summary>
-                <IndicatorMonitor keys={activeKeys} steps={activeStepByKey} labelOf={labelOf} polling={polling} runningKey={runningKey} />
+                <IndicatorMonitor keys={activeKeys} steps={activeStepByKey} labelOf={labelOf} polling={polling} runningKey={runningKey}
+                  publication={refreshCompletedOk ? 'completed' : refreshRolledBack ? 'not-published' : 'pending'} />
               </details>
               ) : null}
             </div>
@@ -489,72 +491,7 @@ export default function DataStatus({ onRefreshed }) {
             </p>
           ) : null}
 
-          {data.latestRuns?.length > 0 ? (
-            <details className="details">
-              <summary>Run history ({data.latestRuns.length})</summary>
-              <div className="table-scroll" role="region" aria-label="Recent refresh runs" tabIndex={0}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Run</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Trigger</th>
-                      <th scope="col">Started UTC</th>
-                      <th scope="col">Completed UTC</th>
-                      <th scope="col">Duration</th>
-                      <th scope="col" className="num">
-                        Retrieved
-                      </th>
-                      <th scope="col" className="num">
-                        Upserted
-                      </th>
-                      <th scope="col" className="num">
-                        Skipped
-                      </th>
-                      <th scope="col" className="num">
-                        Updated
-                      </th>
-                      <th scope="col" className="num">
-                        Unchanged
-                      </th>
-                      <th scope="col">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {/* User-facing run number: ordinal position within the
-                        currently visible newest-first list (newest visible =
-                        list length … oldest visible = 1). The persistent
-                        database run id (run.id, used as the React key and
-                        untouched everywhere else) is never renumbered. */}
-                    {data.latestRuns.map((run, index) => (
-                      <tr key={run.id}>
-                        <th scope="row" className="num">
-                          #{data.latestRuns.length - index}
-                        </th>
-                        <td>{run.status}</td>
-                        <td>{run.trigger ?? '—'}</td>
-                        <td>{run.started_at ? (formatUtcDateTimeSeconds(run.started_at) ?? run.started_at) : '—'}</td>
-                        <td>
-                          {run.completed_at ? (formatUtcDateTimeSeconds(run.completed_at) ?? run.completed_at) : '—'}
-                        </td>
-                        <td>
-                          {run.duration_ms !== null && run.duration_ms !== undefined
-                            ? formatDurationMsValue(run.duration_ms)
-                            : formatDurationMs(run.started_at, run.completed_at)}
-                        </td>
-                        <td className="num">{run.rows_retrieved ?? '—'}</td>
-                        <td className="num">{run.rows_upserted ?? '—'}</td>
-                        <td className="num">{run.rows_skipped_unchanged ?? '—'}</td>
-                        <td className="num">{run.summary_counts?.updated ?? '—'}</td>
-                        <td className="num">{run.summary_counts?.unchanged ?? '—'}</td>
-                        <td>{run.error_message ?? '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          ) : null}
+          <RefreshHistory runs={data.latestRuns} />
         </>
       ) : null}
     </Section>

@@ -1,3 +1,4 @@
+import { AnalyticalTable } from '../components/AnalyticalTable.jsx';
 /**
  * YoY rank verification: focus country plus N neighbors from the SAME
  * YoY-ranked dataset, with previous/current raw values and the coverage block.
@@ -24,7 +25,7 @@ function YoyTable({ focus, above, below, metricKey }) {
   ];
   if (rows.length === 0) return null;
   return (
-    <div className="table-scroll" role="region" aria-label="YoY verification table" tabIndex={0}>
+    <AnalyticalTable label="YoY verification table" freezeYear={false}>
       <table className="table">
         <caption className="sr-only">Neighboring countries around the focus country in the YoY ranking</caption>
         <thead>
@@ -65,7 +66,7 @@ function YoyTable({ focus, above, below, metricKey }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </AnalyticalTable>
   );
 }
 

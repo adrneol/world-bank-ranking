@@ -1,10 +1,11 @@
 import { AnalyticalTable } from './AnalyticalTable.jsx';
 import { METRICS } from '../config/metrics.js';
 import { formatUtcDateTimeSeconds } from '../utils/format.js';
+import FailureDetails from './FailureDetails.jsx';
 
 const results = { published: 'Updated', unchanged: 'Checked · unchanged', failed: 'Failed' };
 
-export default function IndicatorMonitor({ keys, steps, labelOf, polling, runningKey }) {
+export default function IndicatorMonitor({ keys, steps, labelOf, polling, runningKey, publication = 'pending' }) {
   const indicators = [...new Set([...Object.keys(METRICS), ...keys])];
   const attempted = new Set(keys);
   return <AnalyticalTable label="Indicator monitoring" freezeYear={false} className="indicator-monitor">
@@ -14,11 +15,11 @@ export default function IndicatorMonitor({ keys, steps, labelOf, polling, runnin
         const step = steps.get(key);
         const metric = METRICS[key];
         const state = results[step?.status] ? step.status : runningKey === key ? 'checking' : attempted.has(key) ? 'waiting' : 'outside';
-        const result = results[state] ?? (state === 'checking' ? 'Checking' : state === 'waiting' ? (polling ? 'Waiting' : 'No result recorded') : 'Outside reported run');
+        const result = state === 'published' && publication !== 'completed' ? 'Changed · staged' : results[state] ?? (state === 'checking' ? 'Checking' : state === 'waiting' ? (polling ? 'Waiting' : 'No result recorded') : 'Outside reported run');
         return <tr key={key} data-run-state={state}>
           <th scope="row">{labelOf(key) ?? metric?.title ?? key}{metric?.indicatorCode ? <small className="monitor-code">{metric.indicatorCode}</small> : null}</th>
           <td>{metric?.unitLong ?? metric?.unit ?? '—'}</td>
-          <td className={step?.status === 'failed' ? 'monitor-error' : undefined}>{result}{step?.error ? <>: {step.error}</> : null}
+          <td className={step?.status === 'failed' ? 'monitor-error' : undefined}>{result}{step?.error ? <FailureDetails title={`${labelOf(key) ?? metric?.title ?? key} — failure details`} text={typeof step.error === 'string' ? step.error : JSON.stringify(step.error, null, 2)} /> : null}
             {step?.at ? <small className="monitor-code"><time dateTime={step.at}>{formatUtcDateTimeSeconds(step.at) ?? step.at}</time></small> : null}</td>
         </tr>;
       })}</tbody>

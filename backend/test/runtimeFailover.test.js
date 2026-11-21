@@ -9,6 +9,8 @@
  * No test touches live Turso or the live World Bank API (stub + memory DBs).
  */
 
+process.env.PUBLIC_READ_API_ENABLED = '1';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 

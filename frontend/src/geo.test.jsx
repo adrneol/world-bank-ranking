@@ -6,9 +6,9 @@
  * never overrides, never re-polls. Failures and invalid values keep the
  * fallback silently. No test touches the network.
  */
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { flushReact, stubFetch } from './test-utils.js';
 import App from './App.jsx';
@@ -29,6 +29,7 @@ const COUNTRIES = {
     { iso3: 'GBR', name: 'United Kingdom' },
     { iso3: 'JPN', name: 'Japan' },
     { iso3: 'CHN', name: 'China' },
+    { iso3: 'BRA', name: 'Brazil' },
   ],
 };
 
@@ -51,15 +52,19 @@ const INDICATORS = {
   methodology: {},
 };
 
-function renderApp(url) {
+let activeCleanup;
+function renderApp(url, strict = false) {
   window.history.replaceState(null, '', url);
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() => {
-    root.render(<App />);
+    root.render(strict ? <StrictMode><App /></StrictMode> : <App />);
   });
-  return { container, cleanup: () => act(() => root.unmount()) || container.remove() };
+  let mounted = true;
+  const cleanup = () => { if (!mounted) return; mounted = false; act(() => root.unmount()); container.remove(); };
+  activeCleanup = cleanup;
+  return { container, cleanup };
 }
 
 function geoCalls(stub) {
@@ -98,13 +103,126 @@ describe('default-country geolocation precedence', () => {
     window.history.replaceState(null, '', '/');
   });
   afterEach(() => {
+    activeCleanup?.(); activeCleanup = null;
     stub?.restore();
     stub = null;
     document.body.innerHTML = '';
     window.history.replaceState(null, '', '/');
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it.each(['USA', 'IND', 'GBR', 'JPN', 'DEU', 'ZZZ', 'BAD!', null])('uses only a registered geographic result for Compare A (%s)', async (iso3) => {
+  it('uses an explicit eligible shared focus for fresh Compare A without a location lookup', async () => {
+    stub = stubFetch([['/api/geo/country', { iso3: 'JPN', source: 'geoip' }], ['/api/years', YEARS],
+      ['/api/countries', COUNTRIES], ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
+    const { cleanup } = renderApp('/compare/?country=USA');
+    await flushReact(act);
+    expect(new URLSearchParams(location.search).get('cmpEntityA')).toBe('country:USA');
+    expect(new URLSearchParams(location.search).get('cmpEntityB')).toBeNull();
+    expect(geoCalls(stub)).toHaveLength(0);
+    cleanup();
+  });
+
+  it('does not let an invalid URL country block eligible geographic initialization', async () => {
+    stub = stubFetch([['/api/geo/country', { iso3: 'JPN', source: 'geoip' }], ['/api/years', YEARS],
+      ['/api/countries', COUNTRIES], ['/api/indicators', INDICATORS]]);
+    const { cleanup } = renderApp('/overview/?country=ZZZ');
+    await flushReact(act);
+    expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    cleanup();
+  });
+
+  it('retries an initial location failure once after the country registry recovers', async () => {
+    vi.useFakeTimers();
+    let release;
+    const registry = new Promise(resolve => { release = resolve; });
+    let attempts = 0;
+    stub = stubFetch([['/api/geo/country', async () => ++attempts === 1
+      ? { ok: false, status: 503, json: async () => ({ error: { code: 'DATA_SERVICE_STARTING', message: 'Starting' } }) }
+      : { ok: true, status: 200, json: async () => ({ iso3: 'JPN', source: 'geoip' }) }],
+      ['/api/years', YEARS], ['/api/countries', () => registry], ['/api/indicators', INDICATORS]]);
+    const { cleanup } = renderApp('/overview/');
+    await flushReact(act, 12);
+    release({ ok: true, status: 200, json: async () => COUNTRIES });
+    await flushReact(act, 12); await act(() => vi.advanceTimersByTimeAsync(600)); await flushReact(act, 12);
+    expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    expect(attempts).toBe(2);
+    cleanup();
+  });
+
+  it.each(['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit', 'compare'])('initializes a direct %s entry from the same validated identity', async view => {
+    stub = stubFetch([['/api/location', { iso2: 'JP', source: 'frontend-edge' }], ['/api/years', YEARS],
+      ['/api/countries', { countries: COUNTRIES.countries.map(row => ({ ...row, iso2: row.iso3 === 'JPN' ? 'JP' : null })) }],
+      ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
+    const { cleanup } = renderApp('/' + view + '/'); await flushReact(act);
+    expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    if (view === 'compare') {
+      expect(new URLSearchParams(location.search).get('cmpEntityA')).toBe('country:JPN');
+      expect(new URLSearchParams(location.search).get('cmpEntityB')).toBeNull();
+    }
+    expect(stub.calls.filter(url => url === '/api/location')).toHaveLength(1);
+    expect(geoCalls(stub)).toHaveLength(0);
+    cleanup();
+  });
+
+  it.each([true, false])('retains a valid early edge result while the registry loads (public API %s)', async enabled => {
+    let release;
+    const registry = new Promise(resolve => { release = resolve; });
+    stub = stubFetch([['/api/location', { iso2: 'BR', source: 'frontend-edge' }], ['/api/capabilities', { publicReadApiEnabled: enabled }],
+      ['/api/years', YEARS], ['/api/countries', () => registry], ['/api/indicators', INDICATORS]]);
+    const { container, cleanup } = renderApp('/overview/'); await flushReact(act);
+    expect(container.textContent).toContain('Identifying your regional economy');
+    expect(container.textContent).not.toContain('Select a focus economy to open');
+    release({ ok: true, status: 200, json: async () => ({ countries: COUNTRIES.countries.map(row => ({ ...row, iso2: row.iso3 === 'BRA' ? 'BR' : null })) }) });
+    await flushReact(act);
+    expect(new URLSearchParams(location.search).get('country')).toBe('BRA');
+    expect(stub.calls.filter(url => url === '/api/location')).toHaveLength(1);
+    cleanup();
+  });
+
+  it('waits for late location, preserves manual Compare A independently, and reuses focus across pages', async () => {
+    let release;
+    const edge = new Promise(resolve => { release = resolve; });
+    stub = stubFetch([['/api/location', () => edge], ['/api/years', YEARS], ['/api/countries', { countries: COUNTRIES.countries.map(row => ({ ...row, iso2: row.iso3 === 'JPN' ? 'JP' : null })) }],
+      ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
+    const { container, cleanup } = renderApp('/compare/'); await flushReact(act);
+    expect(container.textContent).toContain('Identifying your regional economy');
+    release({ ok: true, status: 200, json: async () => ({ iso2: 'JP', source: 'frontend-edge' }) }); await flushReact(act);
+    act(() => container.querySelector('#cmp-a').click());
+    const usa = [...document.querySelectorAll('.combo-option')].find(option => option.textContent.includes('United States'));
+    act(() => usa.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))); await flushReact(act);
+    expect(new URLSearchParams(location.search).get('cmpEntityA')).toBe('country:USA');
+    expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    for (const label of ['Overview', 'Data', 'Rank', 'Movement', 'YoY', 'Coverage', 'Audit']) {
+      drawerGo(container, label); await flushReact(act);
+      expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    }
+    expect(stub.calls.filter(url => url === '/api/location')).toHaveLength(1);
+    cleanup();
+  });
+
+  it('keeps one location flight through development StrictMode replay', async () => {
+    stub = stubFetch([['/api/location', { iso2: 'JP', source: 'frontend-edge' }], ['/api/years', YEARS],
+      ['/api/countries', { countries: COUNTRIES.countries.map(row => ({ ...row, iso2: row.iso3 === 'JPN' ? 'JP' : null })) }], ['/api/indicators', INDICATORS]]);
+    const { cleanup } = renderApp('/overview/', true); await flushReact(act, 12);
+    expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    expect(stub.calls.filter(url => url === '/api/location')).toHaveLength(1);
+    cleanup();
+  });
+
+  it('normalizes automatic focus in place while deliberate workspace navigation still creates history', async () => {
+    const push = vi.spyOn(window.history, 'pushState');
+    stub = stubFetch([['/api/location', { iso2: 'JP', source: 'frontend-edge' }], ['/api/years', YEARS],
+      ['/api/countries', { countries: COUNTRIES.countries.map(row => ({ ...row, iso2: row.iso3 === 'JPN' ? 'JP' : null })) }], ['/api/indicators', INDICATORS]]);
+    const { container, cleanup } = renderApp('/overview/'); await flushReact(act, 12);
+    expect(new URLSearchParams(location.search).get('country')).toBe('JPN');
+    expect(push).not.toHaveBeenCalled();
+    drawerGo(container, 'Rank'); await flushReact(act);
+    expect(push).toHaveBeenCalledTimes(1);
+    push.mockRestore(); cleanup();
+  });
+
+  it.each(['USA', 'IND', 'GBR', 'JPN', 'DEU', 'BRA', 'ZZZ', 'BAD!', null])('uses only a registered geographic result for Compare A (%s)', async (iso3) => {
     stub = stubFetch([['/api/geo/country', { iso3, source: iso3 ? 'geoip' : 'fallback' }],
       ['/api/years', YEARS], ['/api/countries', COUNTRIES], ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
     const { cleanup } = renderApp('/compare/');
@@ -129,6 +247,18 @@ describe('default-country geolocation precedence', () => {
     act(() => japan.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
     release({ ok: true, status: 200, headers: new Headers(), json: async () => ({ iso3: 'USA', source: 'geoip' }) });
     await flushReact(act);
+    expect(new URLSearchParams(window.location.search).get('cmpEntityA')).toBe('country:JPN');
+    expect(new URLSearchParams(window.location.search).get('cmpEntityB')).toBeNull();
+    cleanup();
+  });
+
+  it('initializes focus and Compare A together without selecting B', async () => {
+    stub = stubFetch([['/api/geo/country', { iso3: 'JPN', source: 'geoip' }],
+      ['/api/years', YEARS], ['/api/countries', { countries: COUNTRIES.countries.map(row => ({ ...row, iso2: row.iso3 === 'JPN' ? 'JP' : 'XX' })) }],
+      ['/api/indicators', INDICATORS], ['/api/entities', { entities: [] }]]);
+    const { cleanup } = renderApp('/compare/');
+    await flushReact(act);
+    expect(new URLSearchParams(window.location.search).get('country')).toBe('JPN');
     expect(new URLSearchParams(window.location.search).get('cmpEntityA')).toBe('country:JPN');
     expect(new URLSearchParams(window.location.search).get('cmpEntityB')).toBeNull();
     cleanup();
@@ -172,7 +302,7 @@ describe('default-country geolocation precedence', () => {
     }
   });
 
-  it('geo failure and invalid values keep the India fallback silently', async () => {
+  it('geo failure and invalid values keep a neutral manual fallback', async () => {
     for (const geo of [{ iso3: null, source: 'fallback' }, { iso3: 'XX', source: 'geoip' }, { iso3: '', source: 'geoip' }]) {
       stub = stubFetch([
         ['/api/geo/country', geo],

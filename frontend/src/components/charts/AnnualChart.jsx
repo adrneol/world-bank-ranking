@@ -60,7 +60,11 @@ export default function AnnualChart({
 export function AnnualOrCategoricalChart({ entries, series, ...format }) {
   const years = entries.map((row) => String(row.x ?? row.name));
   if (years.length < 2 || years.some((year) => !/^\d{4}$/.test(year)) || new Set(years).size !== years.length) {
-    return <BarComparisonChart entries={entries} series={series} {...format} />;
+    return <>
+      <BarComparisonChart entries={entries} series={series} {...format} />
+      <ChartDataFallback label="plotted period values" className="period-chart-evidence" columns={[{ header: 'Period' }, ...(series?.length ? series : [{ key: 'value', label: 'Value' }]).map(item => ({ header: item.label, unit: format.unit }))]}
+        rows={entries.map(row => [String(row.x ?? row.name), ...(series?.length ? series : [{ key: 'value' }]).map(item => row[item.key] == null ? '—' : String(row[item.key]))])} />
+    </>;
   }
   const measures = series?.length ? series : [{ key: 'value', label: 'Value' }];
   const plots = annualSeries(entries, measures);

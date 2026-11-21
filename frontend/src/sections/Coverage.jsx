@@ -1,3 +1,4 @@
+import { AnalyticalTable } from '../components/AnalyticalTable.jsx';
 /**
  * Data coverage: per-metric valid/missing counts, YoY pair counts, and the
  * backend's evidence-only changing-totals explanation (CASE A/B/C/D).
@@ -35,7 +36,7 @@ export default function Coverage({ year, metricKey, fromYear, toYear, subject = 
       <StatusBlock loading={loading} error={error} empty={empty} onRetry={retry} sectionName="coverage" />
       {!loading && !error && data ? (
         <>
-          <div className="table-scroll" role="region" aria-label="Coverage by metric" tabIndex={0}>
+          <AnalyticalTable label="Coverage by metric">
             <table className="table">
               <caption className="sr-only">Coverage per metric for {year}</caption>
               <thead>
@@ -69,10 +70,10 @@ export default function Coverage({ year, metricKey, fromYear, toYear, subject = 
                 ))}
               </tbody>
             </table>
-          </div>
+          </AnalyticalTable>
 
           <h3 className="subhead">YoY coverage</h3>
-          <div className="table-scroll" role="region" aria-label="YoY coverage by metric" tabIndex={0}>
+          <AnalyticalTable label="YoY coverage by metric">
             <table className="table">
               <caption className="sr-only">YoY coverage per metric for {year}</caption>
               <thead>
@@ -102,7 +103,7 @@ export default function Coverage({ year, metricKey, fromYear, toYear, subject = 
                 ))}
               </tbody>
             </table>
-          </div>
+          </AnalyticalTable>
 
           {explanation ? (
             <div className="explanation" aria-live="polite">

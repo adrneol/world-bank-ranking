@@ -2,14 +2,15 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { readFileSync } from 'node:fs'
 import { publicDocuments } from './public-pages.js'
+import { locationEndpoint } from './server/locationPlugin.js'
 
-const catalog = JSON.parse(readFileSync(new URL('./public/data-catalog.json', import.meta.url), 'utf8'))
+const catalog = JSON.parse(readFileSync(new URL('./data-catalog.json', import.meta.url), 'utf8'))
 const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL
 const origin = productionHost ? `https://${productionHost}` : null
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), publicDocuments({ origin, catalog })],
+  plugins: [react(), locationEndpoint(), publicDocuments({ origin, catalog })],
   server: {
     port: 5173,
     proxy: {

@@ -1,3 +1,4 @@
+import { AnalyticalTable } from '../components/AnalyticalTable.jsx';
 /**
  * Level rank verification: focus country plus N neighbors above/below from
  * the SAME backend ranking. Neighbor rows come from the backend response
@@ -18,7 +19,7 @@ function VerifyTable({ focus, above, below }) {
   ];
   if (rows.length === 0) return null;
   return (
-    <div className="table-scroll" role="region" aria-label="Rank verification table" tabIndex={0}>
+    <AnalyticalTable label="Rank verification table" freezeYear={false}>
       <table className="table">
         <caption className="sr-only">Neighboring countries around the focus country in the ranking</caption>
         <thead>
@@ -51,7 +52,7 @@ function VerifyTable({ focus, above, below }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </AnalyticalTable>
   );
 }
 

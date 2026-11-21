@@ -28,9 +28,12 @@ import FocusPicker from './components/FocusPicker.jsx';
 import Tabs, { SubTabs } from './components/Tabs.jsx';
 import NavDrawer, { NavDrawerTrigger } from './components/NavDrawer.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
+import MouseScrollSupport from './components/MouseScrollSupport.jsx';
 import { BootstrapError, BootstrapStillConnecting, BootstrapWarmup } from './components/BootstrapStatus.jsx';
 import { siteMetadata } from './config/site.js';
 import { pagePath, publicPages, viewAtPath } from './config/publicPages.js';
+import { usePublicApiAvailability } from './hooks/usePublicApiAvailability.js';
+import { useEconomyInitialization } from './hooks/useEconomyInitialization.js';
 import { getHeaderContext } from './utils/headerContext.js';
 import Home from './sections/Home.jsx';
 import About from './sections/About.jsx';
@@ -90,9 +93,10 @@ function navKey(effective, rankSub, yoySub) {
 
 // Canonical initial filter state: product defaults overlaid once with the
 // URL at startup. popstate restores use the same constructor so an omitted
-// parameter (e.g. country for the IND default) resets to its default
+// parameter (e.g. an unselected country) resets to its default
 // instead of leaking the previous state's value.
 function defaultFilters() {
+  const url = readUrlState();
   return {
     startYear: null,
     endYear: null,
@@ -112,15 +116,10 @@ function defaultFilters() {
     cmpYearC: null,
     cmpOp: 'level',
     cmpMode: 'observed',
-    ...readUrlState(),
+    ...url,
+    countrySource: String(url.country ?? '').trim() ? 'explicit' : 'unset',
   };
 }
-
-// Default-country geolocation policy (Phase 3, Part B): one mount-only
-// lookup, applied solely as the INITIAL default when no explicit country
-// exists (URL or in-session user choice). Never polled, never re-applied,
-// never an override. Bounded so a slow provider cannot delay the app.
-const GEO_TIMEOUT_MS = 4000;
 
 function YearOptions({ years, id, value, onChange, label }) {
   return (
@@ -213,19 +212,12 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTriggerRef = useRef(null);
   const compareChoiceRef = useRef(false);
-  const compareHasSelectionRef = useRef(Boolean(readUrlState().cmpEntityA));
-  const geoRequestedRef = useRef(false);
-  const [geoCountry, setGeoCountry] = useState(null);
-  // Addressable focus and in-session choices take priority over location.
-  const countryExplicitRef = useRef(
-    new URLSearchParams(window.location.search).get('country') != null &&
-      new URLSearchParams(window.location.search).get('country') !== '',
-  );
   // History sync (Phase 3, Part D): last pushed URL + the key fields that
   // earn a history entry. popSuppressRef skips one mirror sync after a
   // popstate restore so normalization never rewrites the history stack.
   const lastUrlRef = useRef(null);
   const lastNavRef = useRef(null);
+  const lastCountryRef = useRef(null);
   const popSuppressRef = useRef(false);
 
   // Public site display metadata (About/Home labels only; analytical data
@@ -317,18 +309,22 @@ export default function App() {
   // authority for names; the picker lists countries only — no aggregates,
   // regions or custom groups until Phase 4).
   const [countriesData, setCountriesData] = useState(null);
+  const [countriesState, setCountriesState] = useState('loading');
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+    setCountriesState('loading');
     api
       .countries({ includeAggregates: false }, { signal: controller.signal, recover: true, passive: true, timeoutMs: 12000 })
       .then((result) => {
         if (cancelled) return;
         setCountriesData(result);
+        setCountriesState('ready');
       })
       .catch(() => {
         if (cancelled) return;
-        setCountriesData({ countries: [] });
+        setCountriesData(previous => previous ?? { countries: [] });
+        setCountriesState('unavailable');
       });
     return () => {
       cancelled = true;
@@ -359,7 +355,16 @@ export default function App() {
     };
   }, [dataVersion, yearsToken]);
 
-  const eligibleCountries = useMemo(() => countriesData?.countries ?? [], [countriesData]);
+  const eligibleCountries = useMemo(() => (countriesData?.countries ?? []).filter(row =>
+    /^[A-Z]{3}$/.test(row.iso3 ?? '') && !row.isAggregate && Number(row.is_aggregate ?? 0) === 0), [countriesData]);
+  const economyInitialization = useEconomyInitialization({ countries: eligibleCountries, registryState: countriesState,
+    bootstrapReady: Boolean(yearsData?.years?.length), country: filters.country, explicit: filters.countrySource === 'explicit' });
+  useEffect(() => {
+    const detected = economyInitialization.country;
+    if (!detected) return;
+    setFilters(previous => eligibleCountries.some(row => row.iso3 === String(previous.country ?? '').trim().toUpperCase())
+      ? previous : { ...previous, country: detected, countrySource: 'geo' });
+  }, [eligibleCountries, economyInitialization.country]);
   const availableYears = useMemo(() => yearsData?.years ?? [], [yearsData]);
   const minYear = yearsData?.minYear ?? null;
   const maxYear = yearsData?.maxYear ?? null;
@@ -500,11 +505,9 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (effective.view !== 'compare' || compareChoiceRef.current || effective.cmpEntityA || !geoCountry ||
-      !eligibleCountries.some(({ iso3 }) => iso3 === geoCountry)) return;
-    compareChoiceRef.current = true;
-    setFilters(prev => prev.cmpEntityA ? prev : { ...prev, cmpEntityA: `country:${geoCountry}` });
-  }, [effective.view, effective.cmpEntityA, geoCountry, eligibleCountries]);
+    if (effective.view !== 'compare' || compareChoiceRef.current || effective.cmpEntityA || !effective.country) return;
+    setFilters(prev => prev.cmpEntityA ? prev : { ...prev, cmpEntityA: `country:${effective.country}` });
+  }, [effective.view, effective.cmpEntityA, effective.country]);
 
   useEffect(() => {
     const [title, description] = publicPages[effective.view] ?? publicPages.home;
@@ -526,6 +529,7 @@ export default function App() {
       popSuppressRef.current = false;
       lastUrlRef.current = window.location.search;
       lastNavRef.current = navKey(effective, rankSub, yoySub);
+      lastCountryRef.current = effective.country;
       return;
     }
     const query = new URLSearchParams();
@@ -557,20 +561,23 @@ export default function App() {
     if (effective.view === 'rank') query.set('rankSub', rankSub);
     if (effective.view === 'yoy') query.set('yoySub', yoySub);
     const next = `${pagePath(effective.view)}?${query.toString()}`;
-    if (window.location.search === next) {
+    if (`${window.location.pathname}${window.location.search}` === next) {
       lastUrlRef.current = next;
       lastNavRef.current = navKey(effective, rankSub, yoySub);
+      lastCountryRef.current = effective.country;
       return;
     }
     const nav = navKey(effective, rankSub, yoySub);
-    if (lastUrlRef.current === null || lastNavRef.current !== nav) {
+    const automaticCountry = filters.countrySource === 'geo' && !lastCountryRef.current && effective.country;
+    if (lastUrlRef.current !== null && lastNavRef.current !== nav && !automaticCountry) {
       window.history.pushState(null, '', next);
     } else {
       window.history.replaceState(null, '', next);
     }
     lastUrlRef.current = next;
     lastNavRef.current = nav;
-  }, [effective, filters.cmpYearB, rankSub, yoySub]);
+    lastCountryRef.current = effective.country;
+  }, [effective, filters.cmpYearB, filters.countrySource, rankSub, yoySub]);
 
   const setFilter = useCallback((key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -579,45 +586,9 @@ export default function App() {
   // Explicit user country choice: marks the session as user-directed (IP
   // detection must never override it afterwards) and stores the value.
   // Every country picker in the app routes through here.
-  const setCountry = useCallback(
-    (value) => {
-      countryExplicitRef.current = true;
-      setFilter('country', value);
-    },
-    [setFilter],
-  );
-
-  // One initial location lookup. Compare uses its own entity state, and a
-  // direct Compare visit leaves the separate focus selection untouched.
-  const inCompare = effective.view === 'compare';
-  useEffect(() => {
-    if (geoRequestedRef.current || (inCompare && compareHasSelectionRef.current) || (countryExplicitRef.current && !inCompare)) return undefined;
-    const controller = new AbortController();
-    let settled = false;
-    api
-      .geoCountry({ signal: controller.signal, timeoutMs: GEO_TIMEOUT_MS })
-      .then((result) => {
-        if (settled || controller.signal.aborted) return;
-        settled = true;
-        geoRequestedRef.current = true;
-        const iso3 = String(result?.iso3 ?? '').trim().toUpperCase();
-        if (result?.source !== 'geoip' || !/^[A-Z]{3}$/.test(iso3)) return;
-        setGeoCountry(iso3);
-        if ((new URLSearchParams(window.location.search).get('view') ?? viewAtPath(window.location.pathname)) === 'compare') return;
-        if (countryExplicitRef.current) return;
-        setFilters((prev) => {
-          if (prev.country) return prev;
-          return { ...prev, country: iso3 };
-        });
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) geoRequestedRef.current = true;
-      });
-    return () => {
-      settled = true;
-      controller.abort();
-    };
-  }, [inCompare]);
+  const setCountry = useCallback(value => {
+    setFilters(previous => ({ ...previous, country: value, countrySource: String(value ?? '').trim() ? 'explicit' : 'unset' }));
+  }, []);
 
   // Browser history restore: popstate (Back/Forward) replaces the whole
   // filter state from the URL, including sub-tabs. The mirror effect skips
@@ -626,11 +597,6 @@ export default function App() {
   // explicit, so Back/Forward can never resurrect a stale geo default.
   useEffect(() => {
     const onPopState = () => {
-      const query = new URLSearchParams(window.location.search);
-      compareHasSelectionRef.current = Boolean(query.get('cmpEntityA'));
-      if (query.get('country') !== null && query.get('country') !== '') {
-        countryExplicitRef.current = true;
-      }
       popSuppressRef.current = true;
       setFilters(defaultFilters());
       setRankSub(readRankSub());
@@ -689,6 +655,7 @@ export default function App() {
   // a backend-provided identity, and revalidation re-reads backend results.
   const filtersReady = availableYears.length > 0;
   const view = effective.view;
+  const { enabled: publicReadApiEnabled, observe: observePublication } = usePublicApiAvailability(view);
 
   // Background TTL-refresh revalidation (R-04): GET /api/data-status is
   // side-effect free (excluded from auto-refresh triggers), so polling it can
@@ -705,6 +672,7 @@ export default function App() {
     let timer = null;
     const check = async () => {
       if (cancelled || document.hidden) return;
+      const started = performance.now();
       let status = null;
       try {
         const controller = new AbortController();
@@ -715,9 +683,11 @@ export default function App() {
           clearTimeout(timeout);
         }
       } catch {
+        if (!cancelled) observePublication(null, started);
         return; // Background watcher never surfaces errors; the views' own fetches report them.
       }
       if (cancelled) return;
+      observePublication(status?.capabilities, started);
       const next = fingerprintOf(status);
       if (!next || (!next.provider && next.runId === null && !next.lastSuccessAt)) return;
       const prev = knownGeneration.current;
@@ -767,10 +737,11 @@ export default function App() {
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [filtersReady, passiveBootstrap]);
+  }, [filtersReady, passiveBootstrap, observePublication]);
 
   return (
     <div className="app">
+      <MouseScrollSupport />
       <a className="skip-link" href="#main">
         Skip to data
       </a>
@@ -817,7 +788,7 @@ export default function App() {
           </div>
           <NavDrawer
             open={drawerOpen}
-            destinations={ANALYTICAL_VIEWS}
+            destinations={[...INFO_VIEWS, ...ANALYTICAL_VIEWS]}
             active={view}
             triggerLabel={
               isAnalyticalView(view)
@@ -922,7 +893,11 @@ export default function App() {
         ) : null}
 
         <main id="main" key={`${dataVersion}:${view}`}>
-          {filtersReady && !effective.country && ['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit'].includes(view) ?
+          {!effective.country && ['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit', 'compare'].includes(view) &&
+            ['resolving', 'waiting-for-registry'].includes(economyInitialization.status) ?
+            <p className="status" role="status">{filters.countrySource === 'explicit' && economyInitialization.status === 'waiting-for-registry' ? 'Preparing your selected economy…' : 'Identifying your regional economy…'}</p> : null}
+          {filtersReady && !effective.country && ['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit'].includes(view) &&
+            economyInitialization.status === 'unavailable' ?
             <p className="status" role="status">Select a focus economy to open this research view.</p> : null}
           {filtersReady && !effective.country && view === 'movement' ?
             <FocusPicker countries={eligibleCountries} value={effective.country} onChange={setCountry} /> : null}
@@ -1001,7 +976,7 @@ export default function App() {
               yearC={effective.cmpYearC}
               operation={effective.cmpOp}
               groupMode={effective.cmpMode}
-              onEntityA={(v) => { compareChoiceRef.current = true; compareHasSelectionRef.current = Boolean(v); setFilter('cmpEntityA', v); }}
+              onEntityA={(v) => { compareChoiceRef.current = true; setFilter('cmpEntityA', v); }}
               onEntityB={(v) => setFilter('cmpEntityB', v)}
               onLabelA={(v) => setFilter('cmpLabelA', v)}
               onLabelB={(v) => setFilter('cmpLabelB', v)}
@@ -1032,7 +1007,7 @@ export default function App() {
           <nav aria-label="Data sources and documentation">
             <a href="https://data.worldbank.org/">Official World Bank data</a>
             <a href="https://datahelpdesk.worldbank.org/knowledgebase/articles/889392">World Bank Indicators API</a>
-            <a href="/public-data/">This project’s public API</a>
+            {publicReadApiEnabled ? <a href="/public-data/">This project’s public API</a> : null}
             <a href="/methodology/">Methodology</a>
           </nav>
         </footer>

@@ -61,7 +61,10 @@ for (const file of FAMILIES) {
       'common details parity by construction (single renderer)',
     );
     // Desktop tables are preserved, not replaced.
-    assert.ok(source.includes('table-scroll'), 'desktop table architecture retained');
+    assert.equal((source.match(/<AnalyticalTable label="(?:Common|Outside) economies"/g) ?? []).length, 2, 'both desktop lists use the shared named scroll region');
+    assert.ok((source.match(/<table className="table table-compact">/g) ?? []).length >= 2, 'both semantic desktop tables remain');
+    const tableShell = read(COMPONENTS, 'AnalyticalTable');
+    assert.ok(tableShell.includes('table-scroll analytical-table') && tableShell.includes('role="region"') && tableShell.includes('tabIndex={0}'), 'shared shell retains mouse/keyboard scroll semantics');
     assert.ok(source.includes('<Pagination'), 'pagination interaction retained on mobile');
   });
 }

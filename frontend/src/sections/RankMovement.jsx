@@ -1,3 +1,4 @@
+import { AnalyticalTable } from '../components/AnalyticalTable.jsx';
 /**
  * Rank-movement comparison (level mode, V1).
  *
@@ -599,7 +600,7 @@ export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = n
     );
   }
   return (
-    <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
+    <AnalyticalTable label={caption ?? 'Economies'} className="ranking-evidence" freezeYear={false}>
       <table className="table table-compact">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
@@ -680,7 +681,7 @@ export function EconomyTable({ rows, yearA, yearB, yearMid = null, focusYear = n
           })}
         </tbody>
       </table>
-    </div>
+    </AnalyticalTable>
   );
 }
 
@@ -754,7 +755,7 @@ export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, focus
     );
   }
   return (
-    <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
+    <AnalyticalTable label={caption ?? 'Common economies'} className="ranking-evidence" freezeYear={false}>
       <table className="table table-compact">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
@@ -829,7 +830,7 @@ export function CommonTable({ rows, yearA, yearB, yearMid = null, caption, focus
           })}
         </tbody>
       </table>
-    </div>
+    </AnalyticalTable>
   );
 }
 
@@ -1746,7 +1747,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
       .map(({ label }) => label)
       .join(' · ') || '—';
   return (
-    <div className="table-scroll" role="region" aria-label={caption ?? 'Economies'} tabIndex={0}>
+    <AnalyticalTable label={caption ?? 'Economies'} className="ranking-evidence" freezeYear={false}>
       <table className="table table-compact">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
@@ -1830,7 +1831,7 @@ export function GrowthEconomyTable({ rows, intervals, activeInterval = null, cap
           })}
         </tbody>
       </table>
-    </div>
+    </AnalyticalTable>
   );
 }
 
@@ -1900,7 +1901,7 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
     return r.displayMid;
   };
   return (
-    <div className="table-scroll" role="region" aria-label={caption ?? 'Common economies'} tabIndex={0}>
+    <AnalyticalTable label={caption ?? 'Common economies'} className="ranking-evidence" freezeYear={false}>
       <table className="table table-compact">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
@@ -1985,7 +1986,7 @@ export function GrowthCommonTable({ rows, intervals, yearA, yearB, yearMid = nul
           })}
         </tbody>
       </table>
-    </div>
+    </AnalyticalTable>
   );
 }
 
@@ -2082,7 +2083,7 @@ function sortGrowthRows(rows, sort) {
 
 function GrowthPeriodTable({ intervals, metric, mode, isFlow, focusName }) {
   const observed = mode === 'observed';
-  return <div role="region" aria-label={focusName + ' growth by interval'} className="table-scroll growth-period-table" tabIndex={0}>
+  return <AnalyticalTable label={focusName + ' growth by interval'} className="growth-period-table">
     <table className="table">
       <caption className="sr-only">{metric.indicatorCode} · {metric.unit}</caption>
       <thead><tr><th scope="col">Period</th><th scope="col" className="num">{isFlow ? 'Flow change' : 'Growth'}</th>
@@ -2112,7 +2113,7 @@ function GrowthPeriodTable({ intervals, metric, mode, isFlow, focusName }) {
         </tr>;
       })}</tbody>
     </table>
-  </div>;
+  </AnalyticalTable>;
 }
 
 /**
@@ -2360,7 +2361,11 @@ function GrowthResults({ data, focusIso, focusName = focusIso ?? 'Selected econo
           summary={`${focusName} interval changes: ${intervals.filter(({ block }) => block?.available).map(({ block, label }) => `${label} ${block.indiaGrowthDisplay ?? ''}`).join('; ')}`}
         >
           <AnnualOrCategoricalChart
-            entries={intervals.filter(({ block }) => block?.available && block?.indiaGrowthPercent != null).map(({ block, label }) => ({ name: label, value: block.indiaGrowthPercent }))}
+            entries={intervals.map(({ block, label }) => ({ x: label,
+              focus: block?.available ? block.indiaGrowthPercent : null,
+              benchmark: block?.available ? mode === 'observed' ? block.peerAvgObserved : block.peerAvgCommon : null,
+            }))}
+            series={[{ key: 'focus', label: focusName }, { key: 'benchmark', label: 'Other-economy average · ' + (mode === 'observed' ? 'Observed' : 'Like-for-like') }]}
             unit="%"
             decimals={2}
           />

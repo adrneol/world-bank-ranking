@@ -26,6 +26,7 @@ const provider = http.createServer((req, res) => {
   if (providerMode === 'malformed') return send(200, { hello: 'world' });
   if (providerMode === 'unknown') return send(200, { country_code: 'XX' });
   if (providerMode === 'aggregate') return send(200, { country_code: 'XA' });
+  if (/^[A-Z]{2}$/.test(providerMode)) return send(200, { country_code: providerMode });
   return send(200, { country_code: 'US' });
 });
 
@@ -45,6 +46,8 @@ function seedDb(db) {
     { id: 'USA', iso2: 'US', iso3: 'USA', name: 'United States', isAggregate: false },
     { id: 'IND', iso2: 'IN', iso3: 'IND', name: 'India', isAggregate: false },
     { id: 'DEU', iso2: 'DE', iso3: 'DEU', name: 'Germany', isAggregate: false },
+    { id: 'JPN', iso2: 'JP', iso3: 'JPN', name: 'Japan', isAggregate: false },
+    { id: 'BRA', iso2: 'BR', iso3: 'BRA', name: 'Brazil', isAggregate: false },
     // Aggregate-like row: a matching iso2 must still resolve to null.
     { id: 'XAGG', iso2: 'XA', iso3: 'XA', name: 'Aggregate X', isAggregate: true },
   ];
@@ -168,4 +171,27 @@ test('repeated lookups share one provider call (bounded cache)', async () => {
     await api.close();
     db.close();
   }
+});
+
+test('eligible country mappings use stored metadata, including India, USA, Japan, Germany and Brazil', async () => {
+  const { resetGeoCache, lookupCountryForIp } = await import('../src/services/geo.js');
+  const db = await seedAsync();
+  try {
+    for (const [iso2, iso3] of [['IN','IND'],['US','USA'],['JP','JPN'],['DE','DEU'],['BR','BRA']]) {
+      resetGeoCache(); providerMode = iso2;
+      assert.equal(await lookupCountryForIp(db, '8.8.4.4'), iso3);
+    }
+  } finally { db.close(); }
+});
+
+test('a failed provider lookup does not cache null and prevent subsequent recovery', async () => {
+  const { resetGeoCache, lookupCountryForIp } = await import('../src/services/geo.js');
+  resetGeoCache(); providerHits = []; providerMode = '500';
+  const db = await seedAsync();
+  try {
+    assert.equal(await lookupCountryForIp(db, '9.9.9.9'), null);
+    providerMode = 'JP';
+    assert.equal(await lookupCountryForIp(db, '9.9.9.9'), 'JPN');
+    assert.equal(providerHits.length, 2);
+  } finally { db.close(); }
 });

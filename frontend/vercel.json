@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": { "api/public-documents.js": { "includeFiles": "dist/index.html" } },
+  "rewrites": [
+    { "source": "/public-data", "destination": "/api/public-documents?resource=docs" },
+    { "source": "/public-data/", "destination": "/api/public-documents?resource=docs" },
+    { "source": "/public-data/index.html", "destination": "/api/public-documents?resource=docs" },
+    { "source": "/data-catalog.json", "destination": "/api/public-documents?resource=catalog" },
+    { "source": "/sitemap.xml", "destination": "/api/public-documents?resource=sitemap" }
+  ]
+}

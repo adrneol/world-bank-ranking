@@ -105,7 +105,7 @@ describe('App navigation', () => {
       container.querySelector('#navdrawer-trigger').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     const items = [...document.querySelectorAll('.navdrawer-item')];
-    expect(items).toHaveLength(9);
+    expect(items).toHaveLength(12);
     act(() => {
       items.find((el) => el.textContent.includes('Movement')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

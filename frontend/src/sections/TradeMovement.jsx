@@ -1,3 +1,4 @@
+import { AnalyticalTable } from '../components/AnalyticalTable.jsx';
 /**
  * Trade Movement (canonical 4+4 methodology).
  *
@@ -485,7 +486,7 @@ function TradeCommonTable({ sets, basisId, focusIso, focusName, unit }) {
           />
         )
       ) : (
-        <div className="table-scroll" role="region" aria-label="Common economies" tabIndex={0}>
+        <AnalyticalTable label="Common economies" className="ranking-evidence" freezeYear={false}>
         <table className="table table-compact">
           <caption className="sr-only">Common economies with like-for-like ranks and values</caption>
           <thead>
@@ -544,7 +545,7 @@ function TradeCommonTable({ sets, basisId, focusIso, focusName, unit }) {
             })}
           </tbody>
         </table>
-        </div>
+        </AnalyticalTable>
       )}
       <p className="footnote" aria-live="polite">
         Showing {slice.length} of {rows.length} ({commonRows.length} common economies) · page {safePage} of {pages}.
@@ -663,7 +664,7 @@ function TradeOutsideSection({ sets, basisId, focusIso, focusName, unit }) {
           />
         )
       ) : (
-        <div className="table-scroll" role="region" aria-label="Outside economies" tabIndex={0}>
+        <AnalyticalTable label="Outside economies" className="ranking-evidence" freezeYear={false}>
         <table className="table table-compact">
           <caption className="sr-only">Economies outside the common comparison set</caption>
           <thead>
@@ -695,7 +696,7 @@ function TradeOutsideSection({ sets, basisId, focusIso, focusName, unit }) {
             ))}
           </tbody>
         </table>
-        </div>
+        </AnalyticalTable>
       )}
       <p className="footnote" aria-live="polite">
         Showing {slice.length} of {rows.length} ({activeTab.label}) · page {safePage} of {pages}.

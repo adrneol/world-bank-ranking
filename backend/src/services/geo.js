@@ -9,7 +9,7 @@
  * - it is never logged, never persisted, and only an ISO3 (or null) is
  *   returned — no IP, city, coordinates or other location ever leaves;
  * - loopback/private/reserved addresses are never sent to the provider;
- * - results are cached briefly in memory (salted digest, bounded) so repeated
+ * - validated successes are cached in memory (salted digest, bounded) so repeated
  *   loads do not hammer the provider;
  * - every failure mode (timeout, provider error, malformed payload,
  *   unknown/aggregate country, disabled provider) resolves to null —
@@ -144,7 +144,8 @@ export async function lookupCountryForIp(db, ip, options = {}) {
     }
   }
 
-  cacheSet(cacheKey, iso3);
+  // Do not poison subsequent visits/recovery with a cached timeout or null lookup.
+  if (iso3) cacheSet(cacheKey, iso3);
   return iso3;
 }
 

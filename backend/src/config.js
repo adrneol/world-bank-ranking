@@ -1463,6 +1463,7 @@ assertFutureDefinitions();
 export const FOCUS_COUNTRY = Object.freeze({ iso3: 'IND', name: 'India' });
 
 export const config = Object.freeze({
+  publicReadApiEnabled: process.env.PUBLIC_READ_API_ENABLED === '1',
   port: int('PORT', 3001),
 
   worldBank: Object.freeze({

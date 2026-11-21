@@ -10,9 +10,9 @@ year-over-year change, rank, and denominator for twenty indicators grouped
 into eight analysis subjects: GDP per capita (four indicators), Total GDP
 (four indicators), Prices (three), Trade (two), Capital flows (two), Exchange
 rates (one), External sector (three) and Population (one). The default focus
-country is India, but any eligible country, official World Bank aggregate, or
-user-defined group can be analyzed — the product identity is generic, not
-country-specific. Every subject flows
+country is initialized from a validated public-IP country hint when available;
+otherwise the visitor selects an economy. Any eligible country, official World
+Bank aggregate, or user-defined group can be analyzed. Every subject flows
 through the same generic ranking / YoY / comparison engines; each metric keeps
 its own independent ranking and denominator, and subjects are never mixed in
 one panel. Non-GDP families carry explicit semantic metadata (rate vs
@@ -31,7 +31,7 @@ sector, one Population), the application ingests official World Bank
 observations — country observations plus officially published World Bank
 aggregate observations, typed by metadata and never mixed — ranks every
 eligible country/economy by raw value, and
-shows exactly where India stands — with the raw numbers, the neighboring
+shows exactly where the selected economy stands — with the raw numbers, the neighboring
 countries, and the audit trail needed to verify each result. Official
 aggregates never enter country rankings; they are comparable as published
 entities through the generic entity-compare API. A React frontend
@@ -372,9 +372,17 @@ against production billing; row-level write accounting is derived from code
   (`WDI Analysis`), pinned by `frontend/src/identity.test.js`. An
   already-installed old copy may retain stale install metadata — uninstall
   and fresh-install from the deployed build.
-- **Focus country**: URL `?country=` > manual/session selection > one-time
-  IP geolocation (`GEO_PROVIDER_URL`, `GEO_TIMEOUT_MS=3000`) > India
-  fallback. Geolocation is a UX default only, never analytical.
+- **Focus country**: valid URL `?country=` > deliberate manual/session selection
+  > registry-validated IP country > neutral manual selection. One central
+  initialization retains a location hint while metadata loads, regardless of
+  arrival order. It tries same-origin `/api/location` first (2.5 s deadline),
+  then the existing backend resolver (4 s client deadline). A failed attempt
+  gets at most one recovery attempt after country/year bootstrap is ready;
+  navigation, metric, year and theme changes do not restart it. Overview, Data,
+  Rank, Movement, YoY, Coverage and Audit share the resulting focus. Fresh
+  Compare A starts from that focus; B stays empty, and manual A changes remain
+  independent. Geolocation is a convenience default, never analytical or an
+  access-control decision.
 
 ## Local Development
 
@@ -401,6 +409,13 @@ Local API behavior: the browser calls relative `/api/...` on
 `http://localhost:3001`. The backend serves the frontend's data; the
 frontend performs no ranking, YoY, or denominator calculations.
 
+Vite handles `/api/location` locally before its backend proxy and reports no
+country, ignoring supplied geographic headers. Loopback/private IPs cannot
+identify the visitor's public country. The existing backend fallback only
+resolves a trustworthy public client address; ordinary localhost therefore
+offers manual selection. Controlled server-side fixtures verify mappings and
+arrival-order behavior without weakening production proxy trust.
+
 Useful backend commands (`backend/`):
 
 ```powershell
@@ -418,11 +433,29 @@ npm run build   # production build
 
 ## Production Deployment
 
-The frontend build emits a static page for each research workspace, a public JSON data catalog and a PNG social preview. On Vercel, the build uses the platform-provided `VERCEL_PROJECT_PRODUCTION_URL` for absolute canonical and social URLs and the sitemap. Without a verified production hostname, local builds omit those absolute URLs and the sitemap. The public documentation uses the same `VITE_API_BASE_URL` as the frontend when available.
+The frontend build emits a static page for each human research workspace and a PNG social preview. Optional documentation, catalog and sitemap are request-time responses. Vite development and preview use the same publication-aware HTML handler as the Vercel function. `frontend/vercel.json` rewrites `/public-data/`, `/data-catalog.json` and `/sitemap.xml` to that function, which includes the built HTML shell and reads the backend's capability before responding. No optional catalog/docs are left as independently served static files. The Vercel project root must be `frontend/` (or provide equivalent function packaging and routes). A plain static host cannot enforce a separate backend's runtime state; its SPA fallback shows an intentional unavailable page.
 
-The catalog documents `/api/public/` GET routes. They use the existing analytical handlers and validation without scheduling the UI routes’ automatic refresh checks. The public namespace is limited to 60 requests per minute per server-resolved client address. Manual refresh remains on its separate authorization path.
+The platform-provided `VERCEL_PROJECT_PRODUCTION_URL` remains the source of absolute canonical/social URLs and sitemap origins. Without a verified production hostname, these absolute URLs are omitted; no production domain is invented. Keep the existing `VITE_API_BASE_URL` available to both the frontend build and the Vercel function runtime. It remains the existing public backend destination, never a credential.
 
-Geolocation uses the existing provider and economy registry. Forwarded addresses are ignored unless Express already has a verified proxy trust boundary. A deployment that cannot verify its client address leaves the initial country choice empty.
+The catalog documents `/api/public/` GET routes. They use the existing analytical handlers and validation without scheduling the UI routes’ automatic refresh checks or persisting integrity checks. Public and corresponding legacy read routes share a fixed-window budget of 60 requests per minute per server-resolved client address, enforced before staleness checks. Guards recognize case/trailing-slash variants and implicit HEAD requests; passive semantics are bound to the registered alias, and each request is charged once. HTTP 429 includes `Retry-After`. Manual refresh remains on its separate authorization path. The frontend requests passive reads (`readOnly=1`); a direct legacy request without that parameter retains the existing automatic TTL behavior. The legacy integrity/status handler can also persist its normal verification unless passive reading is requested. Neither legacy behavior is a privileged manual-refresh bypass.
+
+`PUBLIC_READ_API_ENABLED` is the **single publication authority**. Only exact `1` enables public aliases; `0`, unset, empty, `true`, `yes` and malformed values disable them. `GET /api/capabilities` returns only the non-secret `publicReadApiEnabled` boolean, with no-store caching, read abuse protection and no database work, even during data-service startup. The frontend shows API discovery only after explicit backend confirmation and fails closed if discovery fails. It checks on a visit/route change, focus, visibility return, pageshow and return online. The existing dataset-status watcher also carries the same backend boolean to active tabs, without adding another polling loop or request. Older in-flight confirmations cannot override newer ones. Updates follow the existing watcher cadence (first check after 30 seconds, then 60 seconds) once year metadata is ready; they are not instantaneous push notifications. Direct document/API requests always enforce current backend state.
+
+`VITE_PUBLIC_READ_API_ENABLED` is deprecated and ignored. Its existing local/example value is retained for compatibility; neither `1` nor `0` grants or blocks publication. There is no independent frontend permission or packaging switch. Human-facing APIs remain reachable and are not made private by hidden links or CORS.
+
+Deploy the corrected backend and frontend function/routes once. Subsequent publication changes require only setting `PUBLIC_READ_API_ENABLED` to the intended `0`/`1` in Render and restarting that backend; a frontend rebuild is not needed for this switch. New documentation/catalog requests receive 404 when disabled and 503 if backend availability cannot be confirmed; normal human pages remain available. Dynamic responses use no-store browser/CDN headers. No dashboard setting is changed by source edits. Old deployments, already-loaded documents, browser history, indexes and previously cached static assets cannot be erased by changing Render's variable. Verify the deployed rewrites, function bundle, runtime API base and CDN behavior separately. Preserve existing database URLs and secrets.
+
+On a Vercel deployment whose project root is `frontend/`, `api/location.js` reads the platform's country hint only when Vercel identifies its runtime. The browser maps that ISO2 hint to the eligible WDI economy registry. It is a one-time UX default, never authorization. It does not transmit the visitor's IP to an additional provider. Verify that the deployment includes this function and Vercel controls its country header; this ingress behavior has not been verified in production. Outside that environment the function returns no country, and the browser falls back to the existing bounded backend provider. That provider transmits the validated client IP to its configured keyless resolver, caches country-only results, and ignores arbitrary forwarded addresses unless Express has a verified proxy trust boundary. Failed or ineligible results leave a neutral choice. URL and manual selections take precedence; Compare B stays empty. No proxy trust was broadened. Without verified client addressing, rate limits may conservatively share a proxy address across visitors; do not enable arbitrary forwarding trust to obtain individual budgets.
+
+The deployed frontend function must own `/api/location`: do not send that route
+through a catch-all backend rewrite or SPA fallback. Both the corrected browser
+bundle and the backend's country registry with usable `iso2` fields are needed.
+Location responses use private/no-store and CDN no-store headers. The backend
+caches only validated successes, so an earlier timeout or unavailable registry
+does not suppress recovery for 30 minutes. No new environment variable or
+provider is required. Render client-address forwarding must be verified against
+the actual ingress chain before changing Express proxy trust; source code
+intentionally does not trust arbitrary forwarded addresses.
 
 Deploy the backend first, then point the frontend at it. The frontend
 receives the API base URL through `VITE_API_BASE_URL` in deployed
@@ -438,7 +471,7 @@ e.g. in Vercel for both Preview and Production.) No source-code change is
 needed to switch between the local backend and a deployed backend.
 Do not commit a real backend URL to any tracked file: local-only
 `frontend/.env` / `frontend/.env.local` are git-ignored conveniences, and
-`vite dev` always uses the local proxy regardless (see below).
+`vite dev` uses the local proxy when no explicit API base is configured.
 
 The backend refuses to start in `NODE_ENV=production` unless the deployment
 environment provides:
@@ -479,13 +512,15 @@ Local-only files (`.env`, `.env.local`) are never committed.
 | `PORT` | backend | API listen port (default 3001). |
 | `REFRESH_ADMIN_TOKEN` | backend | Bearer token for `POST /api/data/refresh`. Empty = open (local dev/tests only). Production refuses to start without it. Never logged or returned. |
 | `CORS_ORIGINS` | backend | Exact-match allowed frontend origins, comma-separated, no wildcards. Unset = permissive dev default. Production refuses to start without it. |
+| `PUBLIC_READ_API_ENABLED` | backend runtime | Exact `1` registers bounded public GET aliases; all other values disable them. Restart required. Legacy human-facing routes remain available. |
+| `VITE_PUBLIC_READ_API_ENABLED` | deprecated | Ignored. Existing values are retained; the backend capability alone controls optional discovery and publication. |
 | `CACHE_TTL_HOURS` | backend | Cache freshness window in hours from the last successful check (default 24). Unchanged successful refreshes renew it. |
 | `DATABASE_FILE` | backend | Local SQLite file (default `data/worldbank.db`). Development database and guarded production fallback. |
 | `DB_MODE` | backend | `turso` or `local` to force the backend; empty = automatic (Turso when configured). Local development sets `DB_MODE=local` so dev work can never touch production Turso. |
 | `TURSO_DATABASE_URL` | backend | Turso Cloud database URL. Secret deployment value — never commit, never log (only the host is logged). |
 | `TURSO_AUTH_TOKEN` | backend | Turso auth token. Secret — never commit, log, or return from any endpoint. |
 | `ALLOW_LOCAL_DB_FALLBACK` | backend | When Turso is unreachable at boot and a valid non-empty local DB exists, serve from it with a loud warning (default true). Never masks an outage with an empty database and never triggers an unattended seed. A genuine mid-serving Turso transport failure also fails over to the validated fallback immediately (see below). |
-| `REFRESH_RATE_LIMIT_MAX` / `REFRESH_RATE_LIMIT_WINDOW_MS` | backend | Manual-refresh abuse protection (defaults 10 per 60 s per IP; GET endpoints never limited). |
+| `REFRESH_RATE_LIMIT_MAX` / `REFRESH_RATE_LIMIT_WINDOW_MS` | backend | Manual-refresh abuse protection (defaults 10 per 60 s per IP). Analytical reads use a separate fixed budget of 60 per minute. |
 | `WB_AUTO_INGEST_ON_EMPTY` / `WB_AUTO_REFRESH_ON_STALE` | backend | Boot empty-ingest and stale-cache background refresh (defaults 1/1; set 0 to require manual refresh). |
 | `WB_PER_PAGE` / `WB_MAX_RETRIES` / `WB_RETRY_BASE_MS` / `WB_TIMEOUT_MS` | backend | World Bank client tuning (defaults 20000 / 5 / 500 ms / 30000 ms). |
 | `GEO_PROVIDER_URL` / `GEO_TIMEOUT_MS` | backend | Keyless IP-geolocation endpoint with `{ip}` placeholder (default `https://ipwho.is/{ip}?fields=country_code`) and single-attempt bound (default 3000 ms). UX default only. |

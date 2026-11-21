@@ -907,9 +907,9 @@ export default function Compare({
   // WEIGHTED_RATIO (resolved from legs) only.
   const groupOffered = supportsGroupValues(canonicalMetricKey);
 
-  const aggregatesQuery = useApi((signal) => api.entities({ type: 'aggregate', pageSize: 200 }, {
+  const aggregatesQuery = useApi((signal) => api.entities({ type: 'aggregate', pageSize: 500, indicator: canonicalMetricKey }, {
     signal, recover: true, passive: true, timeoutMs: 12000,
-  }), 'compare:aggregates');
+  }), 'compare:aggregates:' + canonicalMetricKey);
   const aggregates = aggregatesQuery.data?.entities ?? [];
 
   // Every visible selection is sent when the chosen analysis can use it.
@@ -973,6 +973,7 @@ export default function Compare({
               value={entityObjA}
               countries={countries}
               aggregates={aggregates}
+              aggregateError={aggregatesQuery.error}
               allowGroups={groupOffered}
               metricKey={canonicalMetricKey}
               onChange={(next) => {
@@ -991,6 +992,7 @@ export default function Compare({
               value={entityObjB}
               countries={countries}
               aggregates={aggregates}
+              aggregateError={aggregatesQuery.error}
               allowGroups={groupOffered}
               metricKey={canonicalMetricKey}
               onChange={(next) => {

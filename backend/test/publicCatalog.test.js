@@ -1,3 +1,5 @@
+process.env.PUBLIC_READ_API_ENABLED = '1';
+
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -15,7 +17,7 @@ test('an HTTP client can discover and retrieve bounded public evidence', async t
     db.close();
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const catalog = JSON.parse(await readFile(new URL('../../frontend/public/data-catalog.json', import.meta.url), 'utf8'));
+  const catalog = JSON.parse(await readFile(new URL('../../frontend/data-catalog.json', import.meta.url), 'utf8'));
   async function get(resource, params = {}, expected = 200, headers = {}) {
     const path = `/api/public/${resource}`;
     assert.ok(catalog.resources.some(([entry]) => entry === path));
@@ -66,4 +68,8 @@ test('an HTTP client can discover and retrieve bounded public evidence', async t
     await response.arrayBuffer();
   }
   await get('metadata', {}, 429, { 'x-forwarded-for': '192.0.2.23' });
+  assert.equal((await fetch(origin + '/api/metadata?readOnly=1')).status, 429, 'legacy route shares the read budget');
+  for (const path of ['/api/india/gdp-ranking', '/api/integrity', '/api/geo/country']) {
+    assert.equal((await fetch(origin + path)).status, 429, `${path} cannot bypass the read budget`);
+  }
 });
