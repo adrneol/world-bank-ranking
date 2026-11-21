@@ -59,6 +59,7 @@
 
 import { METRICS, PRODUCTION_METRIC_KEYS, config, isProductionMetric } from '../config.js';
 import { getDb } from '../db/index.js';
+import { observationDelta } from './observationDelta.js';
 import { batchGet, isTransportError } from '../db/driver.js';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -118,7 +119,7 @@ import {
   canonicalDecimalString,
   computeDatasetState,
   countObservations,
-  deleteObservationsForIndicatorYears,
+  deleteObservationKeysInner,
   finishFetchRun,
   forceReleaseRefreshLock,
   getDatasetState,
@@ -1163,6 +1164,7 @@ export async function refreshData(options = {}) {
         const existingIndicator = await getIndicatorByMetricKey(db, metricKey);
         let unchanged = false;
         let storedVintages = null;
+        let delta = null;
         if (existingIndicator) {
           const stored = await getObservationsForCompare(
             db,
@@ -1189,6 +1191,7 @@ export async function refreshData(options = {}) {
           }
           unchanged = isIndicatorPayloadUnchanged(stored, result.stagedRows);
           storedVintages = collectStoredVintages(stored);
+          if (!unchanged) delta = observationDelta(stored, result.stagedRows);
         }
         if (unchanged) {
           if (existingIndicator.name !== result.indicatorName || existingIndicator.unit !== result.indicatorUnit ||
@@ -1231,10 +1234,15 @@ export async function refreshData(options = {}) {
         // (all-or-nothing: a failed publish records a failed run and writes
         // nothing). The 'published' ledger step is recorded only after the
         // publish transaction actually writes them.
+        const changedRows = delta?.upserts ?? result.stagedRows;
+        const removedRows = delta?.removals ?? [];
+        totals.rowsSkippedUnchanged += delta?.unchanged ?? 0;
+        result.rowsUpserted = changedRows.length;
         totals.rowsUpserted += result.rowsUpserted;
         contentChanged = true;
         if (!stagingDir) stagingDir = await createStagingDir(runId);
-        const stagedFile = await spillStagedRows(stagingDir, metricKey, result.stagedRows);
+        const stagedFile = await spillStagedRows(stagingDir, metricKey, changedRows);
+        const removedFile = await spillStagedRows(stagingDir, `${metricKey}-removed`, removedRows);
         changedPlans.push({
           metricKey,
           indicatorCode: result.indicatorCode,
@@ -1243,6 +1251,7 @@ export async function refreshData(options = {}) {
           indicatorSource: result.indicatorSource,
           indicatorSourceNote: result.indicatorSourceNote,
           stagedFile,
+          removedFile,
           rows: result.rowsUpserted,
         });
         result.stagedRows = EMPTY_RELEASED_ROWS;
@@ -1332,7 +1341,8 @@ export async function refreshData(options = {}) {
             sourceNote: plan.indicatorSourceNote,
           });
           const indicator = await getIndicatorByMetricKey(tx, plan.metricKey);
-          await deleteObservationsForIndicatorYears(tx, indicator.id, fetchedStartYear, fetchedEndYear);
+          const removedRows = await readSpilledRows(plan.removedFile);
+          await deleteObservationKeysInner(tx, indicator.id, removedRows);
           await upsertObservationsInner(tx, stagedRows, (row) => ({ ...row, indicatorId: indicator.id }));
           recordStep(plan.metricKey, 'published', { rows: plan.rows });
         }

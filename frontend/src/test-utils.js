@@ -6,6 +6,7 @@
  * receiving the URL and returning such a response. Unmatched requests
  * fail loudly so missing mocks surface instead of hanging.
  */
+import { vi } from 'vitest';
 
 export function stubFetch(routes) {
   const calls = [];
@@ -42,7 +43,7 @@ export function errorResponse(status, code, message) {
 export async function flushReact(act, rounds = 6) {
   for (let i = 0; i < rounds; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    await act(async () => {});
+    await act(async () => { await vi.dynamicImportSettled(); });
   }
 }
 

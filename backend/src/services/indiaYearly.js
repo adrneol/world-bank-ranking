@@ -22,7 +22,9 @@ import {
   getIndicatorByMetricKey,
   getYearRange,
   hasEligibleObservationsForIndicator,
+  getOverviewInputs,
 } from '../db/repository.js';
+import { singleFlight } from './singleFlight.js';
 import { describeMetric, formatPercent, formatValue } from '../domain/format.js';
 import { directionFor, rankByValue } from '../domain/ranking.js';
 import { TRANSFORM_NA_DESCRIPTIONS, TRANSFORM_NA_REASONS } from '../domain/transforms.js';
@@ -53,13 +55,20 @@ function emptyCell(metric, reason, eligibleUniverse) {
  * @param {{startYear?:number, endYear?:number, metricKeys?:string[], focusIso3?:string}} [options]
  */
 export async function buildIndiaYearlyRows(db, options = {}) {
+  return singleFlight(db, JSON.stringify(['yearly', options]), () => buildYearlySnapshot(db, options));
+}
+
+async function buildYearlySnapshot(db, options) {
   const focusIso3 = String(options.focusIso3 ?? FOCUS_COUNTRY.iso3).toUpperCase();
   // Subject-scoped: the GDP-per-capita four remain the default so every existing
   // URL returns exactly the same payload; a subject (or explicit metricKeys list)
   // selects that subject's own metrics. Subjects are never mixed in one response.
   const metricKeys =
     options.metricKeys ?? (options.subject ? metricKeysForSubject(options.subject) : METRIC_KEYS);
-  const eligibleUniverse = await countEligibleCountries(db);
+  for (const key of metricKeys) if (!METRICS[key]) throw new Error(`Unknown metric key: ${key}`);
+  const inputs = options.startYear !== undefined && options.endYear !== undefined
+    ? await getOverviewInputs(db, metricKeys, focusIso3, options.startYear, options.endYear) : null;
+  const eligibleUniverse = inputs ? inputs.eligibleUniverse : await countEligibleCountries(db);
 
   const metricInfo = {};
   const cellsByMetric = {};
@@ -70,7 +79,7 @@ export async function buildIndiaYearlyRows(db, options = {}) {
     if (!metric) throw new Error(`Unknown metric key: ${metricKey}`);
     metricInfo[metricKey] = describeMetric(metric);
 
-    const indicator = await getIndicatorByMetricKey(db, metricKey);
+    const indicator = inputs ? inputs.indicators.get(metricKey) : await getIndicatorByMetricKey(db, metricKey);
     if (!indicator) {
       cellsByMetric[metricKey] = null;
       continue;
@@ -90,7 +99,7 @@ export async function buildIndiaYearlyRows(db, options = {}) {
       cellsByMetric[metricKey] = null;
       continue;
     }
-    if (!stored && !(await hasEligibleObservationsForIndicator(db, indicator.id))) {
+    if (!stored && !(inputs ? indicator.hasData : await hasEligibleObservationsForIndicator(db, indicator.id))) {
       cellsByMetric[metricKey] = null;
       continue;
     }
@@ -99,7 +108,8 @@ export async function buildIndiaYearlyRows(db, options = {}) {
     overallRange.maxYear =
       overallRange.maxYear === null ? endYear : Math.max(overallRange.maxYear, endYear);
 
-    const eligibleRows = await getEligibleObservationsRange(db, indicator.id, startYear, endYear);
+    const eligibleRows = inputs ? inputs.eligibleRows.filter(row => row.metricKey === metricKey)
+      : await getEligibleObservationsRange(db, indicator.id, startYear, endYear);
     const rowsByYear = new Map();
     for (const row of eligibleRows) {
       if (!rowsByYear.has(row.year)) rowsByYear.set(row.year, []);
@@ -107,7 +117,7 @@ export async function buildIndiaYearlyRows(db, options = {}) {
     }
 
     // One extra year is read so the first selected year can still carry a YoY value.
-    const focusSeries = await getCountryObservationsRange(
+    const focusSeries = inputs ? inputs.focusRows.filter(row => row.metricKey === metricKey) : await getCountryObservationsRange(
       db,
       indicator.id,
       focusIso3,
@@ -184,7 +194,7 @@ export async function buildIndiaYearlyRows(db, options = {}) {
     return row;
   });
 
-  const focusCountry = await getCountry(db, focusIso3);
+  const focusCountry = inputs ? inputs.focus : await getCountry(db, focusIso3);
 
   const subjectKey = options.subject ?? subjectOf(metricKeys[0]);
 

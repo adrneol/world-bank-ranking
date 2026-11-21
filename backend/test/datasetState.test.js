@@ -384,6 +384,7 @@ async function startStatusServer(db) {
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
     base,
+    async maintenance() { const { persistVerifiedGeneration } = await import('../src/services/maintenance.js'); return persistVerifiedGeneration(db); },
     async status(path = '/api/data-status') {
       const res = await fetch(base + path);
       assert.equal(res.status, 200);
@@ -413,14 +414,14 @@ test('public and passive status verify a cold generation without persisting inte
     assert.deepEqual(await repository.getDatasetState(db), before);
     const regularStatus = await svc.status();
     assert.deepEqual(regularStatus.integrity, publicStatus.integrity);
-    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, before.contentVersion);
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, null);
   } finally {
     await svc.close();
     db.close();
   }
 });
 
-test('status serves metadata fingerprint + years + merged integrity, marks verified', async () => {
+test('status serves metadata fingerprint + years + merged integrity without writes', async () => {
   const { db, repository } = await seedDb();
   const svc = await startStatusServer(db);
   try {
@@ -432,7 +433,7 @@ test('status serves metadata fingerprint + years + merged integrity, marks verif
     assert.ok(first.integrity.passed, JSON.stringify(first.integrity));
     assert.ok(Array.isArray(first.years.years) && first.years.years.length > 0);
     const state = await repository.getDatasetState(db);
-    assert.equal(state.integrityVerifiedContentVersion, state.contentVersion);
+    assert.equal(state.integrityVerifiedContentVersion, null);
     const second = await svc.status();
     assert.deepEqual(second.fingerprint, first.fingerprint);
     assert.deepEqual(second.integrity, first.integrity);
@@ -458,6 +459,7 @@ test('a failed vintage-provenance result is never cached; the repair invalidates
   try {
     // 1. A healthy dataset verifies and persists its report.
     const healthy = await svc.status();
+    await svc.maintenance();
     assert.ok(healthy.integrity.passed, 'the healthy dataset passes');
     const verified = await repository.getDatasetState(db);
     assert.equal(verified.integrityVerifiedContentVersion, verified.contentVersion);
@@ -505,6 +507,8 @@ test('a failed vintage-provenance result is never cached; the repair invalidates
     // 5. The next status request re-derives, re-verifies and re-persists.
     const repaired = await svc.status();
     assert.ok(repaired.integrity.passed, 'the repaired dataset passes');
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, null);
+    await svc.maintenance();
     const repairedState = await repository.getDatasetState(db);
     assert.equal(repairedState.integrityVerifiedContentVersion, repairedState.contentVersion);
     assert.ok(
@@ -565,6 +569,7 @@ test('unchanged refresh reuses expensive verification; changed refresh re-verifi
   const svc = await startStatusServer(db);
   try {
     await svc.status();
+    await svc.maintenance();
     const v1 = (await repository.getDatasetState(db)).contentVersion;
     // Unchanged refresh: new success run, same content.
     stub.reset();
@@ -596,6 +601,8 @@ test('unchanged refresh reuses expensive verification; changed refresh re-verifi
     assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, null);
     const afterChanged = await svc.status();
     assert.ok(afterChanged.integrity.passed);
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, null);
+    await svc.maintenance();
     const stateC = await repository.getDatasetState(db);
     assert.equal(stateC.contentVersion, v1 + 1);
     assert.equal(stateC.integrityVerifiedContentVersion, v1 + 1, 're-verified on first status');
@@ -612,6 +619,7 @@ test('restart simulation: verified content serves stored checks without rescanni
   const svc = await startStatusServer(db);
   try {
     const first = await svc.status();
+    await svc.maintenance();
     assert.ok(first.integrity.passed);
     const state = await repository.getDatasetState(db);
     assert.equal(state.integrityVerifiedContentVersion, state.contentVersion);
@@ -650,6 +658,7 @@ test('corrupt stored checks fall back to a live rescan and self-heal', async () 
   const svc = await startStatusServer(db);
   try {
     await svc.status();
+    await svc.maintenance();
     const state = await repository.getDatasetState(db);
     assert.ok(state.integrityChecksJson);
     // Corrupt the persisted report but keep the version mark.
@@ -658,6 +667,8 @@ test('corrupt stored checks fall back to a live rescan and self-heal', async () 
     statusCache.resetIntegrityCache();
     const body = await svc.status();
     assert.ok(body.integrity.passed, 'live rescan passes');
+    assert.equal((await repository.getDatasetState(db)).integrityChecksJson, 'bogus', 'GET does not repair stored metadata');
+    await svc.maintenance();
     const healed = await repository.getDatasetState(db);
     assert.ok(healed.integrityChecksJson && healed.integrityChecksJson !== 'bogus', 'stored report repaired');
     assert.deepEqual(
@@ -681,6 +692,7 @@ test('stored checks from an old version are never served', async () => {  const 
   const svc = await startStatusServer(db);
   try {
     await svc.status();
+    await svc.maintenance();
     const v1 = (await repository.getDatasetState(db)).contentVersion;
     // Changed publish advances the version; the old stored report must not
     // be served for the new content even though it parses.
@@ -706,6 +718,8 @@ test('stored checks from an old version are never served', async () => {  const 
     assert.equal(mid.integrityChecksJson, null);
     const body = await svc.status();
     assert.ok(body.integrity.passed);
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, null);
+    await svc.maintenance();
     assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, v1 + 1);
   } finally {
     rowsTransform = null;
@@ -720,6 +734,7 @@ test('metadata-only change advances version without touching observations', asyn
   const svc = await startStatusServer(db);
   try {
     await svc.status();
+    await svc.maintenance();
     const v1 = (await repository.getDatasetState(db)).contentVersion;
     const obsBefore = await repository.countObservations(db);
     stub.reset();
@@ -737,6 +752,8 @@ test('metadata-only change advances version without touching observations', asyn
     await assertShadowMatches(db, repository, 'metadata-change');
     const body = await svc.status();
     assert.ok(body.integrity.passed);
+    assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, null);
+    await svc.maintenance();
     assert.equal((await repository.getDatasetState(db)).integrityVerifiedContentVersion, v1 + 1);
   } finally {
     rowsTransform = null;

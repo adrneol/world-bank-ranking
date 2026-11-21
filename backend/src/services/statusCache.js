@@ -105,10 +105,18 @@ async function getCachedSlot(slot, key, compute) {
   if (slot.key === key && slot.value !== undefined) {
     return { report: slot.value, fromCache: true };
   }
-  const report = await compute();
-  slot.key = key;
-  slot.value = report;
-  return { report, fromCache: false };
+  if (slot.pendingKey === key && slot.pending) return { report: await slot.pending, fromCache: true };
+  const pending = Promise.resolve().then(compute);
+  slot.pendingKey = key;
+  slot.pending = pending;
+  try {
+    const report = await pending;
+    // An older generation finishing late must not replace a newer slot.
+    if (slot.pending === pending) { slot.key = key; slot.value = report; }
+    return { report, fromCache: false };
+  } finally {
+    if (slot.pending === pending) { slot.pending = null; slot.pendingKey = null; }
+  }
 }
 
 export async function getCachedCheapIntegrity(key, compute, scope = defaultScope) {

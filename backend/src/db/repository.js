@@ -438,6 +438,44 @@ export async function deleteObservationsForIndicatorYears(db, indicatorId, start
   return info.changes;
 }
 
+/** Validated removed identities only; caller owns the atomic publication. */
+export async function deleteObservationKeysInner(db, indicatorId, rows) {
+  await batchRun(db, rows, {
+    sql: 'DELETE FROM observations WHERE country_id = ? AND indicator_id = ? AND year = ?',
+    build: row => [row.countryId, indicatorId, row.year],
+  });
+}
+
+/** Five bounded SELECTs in one read batch: one committed snapshot, no per-metric I/O. */
+export async function getOverviewInputs(db, metricKeys, country, startYear, endYear) {
+  const marks = metricKeys.map(() => '?').join(',');
+  const queries = [
+    { sql: 'SELECT COUNT(*) AS n FROM countries WHERE is_aggregate = 0' },
+    { sql: 'SELECT * FROM countries WHERE id = ? OR iso3 = ? LIMIT 1', args: [country, country] },
+    { sql: `SELECT i.*, EXISTS(SELECT 1 FROM observations o JOIN countries c ON c.id=o.country_id
+        WHERE o.indicator_id=i.id AND c.is_aggregate=0 AND o.value IS NOT NULL LIMIT 1) AS hasData
+        FROM indicators i WHERE i.metric_key IN (${marks})`, args: metricKeys },
+    { sql: `SELECT i.metric_key AS metricKey, o.country_id AS iso3, c.name, o.year, o.value, o.value_raw AS valueRaw
+        FROM indicators i JOIN observations o ON o.indicator_id=i.id JOIN countries c ON c.id=o.country_id
+        WHERE i.metric_key IN (${marks}) AND o.year BETWEEN ? AND ? AND c.is_aggregate=0 AND o.value IS NOT NULL
+        ORDER BY i.metric_key,o.year,o.country_id`, args: [...metricKeys, startYear, endYear] },
+    { sql: `SELECT i.metric_key AS metricKey, o.year, o.value, o.value_raw AS valueRaw
+        FROM indicators i JOIN observations o ON o.indicator_id=i.id
+        WHERE i.metric_key IN (${marks}) AND o.country_id=? AND o.year BETWEEN ? AND ?
+        ORDER BY i.metric_key,o.year`, args: [...metricKeys, country, startYear - 1, endYear] },
+  ];
+  // The SDK guarantees a batch transaction. Use explicit read mode, also locally.
+  // Exotic test handles without batch support still need the same read snapshot.
+  let rows;
+  if (typeof db.batch === 'function') rows = (await db.batch(queries, 'read')).map(r => r.rows);
+  else {
+    const tx = await db.transaction('read');
+    try { rows = await batchGet(tx, queries); } finally { tx.close(); }
+  }
+  return { eligibleUniverse: Number(rows[0][0].n), focus: rows[1][0] ?? null,
+    indicators: new Map(rows[2].map(row => [row.metric_key, row])), eligibleRows: rows[3], focusRows: rows[4] };
+}
+
 export async function getObservation(db, countryId, indicatorId, year) {
   return (
     (await queryGet(

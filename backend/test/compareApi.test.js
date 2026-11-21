@@ -629,6 +629,7 @@ test('compare API: a zero value is data, not a missing observation', async () =>
 
 test('compare API: a new dataset content version invalidates a cached comparison', async () => {
   const { db, repository } = await seedCompareDb();
+  await repository.upsertDatasetStateInner(db, { ...await repository.computeDatasetState(db), contentVersion: 1 });
   const { base, close } = await startApp(db);
   try {
     const path = '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2004&yearB=2005&operation=absolute_change';
@@ -651,6 +652,20 @@ test('compare API: a new dataset content version invalidates a cached comparison
   } finally {
     await close();
   }
+});
+
+test('compare API: legacy data without a derived generation never hides a same-vintage value correction', async () => {
+  const { db } = await seedCompareDb();
+  const { base, close } = await startApp(db);
+  try {
+    const path = '/api/compare?entityA=country:IND&entityB=country:CHN&indicator=total_current&yearA=2004&yearB=2005&operation=absolute_change';
+    const first = await getJSON(base, path);
+    assert.equal(first.body.cached, false);
+    await queryRun(db, "UPDATE observations SET value=999,value_raw='999' WHERE country_id='IND' AND year=2005");
+    const second = await getJSON(base, path);
+    assert.equal(second.body.cached, false);
+    assert.equal(second.body.results.comparison.a.value, 999 - 721e9);
+  } finally { await close(); }
 });
 
 test('compare API: observed and like-for-like results are never shared', async () => {

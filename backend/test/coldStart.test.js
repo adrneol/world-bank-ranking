@@ -146,7 +146,7 @@ test('3. non-empty database serves years normally while a background refresh run
 });
 
 // 4. Reads stay byte-identical while a background refresh runs (atomic publish).
-test('4. ranking reads stay identical before, during, and after a background refresh', async () => {
+test('4. ranking reads stay identical before, during, and after a background refresh', async t => {
   const { createMemoryDb } = await import('../src/db/index.js');
   const { refreshData } = await import('../src/wb/ingest.js');
   const db = await createMemoryDb();
@@ -157,6 +157,10 @@ test('4. ranking reads stay identical before, during, and after a background ref
   try {
     const before = await rankingSnapshot(api);
     await backdateLatestRun(db, 48);
+    // The server owns a one-minute check cadence; a metadata edit does not
+    // let a new query string bypass it. Advance the cadence without sleeping.
+    const maintenanceTime = Date.now() + 60001;
+    t.mock.method(Date, 'now', () => maintenanceTime);
 
     // This request trips the stale detector and launches the background
     // refresh; the stub is deterministic so any partial publish would show

@@ -55,7 +55,6 @@ import {
   listFetchRuns,
   listIndicators,
   getLatestPersistedProgress,
-  markIntegrityVerified,
   parseProgressSummary,
   parseStoredIntegrityChecks,
 } from './db/repository.js';
@@ -63,6 +62,7 @@ import { describeUniverseRule } from './domain/universe.js';
 import { describeMeasure, describeMetric } from './domain/format.js';
 import { buildLevelComparisonResponse, COMPARISON_ERROR_CODES } from './services/comparisonService.js';
 import { buildCompareResponse, buildGroupEvaluation } from './services/entityCompare.js';
+import { persistVerifiedGeneration, startMaintenance } from './services/maintenance.js';
 import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
 import { buildFullRanking } from './services/fullRanking.js';
@@ -1033,10 +1033,18 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // current valid dataset. maybeAutoRefresh() guarantees at most one refresh
   // (in-memory flag + SQLite mutex) and backs off after failures.
   if (autoRefreshEnabled) {
+    // Only the server controls check cadence. Query-string changes cannot cause
+    // metadata reads on every request; publication/refresh locks still decide writes.
+    let lastCheck = 0;
+    let lastTarget = null;
     app.use((req, res, next) => {
       (async () => {
         try {
           if (req.method === 'GET' && req.query.readOnly !== '1' && AUTO_REFRESH_PATHS.includes(req.path)) {
+            const target = handle();
+            if (lastTarget === target && Date.now() - lastCheck < 60000) return next();
+            lastTarget = target;
+            lastCheck = Date.now();
             // Phase 8F: while serving fallback, opportunistically re-probe the
             // primary (cooldown-gated inside maybeRecoverPrimary: no storm, no
             // per-request work beyond a timestamp check when cooling down).
@@ -2062,17 +2070,9 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
           passed,
           checks: checks.map((c) => ({ check: c.check, status: c.status })),
         };
-        // Record that this exact content generation passed, conditional on
-        // the version being unchanged since the verification ran. Best
-        // effort: never break the status response.
-        const canPersist = !req.publicCatalogRead && req.query.readOnly !== '1';
-        if (canPersist && passed && (!expensive.fromCache || state.integrityVerifiedContentVersion !== state.contentVersion)) {
-          try {
-            await markIntegrityVerified(h, state.contentVersion, expensive.report.checks);
-          } catch {
-            // Diagnostic write only; the verified report stands regardless.
-          }
-        }
+        // Ordinary GETs never persist verification, regardless of readOnly spelling.
+        // The per-handle memo reuses the proof; persisted operator evidence can
+        // still be consumed above when it belongs to this exact generation.
       } else {
         const key = integrityCacheKey(fingerprint);
         integrity = (
@@ -2682,7 +2682,18 @@ async function boot() {
     console.warn(`Integrity checks skipped: ${error.message}`);
   }
 
+  // Passive UI/public requests cannot drive freshness. Keep one owned cadence
+  // after bootstrap, alongside existing refresh locks and bounded retry policy.
+  const stopMaintenance = config.autoRefreshOnStale ? startMaintenance(async () => {
+    if (!getServiceReadiness().ready || shared.isDegraded) return;
+    if (shared.isFallback) await maybeRecoverPrimary(shared, { onWarn: w => console.warn(`Primary recovery: ${w.message}`) });
+    await maybeAutoRefresh(shared.current ?? db, { onWarn: w => console.warn(`Auto-refresh: ${w.message}`),
+      onTransportFailure: cause => maybeFailoverToFallback(shared, { cause }).catch(() => {}) });
+    if (!isRefreshInProgress()) await persistVerifiedGeneration(shared.current ?? db);
+  }, { onError: () => console.warn('Scheduled maintenance unavailable; serving the last valid dataset.') }) : () => {};
+  server.once('close', stopMaintenance);
   const shutdown = () => {
+    stopMaintenance();
     console.log('Shutting down...');
     server.close(() => {
       closeDb();

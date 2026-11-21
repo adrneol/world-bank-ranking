@@ -32,7 +32,7 @@ import { getDatasetState, getObservationYearSignature } from '../db/repository.j
 /** Maximum number of cached comparison responses per database. */
 export const COMPARE_CACHE_MAX_ENTRIES = 64;
 
-const perDatabase = new WeakMap();
+let perDatabase = new WeakMap();
 
 /**
  * The (bounded, LRU) cache of one database.
@@ -119,9 +119,16 @@ export function compareCacheKey({
  */
 export async function compareInvalidationSignals(db, indicatorId, years) {
   const state = await getDatasetState(db);
+  // Publication advances this version for values, coverage, country metadata
+  // AND provenance. Repository writes outside publication delete the state.
+  // Thus a valid derived version needs no historical COUNT/MIN/MAX scan on
+  // every warm hit. Unknown/legacy state still requires the original signature.
+  if (Number.isInteger(state?.contentVersion) && state.contentVersion >= 1) {
+    return { contentVersion: String(state.contentVersion), signature: null };
+  }
   const signature = await getObservationYearSignature(db, indicatorId, years);
   return {
-    contentVersion: String(state?.contentVersion ?? 'none'),
+    contentVersion: 'none',
     signature,
   };
 }
@@ -131,6 +138,9 @@ export async function compareInvalidationSignals(db, indicatorId, years) {
  * @returns {object|undefined}
  */
 export function getCachedCompare(db, key) {
+  // A legacy count/vintage signature cannot prove that values are unchanged.
+  // Serve exact reads until an authoritative publication derives a version.
+  if (key.startsWith('compare|content:none|')) return undefined;
   return cacheFor(db)?.get(key);
 }
 
@@ -139,6 +149,7 @@ export function getCachedCompare(db, key) {
  * responses are stored by the caller.
  */
 export function setCachedCompare(db, key, value) {
+  if (key.startsWith('compare|content:none|')) return;
   cacheFor(db)?.set(key, value);
 }
 
@@ -150,7 +161,7 @@ export function resetCompareCache(db) {
   }
   // Without a database handle the WeakMap cannot be enumerated; the process
   // is the unit of isolation in that case.
-  for (const value of perDatabase.values()) value.clear();
+  perDatabase = new WeakMap();
 }
 
 export default {

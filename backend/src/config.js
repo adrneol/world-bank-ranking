@@ -1510,7 +1510,7 @@ export const config = Object.freeze({
   })(),
 
   // Refresh-specific abuse protection (manual POST /api/data/refresh only;
-  // ranking/data GET endpoints are never rate-limited). In-memory sliding
+  // analytical GETs have a separate shared read budget). In-memory sliding
   // window per client IP: at most refreshRateLimitMax attempts per
   // refreshRateLimitWindowMs. Non-positive values disable the limiter.
   refreshRateLimitMax: int('REFRESH_RATE_LIMIT_MAX', 10),
@@ -1527,7 +1527,7 @@ export const config = Object.freeze({
   // The backend resolves the requester's country ONCE per lookup through a
   // keyless external IP geolocation provider and maps the result against the
   // stored World Bank country metadata — unknown/aggregate results resolve
-  // to null and the frontend keeps its India fallback. The request IP is
+  // to null and the frontend offers manual selection. The request IP is
   // used transiently for the provider call only: it is never logged,
   // never persisted, and only an ISO3 (or null) leaves this service.
   // GEO_PROVIDER_URL names the provider lookup endpoint with a `{ip}`

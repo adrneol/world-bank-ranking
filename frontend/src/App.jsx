@@ -8,7 +8,7 @@
  * is backend-calculated; this shell holds UI state only.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api/client.js';
 import { fingerprintOf, isNewerGeneration } from './utils/refreshGeneration.js';
 import {
@@ -38,18 +38,18 @@ import { getHeaderContext } from './utils/headerContext.js';
 import Home from './sections/Home.jsx';
 import About from './sections/About.jsx';
 import Methodology from './sections/Methodology.jsx';
-import Compare from './sections/Compare.jsx';
-import Overview from './sections/Overview.jsx';
-import YearlyTable from './sections/YearlyTable.jsx';
-import YearComparison from './sections/YearComparison.jsx';
-import RankMovement from './sections/RankMovement.jsx';
-import LevelVerification from './sections/LevelVerification.jsx';
-import FullRanking from './sections/FullRanking.jsx';
-import YoyRanking from './sections/YoyRanking.jsx';
-import YoyVerification from './sections/YoyVerification.jsx';
-import Coverage from './sections/Coverage.jsx';
-import AuditSource from './sections/AuditSource.jsx';
-import DataStatus from './sections/DataStatus.jsx';
+const Compare = lazy(() => import('./sections/Compare.jsx'));
+const Overview = lazy(() => import('./sections/Overview.jsx'));
+const YearlyTable = lazy(() => import('./sections/YearlyTable.jsx'));
+const YearComparison = lazy(() => import('./sections/YearComparison.jsx'));
+const RankMovement = lazy(() => import('./sections/RankMovement.jsx'));
+const LevelVerification = lazy(() => import('./sections/LevelVerification.jsx'));
+const FullRanking = lazy(() => import('./sections/FullRanking.jsx'));
+const YoyRanking = lazy(() => import('./sections/YoyRanking.jsx'));
+const YoyVerification = lazy(() => import('./sections/YoyVerification.jsx'));
+const Coverage = lazy(() => import('./sections/Coverage.jsx'));
+const AuditSource = lazy(() => import('./sections/AuditSource.jsx'));
+const DataStatus = lazy(() => import('./sections/DataStatus.jsx'));
 
 const PARAMS = ['startYear', 'endYear', 'year', 'metric', 'neighbors', 'fromYear', 'view', 'yearA', 'yearB', 'yearMid', 'basis', 'country', 'cmpEntityA', 'cmpEntityB', 'cmpLabelA', 'cmpLabelB', 'cmpAnalysis', 'cmpMetric', 'cmpBasis', 'cmpYearA', 'cmpYearB', 'cmpYearC', 'cmpOp', 'cmpMode', 'rankSub', 'yoySub'];
 
@@ -893,6 +893,7 @@ export default function App() {
         ) : null}
 
         <main id="main" key={`${dataVersion}:${view}`}>
+          <Suspense fallback={<p className="status" role="status">Loading research view…</p>}>
           {!effective.country && ['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit', 'compare'].includes(view) &&
             ['resolving', 'waiting-for-registry'].includes(economyInitialization.status) ?
             <p className="status" role="status">{filters.countrySource === 'explicit' && economyInitialization.status === 'waiting-for-registry' ? 'Preparing your selected economy…' : 'Identifying your regional economy…'}</p> : null}
@@ -997,6 +998,7 @@ export default function App() {
             <AuditSource year={effective.year} metricKey={effective.metric} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
           {view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
+          </Suspense>
         </main>
 
         <footer className="app-footer">
