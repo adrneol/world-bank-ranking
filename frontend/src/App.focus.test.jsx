@@ -54,10 +54,10 @@ const INDICATORS = {
   methodology: {},
 };
 
-function movementPayload(focus, otherIso, otherName) {
+function movementPayload(focus, otherIso, otherName, yearA = 2004, yearB = 2014) {
   return {
     comparison: { available: true, mode: 'level' },
-    years: { a: 2004, b: 2014 },
+    years: { a: yearA, b: yearB },
     focus,
     metric: { key: 'nominal_current', unit: 'current US$', indicatorCode: 'NY.GDP.PCAP.CD' },
     focusMovement: {
@@ -193,14 +193,14 @@ describe('application focus-country behavior', () => {
       ['/api/years', YEARS],
       ['/api/countries', COUNTRIES],
       ['/api/indicators', INDICATORS],
-      ['/api/comparison/level', movementPayload({ iso3: 'USA', name: 'United States' }, 'CHN', 'China')],
+      ['/api/comparison/level', movementPayload({ iso3: 'USA', name: 'United States' }, 'CHN', 'China', 2014, 2024)],
     ]);
     const { container, cleanup } = renderApp('/?view=movement&country=USA');
     await flushReact(act);
     expect(stub.calls.some((href) => href.includes('/api/comparison/level') && href.includes('country=USA'))).toBe(true);
     const header = container.querySelector('.app-header');
     expect(header.querySelector('.eyebrow').textContent).toBe('World Bank WDI · USA');
-    expect(header.querySelector('h1').textContent).toBe('United States — 2004 → 2014');
+    expect(header.querySelector('h1').textContent).toBe('United States — 2014 → 2024');
     expect(container.textContent).toContain('Above United States');
     openCollapsibleLists(container);
     await flushReact(act);
@@ -216,13 +216,13 @@ describe('application focus-country behavior', () => {
       ['/api/years', YEARS],
       ['/api/countries', COUNTRIES],
       ['/api/indicators', INDICATORS],
-      ['/api/comparison/level', movementPayload({ iso3: 'CHN', name: 'China' }, 'USA', 'United States')],
+      ['/api/comparison/level', movementPayload({ iso3: 'CHN', name: 'China' }, 'USA', 'United States', 2014, 2024)],
     ]);
     const { container, cleanup } = renderApp('/?view=movement&country=CHN');
     await flushReact(act);
     expect(stub.calls.some((href) => href.includes('/api/comparison/level') && href.includes('country=CHN'))).toBe(true);
     const header = container.querySelector('.app-header');
-    expect(header.querySelector('h1').textContent).toBe('China — 2004 → 2014');
+    expect(header.querySelector('h1').textContent).toBe('China — 2014 → 2024');
     expect(container.textContent).toContain('Above China');
     openCollapsibleLists(container);
     await flushReact(act);

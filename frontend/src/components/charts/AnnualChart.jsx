@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useResearchPreference } from '../../hooks/researchPreferences.js';
 import { alignSeries, annualSeries, scaleDetailFor } from './chartData.js';
 import { AnnualRangeControl, ChartTypeToggle, SegmentedControl } from './ChartControls.jsx';
 import AnnualSeriesMarker from './AnnualSeriesMarker.jsx';
@@ -12,9 +12,10 @@ export default function AnnualChart({
   series, unit, decimals, zeroLine = false, chartType, onChartType, initialType = 'line',
   showTypeControl = true,
 }) {
-  const [choice, setChoice] = useState(initialType);
-  const [scaleChoice, setScaleChoice] = useState('linear');
-  const [domainMode, setDomainMode] = useState('auto');
+  const scope=`annual:${unit}:${(series??[]).map(item=>item.label).join('|')}`;
+  const [choice, setChoice] = useResearchPreference(scope+':type',initialType);
+  const [scaleChoice, setScaleChoice] = useResearchPreference(scope+':scale','linear');
+  const [domainMode, setDomainMode] = useResearchPreference(scope+':axes','auto');
   const type = chartType ?? choice;
   const aligned = alignSeries(series);
   const years = aligned.rows.map((row) => row.x);

@@ -2,6 +2,7 @@ import { FOCUS_COUNTRY, METRICS } from '../config.js';
 import { getCountry, getDatasetState, getLatestFetchRun, getFocusHistoryRows } from '../db/repository.js';
 import { formatPercent, formatValue } from '../domain/format.js';
 import { buildYoySeries } from '../domain/yoy.js';
+import { calendarYear } from '../domain/calendar.js';
 
 export const REAL_GROWTH_ID = 'real_gdp_growth';
 export const MAX_HISTORY_YEARS = 100;
@@ -13,7 +14,7 @@ function historyError(message, code) {
 
 export async function buildFocusHistory(db, { country = FOCUS_COUNTRY.iso3, series, startYear, endYear }) {
   if (!Number.isInteger(startYear) || !Number.isInteger(endYear) || startYear < 1960
-      || endYear > new Date().getFullYear() + 1 || startYear > endYear
+      || endYear > calendarYear() + 1 || startYear > endYear
       || endYear - startYear + 1 > MAX_HISTORY_YEARS) {
     throw historyError('Choose an ordered annual history window of up to 100 years.', 'INVALID_RANGE');
   }

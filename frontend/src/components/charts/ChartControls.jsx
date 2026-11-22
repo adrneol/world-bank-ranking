@@ -48,14 +48,15 @@ export function HistoryWindowControls({ years, from, to, onChange, reset, idPref
         onChange={choice => {
           setCustom(choice === 'custom');
           if (choice === 'reset') reset();
-          else if (choice !== 'custom') onChange(presets.find(([label]) => label === choice)[1]);
+          else if (choice === 'custom') onChange({from,to,preset:null});
+          else if (choice !== 'custom') onChange({...presets.find(([label]) => label === choice)[1],preset:choice});
         }} />
       {custom || !active ? <div className="chart-period-controls" aria-label="Chart period filter">
         {[['from', 'From year', from, years.filter((year) => year <= to)],
           ['to', 'To year', to, years.filter((year) => year >= from)]].map(([key, label, value, options]) => {
-          const change = (next) => onChange({ from, to, [key]: Number(next) });
+          const change = (next) => onChange({ from, to, [key]: Number(next),preset:null });
           return <SearchableSelect key={key} id={prefix + '-' + key} label={label} value={String(value)}
-            options={options.map((year) => ({ value: String(year), label: String(year) }))} onChange={change} />;
+            options={[...(!options.includes(value)?[{value:String(value),label:`${value} · no stored observation`}]:[]),...options.map((year) => ({ value: String(year), label: String(year) }))]} onChange={change} />;
         })}
       </div> : null}
     </div>

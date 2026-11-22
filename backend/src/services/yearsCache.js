@@ -65,11 +65,11 @@ function yearsFromState(state) {
   };
 }
 
-export async function getCachedAvailableYears(db = null) {
+export async function getCachedAvailableYears(db = null, capturedState = undefined) {
   const handle = db ?? getDb();
   // Key and stored years come from the SAME row; avoid a duplicate metadata read
   // and the possibility of attaching a newer payload to an older version.
-  const state = await getDatasetState(handle);
+  const state = capturedState===undefined ? await getDatasetState(handle) : capturedState;
   const key = state ? `cv:${state.contentVersion ?? 'none'}` : await yearsCacheKey(handle);
   const entry = entries.get(handle);
   if (entry && entry.key === key) return entry.result;

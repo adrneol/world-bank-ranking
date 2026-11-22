@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useRef } from 'react';
+import { useResearchPreference } from '../hooks/researchPreferences.js';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
 import { formatDecimal } from '../utils/format.js';
@@ -8,16 +9,16 @@ import { SearchableSelect } from '../components/controls.jsx';
 import ChartCard from '../components/charts/ChartCard.jsx';
 import { AnnualRangeControl, ChartTypeToggle, HistoryWindowControls } from '../components/charts/ChartControls.jsx';
 import AnnualSeriesMarker from '../components/charts/AnnualSeriesMarker.jsx';
-import { recentWindow } from '../components/charts/chartData.js';
+import { historyPreset, recentWindow, validHistoryRange } from '../components/charts/chartData.js';
 import UnifiedAnnualPlot from '../components/charts/UnifiedAnnualPlot.jsx';
 import { subjectLabel } from '../config/metrics.js';
 import { historySeries, relatedHistorySeries, REAL_GROWTH_ID } from './overviewContext.js';
 
-export default function OverviewHistory({ country, displayName, historyKey, availableYears, metricYears }) {
-  const [selection, setSelection] = useState([]);
-  const [windowChoice, setWindowChoice] = useState(null);
-  const [chartType, setChartType] = useState('line');
-  const [domainMode, setDomainMode] = useState('auto');
+export default function OverviewHistory({ country, displayName, historyKey, availableYears, metricYears, yearDomain }) {
+  const [selection, setSelection] = useResearchPreference('history:series',[]);
+  const [windowChoice, setWindowChoice] = useResearchPreference('history:range',null);
+  const [chartType, setChartType] = useResearchPreference('history:type','line');
+  const [domainMode, setDomainMode] = useResearchPreference('history:axes','auto');
   const controlId = useId();
   const seriesControl = useRef(null);
   const primary = historySeries(historyKey);
@@ -29,8 +30,8 @@ export default function OverviewHistory({ country, displayName, historyKey, avai
     .sort((a, b) => a - b);
   if (!years.length) return <p className="footnote">No stored history for this indicator.</p>;
   const defaultRange = recentWindow(years, 25);
-  const range = windowChoice && years.includes(windowChoice.from) && years.includes(windowChoice.to)
-    ? windowChoice : defaultRange;
+  const range = historyPreset(years,windowChoice?.preset) ?? (validHistoryRange(windowChoice,yearDomain)
+    ? windowChoice : defaultRange);
   const ids = visible.map(({ id }) => id).sort();
   const requestKey = JSON.stringify([country, range, ids]);
   const remove = (id) => {

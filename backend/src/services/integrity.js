@@ -152,7 +152,7 @@ export async function runExpensiveIntegrityChecks(db) {
   checks.push(result('D.duplicate_observation', duplicateGroups === 0, { duplicateGroups }));
 
   // E. Years must be plausible WDI years (World Bank series start in 1960).
-  const thisYear = new Date().getFullYear();
+  const thisYear = new Date().getUTCFullYear();
   const invalidYears = (
     await queryGet(db, 'SELECT COUNT(*) AS n FROM observations WHERE year IS NULL OR year < 1960 OR year > ?', [
       thisYear + 2,

@@ -20,6 +20,9 @@ export function stubFetch(routes) {
         return { ok: true, status: 200, headers: new Headers(), json: async () => respond };
       }
     }
+    // Older analytical fixtures predate optional scoped availability. Model the
+    // supported older-server 404 explicitly; focused year tests supply its DTO.
+    if (href.includes('/api/availability')) return errorResponse(404,'NOT_FOUND','Scoped availability is not configured in this fixture.');
     throw new Error(`Unmocked fetch: ${href}`);
   };
   return {

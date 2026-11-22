@@ -67,9 +67,12 @@ describe('About page', () => {
   it('routes to methodology and status without inventing content', () => {
     stub = stubFetch([['/api/data-status', VINTAGE_STATUS]]);
     const { container, onOpenView, cleanup } = renderAbout(siteMetadata({}));
-    const buttons = [...container.querySelectorAll('button')];
-    buttons.find((b) => b.textContent.includes('How calculations work')).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const link = container.querySelector('a[href="/methodology/"]');
+    expect(link).toBeTruthy();
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(onOpenView).toHaveBeenCalledWith('methodology');
+    container.querySelector('a[href="/status/"]').dispatchEvent(new MouseEvent('click', {bubbles:true,cancelable:true}));
+    expect(onOpenView).toHaveBeenCalledWith('status');
     expect(container.textContent).not.toMatch(/Ph\.?D|professor|award|university/i);
     cleanup();
   });

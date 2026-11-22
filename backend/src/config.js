@@ -12,6 +12,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { calendarYear, parseYearLimit } from './domain/calendar.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +62,9 @@ function bool(name, fallback) {
   if (['0', 'false', 'no', 'off'].includes(v)) return false;
   throw new Error(`Environment variable ${name} must be a boolean, received: ${raw}`);
 }
+
+// Capture an intentional operator limit once; resolve automatic UTC year per refresh.
+const ingestYearLimit = parseYearLimit(str('INGEST_END_YEAR', 'auto'));
 
 /**
  * CANONICAL WORLD BANK INDICATOR CODES — IMMUTABLE IN PRODUCTION.
@@ -1490,7 +1494,7 @@ export const config = Object.freeze({
   // only what the World Bank returns; missing years stay missing. Per-metric
   // availability is preserved — no common start year is fabricated.
   ingestStartYear: int('INGEST_START_YEAR', 1960),
-  ingestEndYear: int('INGEST_END_YEAR', new Date().getFullYear()),
+  get ingestEndYear() { return ingestYearLimit ?? calendarYear(); },
 
   cacheTtlHours: num('CACHE_TTL_HOURS', 24),
   neighborsDefault: int('RANK_NEIGHBORS_DEFAULT', 5),

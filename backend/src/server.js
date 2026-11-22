@@ -63,6 +63,8 @@ import { describeMeasure, describeMetric } from './domain/format.js';
 import { buildLevelComparisonResponse, COMPARISON_ERROR_CODES } from './services/comparisonService.js';
 import { buildCompareResponse, buildGroupEvaluation } from './services/entityCompare.js';
 import { persistVerifiedGeneration, startMaintenance } from './services/maintenance.js';
+import { buildAvailability } from './services/availability.js';
+import { calendarYear } from './domain/calendar.js';
 import { buildGrowthComparisonResponse } from './services/growthComparisonService.js';
 import { buildCoveragePanel, buildYoyCoveragePanel, explainTotalChange } from './services/coverageService.js';
 import { buildFullRanking } from './services/fullRanking.js';
@@ -785,7 +787,7 @@ function parseYear(value, name) {
   if (value === undefined || value === null || value === '') return undefined;
   const n = typeof value === 'number' ? value
     : typeof value === 'string' && /^\d{4}$/.test(value) ? Number(value) : NaN;
-  const thisYear = new Date().getFullYear();
+  const thisYear = calendarYear();
   if (!Number.isInteger(n) || n < 1960 || n > thisYear + 1) {
     throw httpError(400, `Invalid ${name}: expected an integer year between 1960 and ${thisYear + 1}.`, 'INVALID_YEAR');
   }
@@ -1002,6 +1004,12 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   // Budget legacy reads before TTL checks as well as their published aliases.
   // The paths are registered synchronously below before requests can arrive.
   const publicReadPaths = new Set(['/api/india/gdp-ranking', '/api/integrity', '/api/geo/country']);
+  app.use((req,res,next)=>{
+    if(routePath(req).startsWith('/api/public/')) {
+      for(const name of ['Cache-Control','CDN-Cache-Control','Vercel-CDN-Cache-Control'])res.setHeader(name,name==='Cache-Control'?'private, no-store':'no-store');
+    }
+    next();
+  });
   const publicBudgets = new Map();
   const limitPublicRead = (req, res, next) => {
     if (req.readBudgetCounted) return next();
@@ -1123,7 +1131,9 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
 
   // ---------- years ----------
   publicRead('/api/years', ah(async (req, res) => {
+    res.setHeader('Cache-Control','private, no-store');
     const h = handle();
+    const yearTarget=activeTargetOf(shared);
     // Cold-start seeding: the database is empty and the first ingest is
     // still running (boot or TTL-triggered empty refresh). There are no
     // years to report yet — say so explicitly instead of returning an empty
@@ -1142,12 +1152,29 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       });
       return;
     }
-    const available = await getCachedAvailableYears(h);
+    const available = await getCachedAvailableYears(h,datasetState);
     res.json({
       ...available,
       defaults: { startYear: config.defaultStartYear, endYear: config.defaultEndYear },
+      generation: { contentVersion: datasetState?.contentVersion ?? null, runId: datasetState?.updatedRunId ?? null },
+      database: publicDatabaseTarget(yearTarget),
+      sourceVintage: datasetState?.maxWbLastUpdated ?? null,
+      latestByMetric: Object.fromEntries(Object.entries(available.perMetric??{}).map(([key,years])=>[key,years.at(-1)??null])),
+      selectionPolicy: 'latest-published-unless-explicit; defaults are legacy analysis presets, not acquisition caps',
       methodology: methodologyBlock(),
     });
+  }));
+
+  publicRead('/api/availability', ah(async (req,res) => {
+    res.setHeader('Cache-Control','private, no-store');
+    for (const name of ['indicator','country','entityA','entityB','basis']) {
+      if (req.query[name] != null && typeof req.query[name] !== 'string') throw httpError(400,'Availability parameters must be scalar strings.','INVALID_QUERY');
+    }
+    const metricKey = parseMetric(req.query.indicator);
+    const h=handle(),target=activeTargetOf(shared);
+    const result = await buildAvailability(h, {metricKey,country:req.query.country,
+      entityA:req.query.entityA,entityB:req.query.entityB,basis:req.query.basis});
+    res.json({...result,database:publicDatabaseTarget(target)});
   }));
 
   // ---------- yearly (canonical + legacy alias) ----------
@@ -2026,8 +2053,12 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     // report instead of rescanning. Merged checks keep canonical order and
     // shape. Absent dataset_state falls back to the legacy single memo.
     let integrity = null;
+    let generation = null;
+    let capturedState = null;
+    let capturedYears = null;
     try {
       const state = await getDatasetState(h);
+      if(state) { capturedState=state;capturedYears=await getCachedAvailableYears(h,state);generation={contentVersion:state.contentVersion,runId:state.updatedRunId}; }
       if (state) {
         const cheap = await getCachedCheapIntegrity(
           cheapIntegrityKey(fingerprint?.runId),
@@ -2156,13 +2187,16 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       : null;
     res.json({
       ...cache,
+      observations: capturedState?.observationCount??cache.observations,
+      empty: capturedState ? capturedState.observationCount===0:cache.empty,
       capabilities: { publicReadApiEnabled: config.publicReadApiEnabled },
+      generation,
       // Authoritative upstream World Bank vintage: MAX(wb_last_updated)
       // across stored observations (each row carries the WDI `lastupdated`
       // from its own retrieval). Distinct from lastSuccessAt below, which
       // is the LOCAL retrieval timestamp. Additive, read-only, derived —
       // no ingestion semantics involved.
-      wbLastUpdated: await getMaxWbLastUpdated(h),
+      wbLastUpdated: capturedState ? capturedState.maxWbLastUpdated : await getMaxWbLastUpdated(h),
       // LAST SUCCESSFUL CHECK vs LAST ACTUAL DATA WRITE.
       // `cache.lastSuccessAt` (spread in above) is the time of the latest
       // successful World Bank CHECK — it advances even when the check proved
@@ -2172,7 +2206,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       // metadata-only provenance advance: that rewrite leaves `fetched_at`
       // untouched, so this timestamp keeps meaning "the stored data changed",
       // not "anything at all was written". Null when nothing is stored yet.
-      lastDataChangeAt: fingerprint?.maxFetchedAt ?? null,
+      lastDataChangeAt: capturedState ? capturedState.maxFetchedAt : fingerprint?.maxFetchedAt ?? null,
       inProgress: isRefreshInProgress(),
       progress: getIngestProgress(),
       // Phase 8E: persisted last completed refresh (survives remount/reload;
@@ -2196,7 +2230,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
       // Non-analytical; exposes only whether auth is required, never the token.
       refreshRequiresAuth: config.refreshAdminToken !== '',
       latestRuns,
-      years: await getCachedAvailableYears(h),
+      years: capturedYears ?? await getCachedAvailableYears(h),
       methodology: methodologyBlock(),
     });
   }));

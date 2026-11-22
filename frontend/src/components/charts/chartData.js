@@ -71,6 +71,19 @@ export function recentWindow(years, count) {
   return { from: years.find((year) => year >= to - count + 1) ?? years[0], to };
 }
 
+export function historyPreset(years,name) {
+  if(name==='Recent 10 years')return recentWindow(years,10);
+  if(name==='Recent 25 years')return recentWindow(years,25);
+  if(name==='2000 to latest')return {from:years.find(year=>year>=2000)??years[0],to:years.at(-1)};
+  if(name==='Full history')return {from:years[0],to:years.at(-1)};
+  return null;
+}
+export function validHistoryRange(range,domain) {
+  return range && Number.isInteger(range.from) && Number.isInteger(range.to) &&
+    range.from>=(domain?.min??1960) && range.to<=(domain?.max??9999) && range.from<=range.to &&
+    range.to-range.from+1<=(domain?.historyMaxYears??100);
+}
+
 export function calendarYears(from, to) {
   return Array.from({ length: Math.max(0, to - from + 1) }, (_, offset) => from + offset);
 }

@@ -292,3 +292,53 @@ universe. Ranks and YoY are calculated by this application, not published WDI ra
 Consult the [World Bank Indicators API documentation](https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation),
 [World Bank data terms](https://www.worldbank.org/en/about/legal/terms-of-use-for-datasets),
 and each indicator's source notes and licensing/attribution requirements.
+
+## Phase 5.1 release correction and automatic years
+
+See [PHASE_5_1_RELEASE_CLOSURE.md](PHASE_5_1_RELEASE_CLOSURE.md) for the live HTTP
+evidence, actual Overview/Compare figures, full acceptance results, environment
+consumer references and owner-controlled release checklist. Production acceptance
+remains conditional: the sampled deployed document page returned 503 even though
+the deployed catalog, capability endpoint and economic API returned valid data.
+Local changes do not repair an older deployment until the owner releases them.
+
+The public-document function loads its packaged HTML relative to its module,
+using the existing `frontend/vercel.json` include-files and rewrite rules. The
+existing `VITE_API_BASE_URL` is used both by the SPA build and function runtime;
+production expects the Render **origin**, without an appended `/api`. The backend
+alone authorizes optional publication with exact `PUBLIC_READ_API_ENABLED=1`.
+Disabled is 404; unknown/temporary failure is retryable 503, with a human error
+document or JSON error as appropriate. Checks share active requests, never cache
+an enabled permission. Human routes and sitemap remain independently available.
+
+The catalog retains the original 30 resources, adds typed arguments and complete
+historical GET examples, and adds `/api/public/availability` as resource 31.
+Discover current years before selecting numeric query values:
+
+```text
+https://world-bank-ranking.onrender.com/api/public/years
+https://world-bank-ranking.onrender.com/api/public/availability?indicator=total_current&country=JPN
+https://world-bank-ranking.onrender.com/api/public/focus/history?country=JPN&series=total_constant&startYear=2023&endYear=2025
+https://world-bank-ranking.onrender.com/api/public/compare?entityA=country%3AUSA&entityB=country%3AJPN&indicator=total_current&yearA=2024&yearC=2025&operation=level
+```
+
+The availability route requires this backend revision. API numeric years are
+explicit; `latest` is a frontend selection convention, not an API argument.
+Historical examples do not claim to be the newest release. Source vintage,
+observation year, coverage, valid YoY pairs and common entity inputs are separate.
+Successful HTTP retrieval is not a guarantee of indexing or access through every
+external AI vendor's URL-fetch client.
+
+Automatic ingestion now resolves the current **UTC** year when refresh begins,
+including a long-running process crossing New Year. The existing `INGEST_END_YEAR`
+supports unset/blank/`auto` for automatic acquisition and a numeric four-digit
+intentional cap. `DEFAULT_END_YEAR=2025` remains a legacy analysis preset, not an
+ingestion limit or latest-year UI bound. Historical acquisition remains intact
+because WDI revises old observations. No ENV files or variables changed here.
+
+Latest selections follow committed country/indicator/YoY/common-entity availability
+through the existing publication watcher; explicit numeric years remain pinned.
+Lagging indicators stay on their actual latest year. Valid UI preferences survive
+generation changes. Existing maintenance/TTL/locks remain the only refresh
+mechanism; maintenance cannot execute while a hosting process is suspended.
+No extra scheduler, visitor-privileged refresh or keep-alive service was added.

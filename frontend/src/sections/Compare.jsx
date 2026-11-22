@@ -16,7 +16,8 @@
  * silently dropped.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useResearchPreference } from '../hooks/researchPreferences.js';
 import { api } from '../api/client.js';
 import CompareUniversePanel from '../components/CompareUniversePanel.jsx';
 import EntityPicker from '../components/EntityPicker.jsx';
@@ -25,7 +26,7 @@ import ChartCard from '../components/charts/ChartCard.jsx';
 import IntervalLineChart from '../components/charts/IntervalLineChart.jsx';
 import AnnualChart from '../components/charts/AnnualChart.jsx';
 import { ChartTypeToggle, HistoryWindowControls } from '../components/charts/ChartControls.jsx';
-import { calendarYears, scaleDetailFor } from '../components/charts/chartData.js';
+import { calendarYears, historyPreset, scaleDetailFor } from '../components/charts/chartData.js';
 import { formatAnnualReadout } from '../components/charts/chartFormat.js';
 import { AnalyticalTable, MeasurementHeading } from '../components/AnalyticalTable.jsx';
 import { entityDisplayName, entityToSpec, parseEntitySpecString } from '../components/entities.js';
@@ -89,6 +90,7 @@ function YearSelect({ id, label, years, value, onChange, hint, optional = false,
       disabled={disabled}
       options={[
         ...(optional ? [{ value: '', label: 'Not selected' }] : []),
+        ...(value!=null && !(years??[]).includes(value) ? [{value:String(value),label:`${value} · unavailable`}]:[]),
         ...(years ?? []).map((y) => ({ value: String(y), label: String(y) })),
       ]}
       onChange={(v) => onChange(v === '' ? null : Number(v))}
@@ -750,7 +752,7 @@ function IntervalResultChart({ intervals, operation, analysisLabel, labelA, labe
  * refetching, no recalculation: the plotted points ARE the result.
  */
 function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) {
-  const [chartRange, setChartRange] = useState(null);
+  const [chartRange, setChartRange] = useResearchPreference(`compare:${metricKey}:range`,null);
   const seriesA = data.results?.a?.series?.points ?? [];
   const seriesB = data.results?.b?.series?.points ?? [];
   if (seriesA.length < 2 && seriesB.length < 2) return null;
@@ -769,8 +771,9 @@ function ResultChart({ data, metricKey, countryNames, chartType, onChartType }) 
   const requestedYears = [data.years?.a, data.years?.b, data.years?.c].filter(Number.isInteger);
   const defaultFrom = requestedYears.length ? Math.min(last, Math.max(first, Math.min(...requestedYears))) : first;
   const defaultTo = requestedYears.length ? Math.max(first, Math.min(last, Math.max(...requestedYears))) : last;
-  const rangeKey = JSON.stringify([data.entities?.a?.id ?? data.entities?.a?.iso3, data.entities?.b?.id ?? data.entities?.b?.iso3, data.metric?.key, data.basis, mode, data.years]);
-  const activeRange = chartRange?.key === rangeKey ? chartRange : { from: defaultFrom, to: defaultTo };
+  const rangeKey = JSON.stringify([entityToSpec(data.entities?.a), entityToSpec(data.entities?.b), data.metric?.key, data.basis, mode]);
+  const activeRange = chartRange?.key === rangeKey && chartRange.from>=first && chartRange.to<=last
+    ? historyPreset(allYears,chartRange.preset)??chartRange : { from: defaultFrom, to: defaultTo };
   const { from, to } = activeRange;
   const visibleYears = calendarYears(from, to);
   const mapA = new Map(seriesA.map((point) => [point.year, point]));
@@ -830,6 +833,7 @@ function exactChartValue(value) {
 }
 
 export default function Compare({
+  availabilityPending = false,
   availableYears,
   countries = [],
   entityA,
@@ -880,7 +884,7 @@ export default function Compare({
         : selectedBasis.disabled
           ? selectedBasis.disabledReason ?? 'This Basis is not available for the selected entities.'
           : '';
-  const [chartTypeChoice, setChartTypeChoice] = useState(null);
+  const [chartTypeChoice, setChartTypeChoice] = useResearchPreference('compare:type',null);
   const defaultChartType = effectiveOperation === 'level' ? 'line' : 'bar';
   const chartType = chartTypeChoice ?? defaultChartType;
   const setChartType = (type) => setChartTypeChoice(type);
@@ -923,7 +927,7 @@ export default function Compare({
     : periods.usesEnd && yearC == null && yearB == null;
 
   const canFetch =
-    !selectionError && entityObjA !== null && entityObjB !== null && canonicalMetricKey != null && effectiveOperation != null && yearA != null && !missingRequiredYear &&
+    !availabilityPending && !selectionError && entityObjA !== null && entityObjB !== null && canonicalMetricKey != null && effectiveOperation != null && yearA != null && !missingRequiredYear &&
     (periods.usesEnd ? sendYearC || (!periods.requiresEnd && sendYearB) : true) &&
     // An in-progress empty group stays selectable in the builder but never
     // submits (the backend would 400 EMPTY_GROUP).

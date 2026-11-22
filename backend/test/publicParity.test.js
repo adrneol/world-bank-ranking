@@ -16,6 +16,7 @@ test('every published research resource is retrievable with its analytical contr
   const base = `http://127.0.0.1:${server.address().port}`;
   const common = { country: 'IND', year: 2024, yearA: 2004, yearB: 2024, startYear: 2004, endYear: 2024 };
   const parameters = {
+    'availability': { indicator: 'total_current' },
     'observations': { indicator: 'nominal_current' },
     'focus/yearly': { subject: 'gdp_total' },
     'focus/history': { series: 'total_constant,inflation_cpi' },

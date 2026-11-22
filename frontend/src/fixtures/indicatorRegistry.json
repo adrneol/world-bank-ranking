@@ -1,0 +1,1586 @@
+{
+  "fixture": "Public registry metadata captured 2026-11-22; no economic observations or private configuration.",
+  "subjects": [
+    {
+      "key": "gdp_per_capita",
+      "label": "GDP per capita",
+      "metricKeys": [
+        "nominal_current",
+        "nominal_constant",
+        "ppp_current",
+        "ppp_constant"
+      ]
+    },
+    {
+      "key": "gdp_total",
+      "label": "Total GDP",
+      "metricKeys": [
+        "total_current",
+        "total_constant",
+        "total_ppp_current",
+        "total_ppp_constant"
+      ]
+    },
+    {
+      "key": "prices",
+      "label": "Prices",
+      "metricKeys": [
+        "inflation_cpi",
+        "inflation_cpi_index",
+        "inflation_deflator"
+      ]
+    },
+    {
+      "key": "trade",
+      "label": "Trade",
+      "metricKeys": [
+        "exports_current",
+        "imports_current"
+      ]
+    },
+    {
+      "key": "capital_flows",
+      "label": "Capital flows",
+      "metricKeys": [
+        "fdi_inflows",
+        "fdi_inflows_pct_gdp"
+      ]
+    },
+    {
+      "key": "exchange",
+      "label": "Exchange rates",
+      "metricKeys": [
+        "fx_official"
+      ]
+    },
+    {
+      "key": "external",
+      "label": "External sector",
+      "metricKeys": [
+        "current_account",
+        "reserves_ex_gold",
+        "remittances_received"
+      ]
+    },
+    {
+      "key": "population",
+      "label": "Population",
+      "metricKeys": [
+        "population_total"
+      ]
+    }
+  ],
+  "production": [
+    {
+      "key": "nominal_current",
+      "subject": "gdp_per_capita",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_PER_CAPITA",
+      "indicatorCode": "NY.GDP.PCAP.CD",
+      "label": "Nominal \u2014 Current US$",
+      "shortLabel": "Nominal Current",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "nominal",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "NOT_AGGREGATABLE",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": null,
+      "displayDecimals": 0,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.PCAP.CD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "nominal_constant",
+      "subject": "gdp_per_capita",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_PER_CAPITA",
+      "indicatorCode": "NY.GDP.PCAP.KD",
+      "label": "Real \u2014 Constant 2015 US$",
+      "shortLabel": "Nominal Constant 2015",
+      "unit": "constant 2015 US$",
+      "unitLong": "constant 2015 US$",
+      "currencySymbol": "$",
+      "group": "nominal",
+      "priceBasis": "constant",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "NOT_AGGREGATABLE",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": 2015,
+      "displayScale": null,
+      "displayDecimals": 0,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.PCAP.KD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "ppp_current",
+      "subject": "gdp_per_capita",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_PER_CAPITA",
+      "indicatorCode": "NY.GDP.PCAP.PP.CD",
+      "label": "PPP \u2014 Current international $",
+      "shortLabel": "PPP Current",
+      "unit": "current international $",
+      "unitLong": "current international $",
+      "currencySymbol": "$",
+      "group": "ppp",
+      "priceBasis": "current",
+      "currencyBasis": "INTERNATIONAL_DOLLAR",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "NOT_AGGREGATABLE",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": true,
+      "baseYear": null,
+      "displayScale": null,
+      "displayDecimals": 0,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.CD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "ppp_constant",
+      "subject": "gdp_per_capita",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_PER_CAPITA",
+      "indicatorCode": "NY.GDP.PCAP.PP.KD",
+      "label": "PPP \u2014 Constant 2021 international $",
+      "shortLabel": "PPP Constant 2021",
+      "unit": "constant 2021 international $",
+      "unitLong": "constant 2021 international $",
+      "currencySymbol": "$",
+      "group": "ppp",
+      "priceBasis": "constant",
+      "currencyBasis": "INTERNATIONAL_DOLLAR",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "NOT_AGGREGATABLE",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": true,
+      "baseYear": 2021,
+      "displayScale": null,
+      "displayDecimals": 0,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "total_current",
+      "subject": "gdp_total",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_TOTAL",
+      "indicatorCode": "NY.GDP.MKTP.CD",
+      "label": "Total GDP \u2014 Nominal \u2014 Current US$",
+      "shortLabel": "Current US$",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "usd",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "trillions",
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.MKTP.CD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "total_constant",
+      "subject": "gdp_total",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_TOTAL",
+      "indicatorCode": "NY.GDP.MKTP.KD",
+      "label": "Total GDP \u2014 Real \u2014 Constant 2015 US$",
+      "shortLabel": "Constant 2015 US$",
+      "unit": "constant 2015 US$",
+      "unitLong": "constant 2015 US$",
+      "currencySymbol": "$",
+      "group": "usd",
+      "priceBasis": "constant",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": 2015,
+      "displayScale": "trillions",
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "total_ppp_current",
+      "subject": "gdp_total",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_TOTAL",
+      "indicatorCode": "NY.GDP.MKTP.PP.CD",
+      "label": "Total GDP \u2014 PPP \u2014 Current international $",
+      "shortLabel": "PPP Current",
+      "unit": "current international $",
+      "unitLong": "current international $",
+      "currencySymbol": "$",
+      "group": "ppp",
+      "priceBasis": "current",
+      "currencyBasis": "INTERNATIONAL_DOLLAR",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": true,
+      "baseYear": null,
+      "displayScale": "trillions",
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.MKTP.PP.CD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "total_ppp_constant",
+      "subject": "gdp_total",
+      "domain": "NATIONAL_ACCOUNTS",
+      "family": "GDP_TOTAL",
+      "indicatorCode": "NY.GDP.MKTP.PP.KD",
+      "label": "Total GDP \u2014 PPP \u2014 Constant 2021 international $",
+      "shortLabel": "PPP Constant 2021",
+      "unit": "constant 2021 international $",
+      "unitLong": "constant 2021 international $",
+      "currencySymbol": "$",
+      "group": "ppp",
+      "priceBasis": "constant",
+      "currencyBasis": "INTERNATIONAL_DOLLAR",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "MORE_IS_MORE",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": true,
+      "baseYear": 2021,
+      "displayScale": "trillions",
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.MKTP.PP.KD",
+      "productionEnabled": true,
+      "ingested": true
+    },
+    {
+      "key": "inflation_cpi",
+      "subject": "prices",
+      "domain": "PRICES",
+      "family": "INFLATION_CPI",
+      "indicatorCode": "FP.CPI.TOTL.ZG",
+      "label": "CPI inflation \u2014 annual %",
+      "shortLabel": "CPI inflation",
+      "unit": "annual %",
+      "unitLong": "annual %",
+      "currencySymbol": null,
+      "group": "prices",
+      "priceBasis": "NOT_APPLICABLE",
+      "currencyBasis": "NOT_APPLICABLE",
+      "frequency": "ANNUAL",
+      "observationType": "RATE",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PP"
+      ],
+      "aggregation": "OFFICIAL_ONLY",
+      "rankingDirection": "ASC",
+      "interpretation": "LOWER_PREFERRED_IN_STABILITY",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "SIGNED",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": null,
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/FP.CPI.TOTL.ZG?format=json (re-verified unchanged at promotion)",
+        "name": "Inflation, consumer prices (annual %)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "pricesBases": [
+        {
+          "id": "cpi_inflation_annual",
+          "metricKey": "inflation_cpi",
+          "label": "Annual CPI inflation (%)",
+          "description": "Annual CPI inflation rate in the selected year.",
+          "formula": "A(i,t) = Inflation(i,t)",
+          "unit": "annual %",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower annual CPI inflation",
+          "requiresSequence": false
+        },
+        {
+          "id": "cpi_inflation_average",
+          "metricKey": "inflation_cpi",
+          "label": "Average annual CPI inflation (%)",
+          "description": "Arithmetic average of annual CPI inflation rates over S+1 through E. Average annual rate, not total price increase.",
+          "formula": "(1/(E-S)) * sum(t=S+1..E) Inflation(t)",
+          "unit": "annual %",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower average annual CPI inflation",
+          "requiresSequence": true
+        },
+        {
+          "id": "cpi_inflation_cumulative",
+          "metricKey": "inflation_cpi",
+          "label": "Cumulative CPI inflation (%)",
+          "description": "Compounded total consumer-price increase over S+1 through E. Inflation compounds; annual rates are never summed.",
+          "formula": "[prod(t=S+1..E)(1+Inflation(t)/100) - 1] * 100",
+          "unit": "%",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower cumulative consumer-price increase",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "inflation_cpi_index",
+      "subject": "prices",
+      "domain": "PRICES",
+      "family": "INFLATION_CPI",
+      "indicatorCode": "FP.CPI.TOTL",
+      "label": "CPI index \u2014 2010 = 100",
+      "shortLabel": "CPI index",
+      "unit": "index (2010 = 100)",
+      "unitLong": "index points (2010 = 100)",
+      "currencySymbol": null,
+      "group": "prices",
+      "priceBasis": "NOT_APPLICABLE",
+      "currencyBasis": "NOT_APPLICABLE",
+      "frequency": "ANNUAL",
+      "observationType": "INDEX",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "INDEX_POINT"
+      ],
+      "aggregation": "OFFICIAL_ONLY",
+      "rankingDirection": "NEUTRAL",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": 2010,
+      "displayScale": null,
+      "displayDecimals": 1,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/FP.CPI.TOTL",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/FP.CPI.TOTL?format=json (re-verified unchanged at promotion)",
+        "name": "Consumer price index (2010 = 100)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "pricesBases": [
+        {
+          "id": "cpi_index_annual",
+          "metricKey": "inflation_cpi_index",
+          "label": "Annual CPI index",
+          "description": "Consumer price index for the selected year, 2010 = 100. Index level, not a currency amount. Primarily for observing change within a country, not for cross-country ranking.",
+          "formula": "CPILevel(i,t) = CPI(i,t)",
+          "unit": "index points (2010 = 100)",
+          "rankable": false,
+          "rankDirection": null,
+          "requiresSequence": false
+        },
+        {
+          "id": "cpi_index_period_change",
+          "metricKey": "inflation_cpi_index",
+          "label": "Period CPI change (%)",
+          "description": "Percentage change in the consumer price index between the selected start and end years; not annualized. Lower values mean a smaller increase in consumer prices.",
+          "formula": "(CPI_E / CPI_S - 1) * 100",
+          "unit": "%",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower cumulative consumer-price increase",
+          "requiresSequence": false
+        }
+      ]
+    },
+    {
+      "key": "inflation_deflator",
+      "subject": "prices",
+      "domain": "PRICES",
+      "family": "INFLATION_DEFLATOR",
+      "indicatorCode": "NY.GDP.DEFL.KD.ZG",
+      "label": "GDP-deflator inflation \u2014 annual %",
+      "shortLabel": "GDP-deflator inflation",
+      "unit": "annual %",
+      "unitLong": "annual %",
+      "currencySymbol": null,
+      "group": "prices",
+      "priceBasis": "NOT_APPLICABLE",
+      "currencyBasis": "NOT_APPLICABLE",
+      "frequency": "ANNUAL",
+      "observationType": "RATE",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PP"
+      ],
+      "aggregation": "OFFICIAL_ONLY",
+      "rankingDirection": "ASC",
+      "interpretation": "LOWER_PREFERRED_IN_STABILITY",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "SIGNED",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": null,
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/NY.GDP.DEFL.KD.ZG",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/NY.GDP.DEFL.KD.ZG?format=json (re-verified unchanged at promotion)",
+        "name": "Inflation, GDP deflator (annual %)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "pricesBases": [
+        {
+          "id": "deflator_annual",
+          "metricKey": "inflation_deflator",
+          "label": "Annual GDP-deflator inflation (%)",
+          "description": "Annual GDP-deflator inflation rate in the selected year.",
+          "formula": "A(i,t) = D(i,t)",
+          "unit": "annual %",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower annual GDP-deflator inflation",
+          "requiresSequence": false
+        },
+        {
+          "id": "deflator_average",
+          "metricKey": "inflation_deflator",
+          "label": "Average annual GDP-deflator inflation (%)",
+          "description": "Arithmetic average of annual GDP-deflator inflation rates over S+1 through E.",
+          "formula": "(1/(E-S)) * sum(t=S+1..E) D(t)",
+          "unit": "annual %",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower average annual GDP-deflator inflation",
+          "requiresSequence": true
+        },
+        {
+          "id": "deflator_cumulative",
+          "metricKey": "inflation_deflator",
+          "label": "Cumulative GDP-deflator inflation (%)",
+          "description": "Compounded total increase in the GDP implicit price level over S+1 through E.",
+          "formula": "[prod(t=S+1..E)(1+D(t)/100) - 1] * 100",
+          "unit": "%",
+          "rankable": true,
+          "rankDirection": "ASC",
+          "rankWording": "Ranked by lower cumulative GDP-deflator inflation",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "exports_current",
+      "subject": "trade",
+      "domain": "TRADE",
+      "family": "EXPORTS",
+      "indicatorCode": "NE.EXP.GNFS.CD",
+      "label": "Exports \u2014 current US$",
+      "shortLabel": "Exports, current US$",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "trade",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "FLOW",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "trillions",
+      "displayDecimals": 2,
+      "periodAggregation": [
+        "SUM",
+        "AVG"
+      ],
+      "worldBankPage": "https://data.worldbank.org/indicator/NE.EXP.GNFS.CD",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/NE.EXP.GNFS.CD?format=json (re-verified unchanged at promotion)",
+        "name": "Exports of goods and services (current US$)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "tradeBases": [
+        {
+          "id": "exp_annual_value",
+          "metricKey": "exports_current",
+          "label": "Annual export value",
+          "question": "How large was this country\u2019s export flow in the selected year?",
+          "formula": "T(i,t) = raw WDI NE.EXP.GNFS.CD",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "rankWording": "Ranked by largest annual export value",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "exp_period_cagr",
+          "metricKey": "exports_current",
+          "label": "Period export growth \u2014 CAGR",
+          "question": "At what average annual rate did nominal export value grow between the selected endpoints?",
+          "formula": "((T_E/T_S)^(1/(E-S)) - 1) * 100",
+          "unit": "%",
+          "gapUnit": "percentage points",
+          "rankWording": "Ranked by highest nominal export CAGR",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "exp_period_total",
+          "metricKey": "exports_current",
+          "label": "Period total export flow",
+          "question": "What was the total nominal value of exports across all years in the selected period?",
+          "formula": "sum(t=S..E) T(t)",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "rankWording": "Ranked by largest cumulative export flow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "exp_period_average",
+          "metricKey": "exports_current",
+          "label": "Period average annual export flow",
+          "question": "What was the average annual nominal value of exports during the selected period?",
+          "formula": "sum(t=S..E) T(t) / (E-S+1)",
+          "unit": "current US$/year",
+          "gapUnit": "current US$/year",
+          "rankWording": "Ranked by largest average annual export flow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "imports_current",
+      "subject": "trade",
+      "domain": "TRADE",
+      "family": "IMPORTS",
+      "indicatorCode": "NE.IMP.GNFS.CD",
+      "label": "Imports \u2014 current US$",
+      "shortLabel": "Imports, current US$",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "trade",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "FLOW",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "trillions",
+      "displayDecimals": 2,
+      "periodAggregation": [
+        "SUM",
+        "AVG"
+      ],
+      "worldBankPage": "https://data.worldbank.org/indicator/NE.IMP.GNFS.CD",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/NE.IMP.GNFS.CD?format=json (re-verified unchanged at promotion)",
+        "name": "Imports of goods and services (current US$)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "tradeBases": [
+        {
+          "id": "imp_annual_value",
+          "metricKey": "imports_current",
+          "label": "Annual import value",
+          "question": "How large was this country\u2019s import flow in the selected year?",
+          "formula": "T(i,t) = raw WDI NE.IMP.GNFS.CD",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "rankWording": "Ranked by largest annual import value",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "imp_period_cagr",
+          "metricKey": "imports_current",
+          "label": "Period import growth \u2014 CAGR",
+          "question": "At what average annual rate did nominal import value grow between the selected endpoints?",
+          "formula": "((T_E/T_S)^(1/(E-S)) - 1) * 100",
+          "unit": "%",
+          "gapUnit": "percentage points",
+          "rankWording": "Ranked by highest nominal import CAGR",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "imp_period_total",
+          "metricKey": "imports_current",
+          "label": "Period total import flow",
+          "question": "What was the total nominal value of imports across all years in the selected period?",
+          "formula": "sum(t=S..E) T(t)",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "rankWording": "Ranked by largest cumulative import flow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "imp_period_average",
+          "metricKey": "imports_current",
+          "label": "Period average annual import flow",
+          "question": "What was the average annual nominal value of imports during the selected period?",
+          "formula": "sum(t=S..E) T(t) / (E-S+1)",
+          "unit": "current US$/year",
+          "gapUnit": "current US$/year",
+          "rankWording": "Ranked by largest average annual import flow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "fdi_inflows",
+      "subject": "capital_flows",
+      "domain": "EXTERNAL",
+      "family": "FDI",
+      "indicatorCode": "BX.KLT.DINV.CD.WD",
+      "label": "FDI net inflows \u2014 current US$",
+      "shortLabel": "FDI net inflows",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "flows",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "FLOW",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "YOY"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "SIGNED",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "billions",
+      "displayDecimals": 2,
+      "periodAggregation": [
+        "SUM",
+        "AVG"
+      ],
+      "worldBankPage": "https://data.worldbank.org/indicator/BX.KLT.DINV.CD.WD",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/BX.KLT.DINV.CD.WD?format=json (re-verified unchanged at promotion)",
+        "name": "Foreign direct investment, net inflows (BoP, current US$)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "capitalBases": [
+        {
+          "id": "fdi_annual_value",
+          "metricKey": "fdi_inflows",
+          "label": "Annual net FDI",
+          "question": "How much net FDI entered the economy during the selected year?",
+          "formula": "F(i,t) = raw WDI BX.KLT.DINV.CD.WD",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "rankWording": "Ranked by largest annual net FDI inflow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "fdi_period_cumulative",
+          "metricKey": "fdi_inflows",
+          "label": "Cumulative net FDI",
+          "question": "How much cumulative net FDI flowed into this economy during the selected period?",
+          "formula": "sum(t=S+1..E) F(t)",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "rankWording": "Ranked by largest cumulative net FDI inflow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "fdi_period_average",
+          "metricKey": "fdi_inflows",
+          "label": "Average annual net FDI",
+          "question": "What was the typical annual net FDI inflow during the period?",
+          "formula": "sum(t=S+1..E) F(t) / (E-S)",
+          "unit": "current US$/year",
+          "gapUnit": "current US$/year",
+          "rankWording": "Ranked by largest average annual net FDI inflow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "fdi_inflows_pct_gdp",
+      "subject": "capital_flows",
+      "domain": "EXTERNAL",
+      "family": "FDI",
+      "indicatorCode": "BX.KLT.DINV.WD.GD.ZS",
+      "label": "FDI net inflows \u2014 % of GDP",
+      "shortLabel": "FDI net inflows, % of GDP",
+      "unit": "% of GDP",
+      "unitLong": "% of GDP",
+      "currencySymbol": null,
+      "group": "flows",
+      "priceBasis": "NOT_APPLICABLE",
+      "currencyBasis": "NOT_APPLICABLE",
+      "frequency": "ANNUAL",
+      "observationType": "RATIO",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PP"
+      ],
+      "aggregation": "WEIGHTED_RATIO",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "SIGNED",
+      "requiredDenominator": {
+        "metricKey": "total_current",
+        "numeratorMetric": "fdi_inflows",
+        "basis": "current-price USD"
+      },
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": null,
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/BX.KLT.DINV.WD.GD.ZS",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/BX.KLT.DINV.WD.GD.ZS?format=json (re-verified unchanged at promotion)",
+        "name": "Foreign direct investment, net inflows (% of GDP)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "capitalBases": [
+        {
+          "id": "fdigdp_annual_value",
+          "metricKey": "fdi_inflows_pct_gdp",
+          "label": "Annual FDI (% of GDP)",
+          "question": "How large were net FDI inflows relative to the size of the economy in this year?",
+          "formula": "R(i,t) = raw WDI BX.KLT.DINV.WD.GD.ZS",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "rankWording": "Ranked by higher net FDI inflows relative to GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "fdigdp_period_average",
+          "metricKey": "fdi_inflows_pct_gdp",
+          "label": "Average annual FDI (% of GDP)",
+          "question": "What was the typical annual FDI inflow relative to GDP during the period?",
+          "formula": "sum(t=S+1..E) R(t) / (E-S)",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "rankWording": "Ranked by higher average annual FDI relative to GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "fdigdp_period_cumulative_share",
+          "metricKey": "fdi_inflows_pct_gdp",
+          "label": "Cumulative FDI / cumulative GDP",
+          "question": "How large was cumulative net FDI relative to cumulative GDP over the same period?",
+          "formula": "[sum(t=S+1..E) FDI(t) / sum(t=S+1..E) GDP(t)] * 100 (GDP = NY.GDP.MKTP.CD)",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "rankWording": "Ranked by higher cumulative FDI relative to cumulative GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "fx_official",
+      "subject": "exchange",
+      "domain": "FINANCIAL",
+      "family": "EXCHANGE_RATE",
+      "indicatorCode": "PA.NUS.FCRF",
+      "label": "Official exchange rate \u2014 LCU per US$",
+      "shortLabel": "Official FX vs USD",
+      "unit": "LCU per US$",
+      "unitLong": "local currency units per US$ (period average)",
+      "currencySymbol": null,
+      "group": "fx",
+      "priceBasis": "NOT_APPLICABLE",
+      "currencyBasis": "NOT_APPLICABLE",
+      "frequency": "ANNUAL",
+      "observationType": "QUOTED_RATE",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY"
+      ],
+      "aggregation": "MEMBER_ONLY",
+      "rankingDirection": "NEUTRAL",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": {
+        "convention": "LCU_PER_USD",
+        "base": "USD"
+      },
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": null,
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/PA.NUS.FCRF",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/PA.NUS.FCRF?format=json (re-verified unchanged at promotion)",
+        "name": "Official exchange rate (LCU per US$, period average)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "fxBases": [
+        {
+          "id": "fx_annual_rate",
+          "metricKey": "fx_official",
+          "label": "Annual Official FX Rate",
+          "question": "What was the official annual-average exchange rate (LCU per US$)?",
+          "formula": "A(i,t) = ER(i,t)",
+          "unit": "LCU per US$",
+          "rankable": false,
+          "rankDirection": null,
+          "rankWording": null,
+          "benchmarkType": null,
+          "note": "Not cross-country rankable: LCU magnitudes reflect currency denomination, not strength."
+        },
+        {
+          "id": "fx_annual_change",
+          "metricKey": "fx_official",
+          "label": "Annual Nominal FX Change",
+          "question": "How did the official nominal exchange rate move against the USD over the year?",
+          "formula": "((ER(t)/ER(t-1)) - 1) * 100",
+          "unit": "%",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "rankWording": "Ranked by greatest nominal depreciation vs USD",
+          "benchmarkType": "median",
+          "note": "Positive = nominal depreciation vs USD; negative = nominal appreciation vs USD."
+        },
+        {
+          "id": "fx_period_change",
+          "metricKey": "fx_official",
+          "label": "Period Nominal FX Change",
+          "question": "How did the official nominal exchange rate move against the USD between the selected endpoints?",
+          "formula": "((ER(E)/ER(S)) - 1) * 100",
+          "unit": "%",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "rankWording": "Ranked by greatest nominal depreciation vs USD",
+          "benchmarkType": "median",
+          "note": "Endpoints only (price, not flow). CAGR shown as secondary annualized display with identical ordering."
+        }
+      ]
+    },
+    {
+      "key": "current_account",
+      "subject": "external",
+      "domain": "EXTERNAL",
+      "family": "CURRENT_ACCOUNT",
+      "indicatorCode": "BN.CAB.XOKA.CD",
+      "label": "Current account balance \u2014 current US$",
+      "shortLabel": "Current account",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "external",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "FLOW",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "YOY"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "SIGNED",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "billions",
+      "displayDecimals": 2,
+      "periodAggregation": [
+        "SUM",
+        "AVG"
+      ],
+      "worldBankPage": "https://data.worldbank.org/indicator/BN.CAB.XOKA.CD",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/BN.CAB.XOKA.CD?format=json (live-verified at promotion; signed flow)",
+        "name": "Current account balance (BoP, current US$)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "externalBases": [
+        {
+          "id": "ca_annual_gdp",
+          "metricKey": "current_account",
+          "label": "Annual CA / GDP",
+          "question": "What was the current-account balance relative to GDP in the selected year?",
+          "formula": "(CA(t)/GDP(t)) * 100 from BN.CAB.XOKA.CD + NY.GDP.MKTP.CD legs",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "benchmarkType": "mean",
+          "rankWording": "Ranked by higher current-account balance relative to GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "ca_average_gdp",
+          "metricKey": "current_account",
+          "label": "Average Annual CA / GDP",
+          "question": "What was the typical annual current-account position relative to GDP during the period?",
+          "formula": "sum(t=S+1..E) CA(t)/GDP(t) / (E-S)",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "benchmarkType": "mean",
+          "rankWording": "Ranked by higher average annual CA relative to GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "ca_cumulative_share",
+          "metricKey": "current_account",
+          "label": "Cumulative CA / Cumulative GDP",
+          "question": "How large was cumulative net CA flow relative to cumulative GDP (GDP-weighted intensity)?",
+          "formula": "[sum(t=S+1..E) CA(t) / sum(t=S+1..E) GDP(t)] * 100",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "benchmarkType": "mean",
+          "rankWording": "Ranked by higher cumulative CA relative to cumulative GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "reserves_ex_gold",
+      "subject": "external",
+      "domain": "EXTERNAL",
+      "family": "RESERVES",
+      "indicatorCode": "FI.RES.XGLD.CD",
+      "label": "Reserves minus gold \u2014 current US$",
+      "shortLabel": "Reserves ex-gold",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "external",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "billions",
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/FI.RES.XGLD.CD",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/FI.RES.XGLD.CD?format=json (live-verified at promotion)",
+        "name": "Total reserves minus gold (current US$)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "externalBases": [
+        {
+          "id": "res_annual_stock",
+          "metricKey": "reserves_ex_gold",
+          "label": "Annual Reserve Stock",
+          "question": "What was the nominal ex-gold reserve stock at the selected date?",
+          "formula": "R(t) = raw WDI FI.RES.XGLD.CD",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "benchmarkType": "median",
+          "rankWording": "Ranked by largest nominal reserve stock (size only)",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "res_period_change",
+          "metricKey": "reserves_ex_gold",
+          "label": "Period Reserve-Stock Change",
+          "question": "How did the nominal reserve stock change between the selected endpoints?",
+          "formula": "((R(E)/R(S)) - 1) * 100, endpoints only",
+          "unit": "%",
+          "gapUnit": "percentage points",
+          "benchmarkType": "median",
+          "rankWording": "Ranked by largest reserve-stock percentage change",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "res_import_coverage",
+          "metricKey": "reserves_ex_gold",
+          "label": "Ex-Gold Reserve Import Coverage",
+          "question": "How many months of annual goods-and-services imports do ex-gold reserves cover?",
+          "formula": "(Reserves(t)/Imports(t)) * 12",
+          "unit": "months",
+          "gapUnit": "months",
+          "benchmarkType": "mean",
+          "rankWording": "Ranked by higher ex-gold reserve import coverage",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        }
+      ]
+    },
+    {
+      "key": "remittances_received",
+      "subject": "external",
+      "domain": "EXTERNAL",
+      "family": "REMITTANCES",
+      "indicatorCode": "BX.TRF.PWKR.CD.DT",
+      "label": "Remittances received \u2014 current US$",
+      "shortLabel": "Remittances received",
+      "unit": "current US$",
+      "unitLong": "current US$",
+      "currencySymbol": "$",
+      "group": "external",
+      "priceBasis": "current",
+      "currencyBasis": "USD",
+      "frequency": "ANNUAL",
+      "observationType": "FLOW",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "billions",
+      "displayDecimals": 2,
+      "periodAggregation": [
+        "SUM",
+        "AVG"
+      ],
+      "worldBankPage": "https://data.worldbank.org/indicator/BX.TRF.PWKR.CD.DT",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/BX.TRF.PWKR.CD.DT?format=json (live-verified at promotion)",
+        "name": "Personal remittances, received (current US$)"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "externalBases": [
+        {
+          "id": "remit_annual_value",
+          "metricKey": "remittances_received",
+          "label": "Annual Remittances Received",
+          "question": "How much personal remittance flow was received during the selected year?",
+          "formula": "Remit(t) = raw WDI BX.TRF.PWKR.CD.DT",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "benchmarkType": "median",
+          "rankWording": "Ranked by largest annual remittance inflow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": false
+        },
+        {
+          "id": "remit_period_cumulative",
+          "metricKey": "remittances_received",
+          "label": "Cumulative Remittances Received",
+          "question": "How much remittance flow was received across the entire period?",
+          "formula": "sum(t=S+1..E) Remit(t)",
+          "unit": "current US$",
+          "gapUnit": "current US$",
+          "benchmarkType": "median",
+          "rankWording": "Ranked by largest cumulative remittance inflow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "remit_period_average",
+          "metricKey": "remittances_received",
+          "label": "Average Annual Remittances",
+          "question": "What was the typical annual remittance flow scale during the period?",
+          "formula": "sum(t=S+1..E) Remit(t) / (E-S)",
+          "unit": "current US$/year",
+          "gapUnit": "current US$/year",
+          "benchmarkType": "median",
+          "rankWording": "Ranked by largest average annual remittance inflow",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        },
+        {
+          "id": "remit_cumulative_intensity",
+          "metricKey": "remittances_received",
+          "label": "Cumulative Remittance Intensity",
+          "question": "How large were cumulative remittances relative to cumulative GDP?",
+          "formula": "[sum(t=S+1..E) Remit(t) / sum(t=S+1..E) GDP(t)] * 100",
+          "unit": "% of GDP",
+          "gapUnit": "percentage points",
+          "benchmarkType": "mean",
+          "rankWording": "Ranked by higher cumulative remittances relative to cumulative GDP",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "requiresSequence": true
+        }
+      ]
+    },
+    {
+      "key": "population_total",
+      "subject": "population",
+      "domain": "DEMOGRAPHICS",
+      "family": "POPULATION",
+      "indicatorCode": "SP.POP.TOTL",
+      "label": "Population \u2014 total",
+      "shortLabel": "Population",
+      "unit": "people",
+      "unitLong": "people",
+      "currencySymbol": null,
+      "group": "population",
+      "priceBasis": "NOT_APPLICABLE",
+      "currencyBasis": "NOT_APPLICABLE",
+      "frequency": "ANNUAL",
+      "observationType": "LEVEL",
+      "validChangeTypes": [
+        "ABSOLUTE",
+        "PERCENT",
+        "YOY",
+        "CAGR"
+      ],
+      "aggregation": "SUM",
+      "rankingDirection": "DESC",
+      "interpretation": "NEUTRAL",
+      "comparisonCapability": [
+        "COUNTRY",
+        "OFFICIAL_AGGREGATE",
+        "CUSTOM_GROUP"
+      ],
+      "signDomain": "POSITIVE_ONLY",
+      "requiredDenominator": null,
+      "quotation": null,
+      "derivation": {
+        "kind": "RAW"
+      },
+      "lifecycle": "PRODUCTION",
+      "ppp": false,
+      "baseYear": null,
+      "displayScale": "billions",
+      "displayDecimals": 2,
+      "periodAggregation": [],
+      "worldBankPage": "https://data.worldbank.org/indicator/SP.POP.TOTL",
+      "verified": {
+        "date": "2026-09-24",
+        "method": "GET /v2/indicator/SP.POP.TOTL?format=json (live-verified at promotion)",
+        "name": "Population, total"
+      },
+      "productionEnabled": true,
+      "ingested": true,
+      "populationBases": [
+        {
+          "id": "pop_annual_value",
+          "metricKey": "population_total",
+          "label": "Annual Population",
+          "question": "How large was the estimated population in the selected year?",
+          "formula": "P(i,t) = raw WDI SP.POP.TOTL",
+          "unit": "people",
+          "gapUnit": "people",
+          "rankWording": "Ranked by largest population size",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "benchmarkType": "mean",
+          "requiresSequence": false
+        },
+        {
+          "id": "pop_period_change",
+          "metricKey": "population_total",
+          "label": "Period Population Change",
+          "question": "How many people were added/lost between the selected endpoints?",
+          "formula": "P(i,E) - P(i,S), endpoints only",
+          "unit": "people",
+          "gapUnit": "people",
+          "rankWording": "Ranked by largest absolute population increase",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "benchmarkType": "mean",
+          "requiresSequence": false
+        },
+        {
+          "id": "pop_period_growth",
+          "metricKey": "population_total",
+          "label": "Period Population Growth",
+          "question": "What percentage did population change by between the selected endpoints?",
+          "formula": "((P(i,E)/P(i,S)) - 1) * 100, endpoints only",
+          "unit": "%",
+          "gapUnit": "percentage points",
+          "rankWording": "Ranked by highest population growth percentage",
+          "rankable": true,
+          "rankDirection": "DESC",
+          "benchmarkType": "mean",
+          "requiresSequence": false
+        }
+      ]
+    }
+  ]
+}

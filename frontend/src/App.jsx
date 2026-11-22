@@ -34,6 +34,9 @@ import { siteMetadata } from './config/site.js';
 import { pagePath, publicPages, viewAtPath } from './config/publicPages.js';
 import { usePublicApiAvailability } from './hooks/usePublicApiAvailability.js';
 import { useEconomyInitialization } from './hooks/useEconomyInitialization.js';
+import { useYearAvailability } from './hooks/useYearAvailability.js';
+import { ResearchPreferences } from './hooks/researchPreferences.jsx';
+import { automaticYear, latestPeriod, selectedPeriod, selectedYear } from './utils/yearSelection.js';
 import { getHeaderContext } from './utils/headerContext.js';
 import Home from './sections/Home.jsx';
 import About from './sections/About.jsx';
@@ -121,15 +124,18 @@ function defaultFilters() {
   };
 }
 
-function YearOptions({ years, id, value, onChange, label }) {
+function YearOptions({ years = [], id, value, onChange, label, allowLatest = false, automatic = false, latestYear = years.at(-1) }) {
+  const options=(years??[]).map(y=>({value:String(y),label:String(y)}));
+  if (value != null && !years.includes(value)) options.unshift({value:String(value),label:`${value} · unavailable`});
+  if (allowLatest) options.unshift({value:'latest',label:`Latest available${latestYear != null ? ' · '+latestYear : ''}`});
   return (
     <SearchableSelect
       id={id}
       label={label}
-      value={value != null ? String(value) : ''}
+      value={allowLatest && automatic ? 'latest' : value != null ? String(value) : ''}
       placeholder="Select year…"
-      options={(years ?? []).map((y) => ({ value: String(y), label: String(y) }))}
-      onChange={(v) => onChange(v === '' ? '' : Number(v))}
+      options={options}
+      onChange={v=>onChange(v==='latest'?'latest':v===''?'':Number(v))}
     />
   );
 }
@@ -367,8 +373,23 @@ export default function App() {
   }, [eligibleCountries, economyInitialization.country]);
   const availableYears = useMemo(() => yearsData?.years ?? [], [yearsData]);
   const minYear = yearsData?.minYear ?? null;
-  const maxYear = yearsData?.maxYear ?? null;
   const defaultStart = yearsData?.defaults?.startYear ?? minYear;
+  const compareView=filters.view==='compare';
+  const selectedMetric=resolveMetricKey(filters.metric)??'nominal_current';
+  const legacyCompareFamily=METRIC_FAMILIES[filters.cmpMetric];
+  const availabilityMetric=compareView ? resolveMetricKey(filters.cmpMetric) ??
+    (legacyCompareFamily?.metricKeys.includes(filters.cmpBasis) ? filters.cmpBasis : legacyCompareFamily?.metricKeys[0]) ?? 'total_current' : selectedMetric;
+  const validatedCountry=eligibleCountries.some(row=>row.iso3===String(filters.country??'').toUpperCase())?String(filters.country).toUpperCase():null;
+  const availabilityParams=compareView ? {indicator:availabilityMetric,
+    entityA:filters.cmpEntityA|| (validatedCountry?`country:${validatedCountry}`:undefined),entityB:filters.cmpEntityB||undefined,basis:filters.cmpBasis} :
+    {indicator:availabilityMetric,country:validatedCountry||undefined};
+  const availabilityEnabled=availableYears.length>0 && !['home','about','methodology','status'].includes(filters.view) &&
+    Boolean(validatedCountry || (compareView && filters.cmpEntityA && !String(filters.cmpEntityA).endsWith(':'))) &&
+    (!compareView || [filters.cmpEntityA,filters.cmpEntityB].every(spec=>!spec||!String(spec).endsWith(':')));
+  const yearAvailability=useYearAvailability(availabilityParams,{token:dataVersion,contentVersion:yearsData?.generation?.contentVersion??null,provider:yearsData?.database?.provider??null},availabilityEnabled);
+  const scopedYears=yearAvailability.data?.years ?? yearsData?.perMetric?.[availabilityMetric] ?? availableYears;
+  const countryYears=yearAvailability.data?.countryYears ?? scopedYears;
+  const comparisonYears=yearAvailability.data?.commonYears ?? scopedYears;
 
   // Resolve effective filters against actually-available years.
   const effective = useMemo(() => {
@@ -376,15 +397,14 @@ export default function App() {
     // which hydrateRegistry() swaps when /api/indicators loads: reference
     // the version so filters re-resolve against backend metadata.
     void registryVersion;
-    const pick = (value, fallback) => {
-      const n = Number.parseInt(value, 10);
-      if (Number.isInteger(n) && availableYears.includes(n)) return n;
-      return fallback;
-    };
-    const endYear = pick(filters.endYear, maxYear);
+    const pick=selectedYear;
+    const metricLatest=scopedYears.at(-1)??null;
+    const focusLatest=countryYears.at(-1)??null;
+    const latestForView=filters.view==='overview' ? focusLatest : filters.view==='yoy' && yearAvailability.data?.yoySupported ? yearAvailability.data.latestYoyYear : metricLatest;
+    const endYear = pick(filters.endYear, metricLatest);
     let startYear = pick(filters.startYear, defaultStart);
     if (startYear != null && endYear != null && startYear > endYear) startYear = endYear;
-    const year = pick(filters.year, maxYear);
+    const year = pick(filters.year, yearAvailability.pending ? null : latestForView);
     const metric = resolveMetricKey(filters.metric) ?? 'nominal_current';
     const neighborsRaw = Number.parseInt(filters.neighbors, 10);
     const neighbors = Number.isInteger(neighborsRaw) ? Math.max(0, Math.min(50, neighborsRaw)) : 5;
@@ -392,8 +412,9 @@ export default function App() {
     const view = isViewId(filters.view) ? filters.view : 'home';
     // Rank-movement years default to a decade-like pair when available,
     // otherwise the stored extremes. Never hardcoded to a fixed range.
-    const defaultYearA = availableYears.includes(2004) ? 2004 : minYear;
-    const defaultYearB = availableYears.includes(2014) ? 2014 : maxYear;
+    const period=selectedPeriod(countryYears,filters.yearA,filters.yearB);
+    const defaultYearA = period.start;
+    const defaultYearB = period.end;
     const yearA = pick(filters.yearA, defaultYearA);
     const yearB = pick(filters.yearB, defaultYearB);
     // Optional middle year: strictly between the two endpoints, else None.
@@ -476,18 +497,19 @@ export default function App() {
     // An omitted URL value retains the historical latest-year default.
     // The explicit 'none' sentinel lets optional Compare periods be cleared
     // and survive URL sharing/reload without changing Movement year state.
-    const cmpYearB = filters.cmpYearB === 'none' ? null : pick(filters.cmpYearB, maxYear);
+    const cmpStart=pick(filters.cmpYearA,latestPeriod(comparisonYears).start??comparisonYears[0]??null);
+    const cmpEnd=!automaticYear(filters.cmpYearC) ? null : comparisonYears.filter(year=>year>cmpStart).at(-1)??null;
+    const cmpYearB = filters.cmpYearB === 'none' ? null : pick(filters.cmpYearB, cmpEnd);
     // Year C is the optional END year of the three-period model. It has no
     // default: without it a two-point analysis uses the documented A->B pair.
     const cmpYearCText = filters.cmpYearC != null ? String(filters.cmpYearC).trim() : '';
     const cmpYearCNumber = cmpYearCText === '' ? null : Number(cmpYearCText);
     const cmpYearC = Number.isInteger(cmpYearCNumber) ? cmpYearCNumber : null;
-    const cmpDecade = maxYear != null && availableYears.includes(maxYear - 10) ? maxYear - 10 : minYear;
-    const cmpYearA = pick(filters.cmpYearA, cmpDecade);
+    const cmpYearA = cmpStart;
     const cmpOp = COMPARE_OPERATIONS.some((op) => op.id === filters.cmpOp) ? filters.cmpOp : 'level';
     const cmpMode = filters.cmpMode === 'like_for_like' ? 'like_for_like' : 'observed';
-    return { startYear, endYear, year, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName, cmpEntityA, cmpEntityB, cmpLabelA, cmpLabelB, cmpAnalysis, cmpMetric, cmpBasis, cmpYearA, cmpYearB, cmpYearC, cmpOp, cmpMode };
-  }, [filters, availableYears, maxYear, minYear, defaultStart, eligibleCountries, registryVersion]);
+    return { startYear, endYear, year, latestYear:latestForView, metric, subject, neighbors, fromYear, view, yearA, yearB, yearMid, basis, country, focusName, cmpEntityA, cmpEntityB, cmpLabelA, cmpLabelB, cmpAnalysis, cmpMetric, cmpBasis, cmpYearA, cmpYearB, cmpYearC, cmpOp, cmpMode };
+  }, [filters, availableYears, defaultStart, eligibleCountries, registryVersion,scopedYears,countryYears,comparisonYears,yearAvailability.data,yearAvailability.pending]);
 
   const rankSubs = useMemo(
     () => [
@@ -534,13 +556,13 @@ export default function App() {
     }
     const query = new URLSearchParams();
     if (effective.startYear != null) query.set('startYear', effective.startYear);
-    if (effective.endYear != null) query.set('endYear', effective.endYear);
-    if (effective.year != null) query.set('year', effective.year);
+    query.set('endYear', automaticYear(filters.endYear)?'latest':filters.endYear);
+    query.set('year', automaticYear(filters.year)?'latest':filters.year);
     query.set('metric', effective.metric);
     query.set('neighbors', effective.neighbors);
     if (effective.fromYear != null) query.set('fromYear', effective.fromYear);
-    if (effective.yearA != null) query.set('yearA', effective.yearA);
-    if (effective.yearB != null) query.set('yearB', effective.yearB);
+    query.set('yearA', automaticYear(filters.yearA)?'auto':filters.yearA);
+    query.set('yearB', automaticYear(filters.yearB)?'latest':filters.yearB);
     if (effective.yearMid != null) query.set('yearMid', effective.yearMid);
     if (effective.basis !== 'level') query.set('basis', effective.basis);
     if (effective.country) query.set('country', effective.country);
@@ -552,9 +574,9 @@ export default function App() {
     query.set('cmpAnalysis', effective.cmpAnalysis);
     query.set('cmpMetric', effective.cmpMetric);
     query.set('cmpBasis', effective.cmpBasis);
-    if (effective.cmpYearA != null) query.set('cmpYearA', effective.cmpYearA);
+    if (effective.cmpYearA != null) query.set('cmpYearA', automaticYear(filters.cmpYearA)?'auto':filters.cmpYearA);
     if (filters.cmpYearB === 'none') query.set('cmpYearB', 'none');
-    else if (effective.cmpYearB != null) query.set('cmpYearB', effective.cmpYearB);
+    else if (effective.cmpYearB != null) query.set('cmpYearB', automaticYear(filters.cmpYearB)?'latest':filters.cmpYearB);
     if (effective.cmpYearC != null) query.set('cmpYearC', effective.cmpYearC);
     query.set('cmpOp', effective.cmpOp);
     if (effective.cmpMode !== 'observed') query.set('cmpMode', effective.cmpMode);
@@ -577,7 +599,7 @@ export default function App() {
     lastUrlRef.current = next;
     lastNavRef.current = nav;
     lastCountryRef.current = effective.country;
-  }, [effective, filters.cmpYearB, filters.countrySource, rankSub, yoySub]);
+  }, [effective, filters.cmpYearA, filters.cmpYearB, filters.countrySource, filters.year, filters.yearA, filters.yearB, filters.endYear, rankSub, yoySub]);
 
   const setFilter = useCallback((key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -624,6 +646,8 @@ export default function App() {
   // visible views were built from. Declared before handleRefreshed so the
   // manual-refresh path can adopt the new generation without rediscovery.
   const knownGeneration = useRef(null);
+  const yearSnapshot=useRef(null);
+  useEffect(()=>{yearSnapshot.current={contentVersion:yearsData?.generation?.contentVersion??null,provider:yearsData?.database?.provider??null};},[yearsData]);
 
   const handleRefreshed = useCallback((summary) => {
     // The notice lives here (above the remounted <main>) so it survives the
@@ -654,6 +678,7 @@ export default function App() {
   // exactly like a manual refresh does. No economics here: the fingerprint is
   // a backend-provided identity, and revalidation re-reads backend results.
   const filtersReady = availableYears.length > 0;
+  const researchReady = filtersReady && !yearAvailability.pending;
   const view = effective.view;
   const { enabled: publicReadApiEnabled, observe: observePublication } = usePublicApiAvailability(view);
 
@@ -689,16 +714,19 @@ export default function App() {
       if (cancelled) return;
       observePublication(status?.capabilities, started);
       const next = fingerprintOf(status);
-      if (!next || (!next.provider && next.runId === null && !next.lastSuccessAt)) return;
+      if (!next || (!next.provider && next.runId === null && !next.lastSuccessAt && next.contentVersion==null)) return;
       const prev = knownGeneration.current;
       if (!prev) {
         knownGeneration.current = next;
-      } else if (isNewerGeneration(prev, next) || (prev.provider && next.provider && prev.provider !== next.provider)) {
+        const previousYears=yearSnapshot.current;
+        if(previousYears && ((previousYears.contentVersion!=null && status.generation?.contentVersion!=null && previousYears.contentVersion!==status.generation.contentVersion) ||
+          (previousYears.provider && next.provider && previousYears.provider!==next.provider)))setDataVersion(value=>value+1);
+      } else if (isNewerGeneration(prev, next) || (prev.contentVersion!=null && next.contentVersion!=null && prev.contentVersion!==next.contentVersion) || (prev.provider && next.provider && prev.provider !== next.provider)) {
         knownGeneration.current = next;
         setRefreshNotice(
           prev.provider && next.provider && prev.provider !== next.provider
             ? 'The serving database changed. Analytical views were reloaded.'
-            : `Background refresh published a newer dataset${next.runId != null ? ` (run #${next.runId})` : ''} — all views were updated automatically.`,
+            : `Published dataset changed${next.runId != null ? ` (run #${next.runId})` : ''} — analytical views were updated automatically.`,
         );
         setDataVersion((v) => v + 1);
         return;
@@ -839,7 +867,7 @@ export default function App() {
               {view === 'data' ? (
                 <>
                   <YearOptions years={availableYears} id="f-start" label="Period start" value={effective.startYear} onChange={(v) => setFilter('startYear', v)} />
-                  <YearOptions years={availableYears} id="f-end" label="Period end" value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
+                  <YearOptions years={scopedYears} id="f-end" label="Period end" allowLatest automatic={automaticYear(filters.endYear)} value={effective.endYear} onChange={(v) => setFilter('endYear', v)} />
                 </>
               ) : null}
               <FocusPicker
@@ -847,7 +875,7 @@ export default function App() {
                 value={effective.country}
                 onChange={(v) => setCountry(v)}
               />
-              <YearOptions years={availableYears} id="f-year" label="Year" value={effective.year} onChange={(v) => setFilter('year', v)} />
+              <YearOptions years={view==='overview'?countryYears:scopedYears} id="f-year" label="Year" allowLatest latestYear={yearAvailability.pending?null:effective.latestYear} automatic={automaticYear(filters.year)} value={effective.year} onChange={(v) => setFilter('year', v)} />
               <SearchableSelect
                 id="f-subject"
                 label="Analysis"
@@ -892,7 +920,12 @@ export default function App() {
           </p>
         ) : null}
 
+        <ResearchPreferences scope={`${view}:${view==='compare'?'entities':effective.country}`}>
         <main id="main" key={`${dataVersion}:${view}`}>
+          {availabilityEnabled && yearAvailability.error ? <p className="status" role="status">Economy-specific year availability could not be confirmed. Published indicator years remain available. <button className="btn btn-secondary" onClick={yearAvailability.retry}>Retry year discovery</button></p> : null}
+          {yearAvailability.pending ? <p className="status" role="status">Checking published year availability…</p> : null}
+          {!automaticYear(filters.year) && yearAvailability.data && !(view==='overview'?countryYears:scopedYears).includes(Number(filters.year)) ? <p className="status" role="status">No published observations for the requested year {filters.year}. <button className="btn btn-secondary" onClick={()=>setFilter('year','latest')}>Use latest available</button></p> : null}
+          {view==='overview' && !yearAvailability.pending && yearAvailability.data && !countryYears.length ? <p className="status" role="status">No published observations for this economy and indicator.</p> : null}
           <Suspense fallback={<p className="status" role="status">Loading research view…</p>}>
           {!effective.country && ['overview', 'data', 'rank', 'yoy', 'movement', 'coverage', 'audit', 'compare'].includes(view) &&
             ['resolving', 'waiting-for-registry'].includes(economyInitialization.status) ?
@@ -913,16 +946,16 @@ export default function App() {
           {view === 'about' ? (
             <About site={site} onOpenView={(v) => setFilter('view', v)} />
           ) : null}
-          {filtersReady && effective.country && view === 'overview' ? (
+          {researchReady && effective.country && view === 'overview' ? (
             <>
-              <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={availableYears} metricYears={yearsData?.perMetric} onCompareEntities={openCompareWith} />
+              <Overview year={effective.year} subject={effective.subject} metricKey={effective.metric} country={effective.country} focusName={effective.focusName} availableYears={countryYears} metricYears={{...yearsData?.perMetric,[effective.metric]:countryYears}} yearDomain={yearAvailability.data?.yearDomain} onCompareEntities={openCompareWith} />
               <YearComparison year={effective.year} subject={effective.subject} country={effective.country} />
             </>
           ) : null}
-          {filtersReady && effective.country && view === 'data' ? (
+          {researchReady && effective.country && view === 'data' ? (
             <YearlyTable startYear={effective.startYear} endYear={effective.endYear} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
-          {filtersReady && effective.country && view === 'rank' ? (
+          {researchReady && effective.country && view === 'rank' ? (
             <div role="tabpanel" id="panel-rank" aria-labelledby="tab-rank">
               <SubTabs options={rankSubs} active={rankSub} onChange={setRankSub} label="Rank workspace views" />
               {rankSub === 'verify' ? (
@@ -932,9 +965,9 @@ export default function App() {
               )}
             </div>
           ) : null}
-          {filtersReady && effective.country && view === 'movement' ? (
+          {researchReady && effective.country && view === 'movement' ? (
             <RankMovement
-              availableYears={availableYears}
+              availableYears={scopedYears}
               yearA={effective.yearA}
               yearB={effective.yearB}
               yearMid={effective.yearMid}
@@ -951,7 +984,7 @@ export default function App() {
               onCountry={(v) => setCountry(v)}
             />
           ) : null}
-          {filtersReady && effective.country && view === 'yoy' ? (
+          {researchReady && effective.country && view === 'yoy' ? (
             <div role="tabpanel" id="panel-yoy" aria-labelledby="tab-yoy">
               <SubTabs options={yoySubs} active={yoySub} onChange={setYoySub} label="YoY workspace views" />
               {yoySub === 'ranking' ? (
@@ -963,7 +996,8 @@ export default function App() {
           ) : null}
           {filtersReady && view === 'compare' ? (
             <Compare
-              availableYears={availableYears}
+              availabilityPending={yearAvailability.pending}
+              availableYears={comparisonYears}
               countries={eligibleCountries}
               entityA={effective.cmpEntityA}
               entityB={effective.cmpEntityB}
@@ -991,15 +1025,16 @@ export default function App() {
               onGroupMode={(v) => setFilter('cmpMode', v)}
             />
           ) : null}
-          {filtersReady && effective.country && view === 'coverage' ? (
+          {researchReady && effective.country && view === 'coverage' ? (
             <Coverage year={effective.year} metricKey={effective.metric} fromYear={effective.fromYear} toYear={effective.year} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
-          {filtersReady && effective.country && view === 'audit' ? (
+          {researchReady && effective.country && view === 'audit' ? (
             <AuditSource year={effective.year} metricKey={effective.metric} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
           {view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
           </Suspense>
         </main>
+        </ResearchPreferences>
 
         <footer className="app-footer">
           <p>

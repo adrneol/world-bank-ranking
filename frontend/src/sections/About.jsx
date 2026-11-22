@@ -13,6 +13,7 @@
  * falls back to automatic with a diagnostic warning.
  */
 
+import EditorialLink from '../components/EditorialLink.jsx';
 import { useEffect } from 'react';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
@@ -88,12 +89,14 @@ export default function About({ site, onOpenView }) {
           latest available year and dataset freshness always come from the backend — see Status.
         </p>
         <div className="analysis-header-side">
-          <button type="button" className="btn btn-secondary" onClick={() => onOpenView?.('methodology')}>
+          <EditorialLink href="/methodology/" onNavigate={onOpenView?()=>onOpenView('methodology'):undefined}>
             How calculations work
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={() => onOpenView?.('status')}>
+            <span aria-hidden="true"> →</span>
+          </EditorialLink>
+          <EditorialLink href="/status/" onNavigate={onOpenView?()=>onOpenView('status'):undefined}>
             Check data status
-          </button>
+            <span aria-hidden="true"> →</span>
+          </EditorialLink>
         </div>
       </Section>
       <Section
@@ -107,7 +110,7 @@ export default function About({ site, onOpenView }) {
         </p>
         {site?.contactSpecified ? (
           <p>
-            <a className="btn btn-secondary contact-email" href={`mailto:${site.contactEmail}`}>
+            <a className="editorial-link contact-email" href={`mailto:${site.contactEmail}`}>
               {site.contactEmail}
             </a>
           </p>
@@ -117,8 +120,7 @@ export default function About({ site, onOpenView }) {
           </p>
         )}
         <p className="footnote">
-          The address above is public display metadata, not a credential. Never send passwords,
-          tokens, or other secrets by email.
+          Never send passwords, tokens, or other secrets by email.
         </p>
       </Section>
       <details id="about-resilience" className="details resilience-disclosure">

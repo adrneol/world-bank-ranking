@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useResearchPreference } from '../../hooks/researchPreferences.js';
 import { useIsNarrowChart } from '../../hooks/useMediaQuery.js';
 import { annualGeometry, barAxes, barCenter, plotInsets, valueAxis, visibleSegments, visibleValues } from './annualGeometry.js';
 import { formatAnnualReadout, formatTickValue, isPercentageUnit } from './chartFormat.js';
@@ -90,6 +91,8 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
   const clipId = useId();
   const [viewport, setViewport] = useState(0);
   const [scroll, setScroll] = useState(0);
+  const [rememberedScroll,setRememberedScroll]=useResearchPreference('plot:'+JSON.stringify(regions.map(region=>[region.unit,region.series.map(item=>[item.id,item.label])]))+':scroll',0);
+  const restoreScroll=useRef(rememberedScroll);
   const [active, setActive] = useState(null);
   const [inspection, setInspection] = useState(null);
   const gesture = useRef(null);
@@ -113,6 +116,7 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
   useEffect(() => {
     const element = scroller.current;
     if (!element) return undefined;
+    element.scrollLeft=restoreScroll.current;
     const measure = () => { setViewport(element.clientWidth); setScroll(element.scrollLeft); };
     measure();
     if (typeof ResizeObserver !== 'function') return undefined;
@@ -205,7 +209,7 @@ export default function UnifiedAnnualPlot({ years, regions, type = 'line', scale
     if (frame.current != null) return;
     frame.current = requestAnimationFrame(() => {
       frame.current = null;
-      if (scroller.current) setScroll(scroller.current.scrollLeft);
+      if (scroller.current) { setScroll(scroller.current.scrollLeft);setRememberedScroll(scroller.current.scrollLeft); }
     });
   };
 

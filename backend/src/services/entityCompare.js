@@ -96,7 +96,7 @@ export const COMPARE_BLOCK_CODES = Object.freeze({
   PARTIAL_COMPARISON: 'PARTIAL_COMPARISON',
 });
 
-function compareBasisIdsForMetric(metricKey) {
+export function compareBasisIdsForMetric(metricKey) {
   const registered = [
     ...pricesBasesForMetric(metricKey),
     ...tradeBasesForMetric(metricKey),

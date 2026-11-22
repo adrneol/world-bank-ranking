@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pagePath } from './src/config/publicPages.js';
 import { humanPages, publicPageHtml, siteOrigin } from './server/documentHtml.js';
-import { publicationResource, respondPublication } from './server/publication.js';
+import { publicationFailure, publicationResource, respondPublication } from './server/publication.js';
 
 export { publicPageHtml } from './server/documentHtml.js';
 
@@ -13,7 +13,7 @@ export function publicDocuments({ origin, catalog }) {
     const resource = publicationResource(new URL(req.url, 'http://localhost').pathname);
     if (!resource) return next();
     try { await respondPublication(req, res, { resource, backend, origin: base, catalog, template }); }
-    catch { res.statusCode = 503; res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.end('Public API documentation is temporarily unavailable. Return to /.'); }
+    catch { publicationFailure(req, res, { resource, rendering: true }); }
   };
   return {
     name: 'public-research-documents',

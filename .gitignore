@@ -43,4 +43,11 @@ PROJECT_REQUIREMENTS.md
 
 # Local AI coding agent skills and configuration
 .agents/
-phase_5_ACCESSIBILITY.md
+
+
+# Benchmark results and engineering documentation
+/benchmarks/
+/docs/
+/OPTIMIZATION.md
+/PHASE_5_ACCEPTANCE.md
+/PHASE_5_1_RELEASE_CLOSURE.md

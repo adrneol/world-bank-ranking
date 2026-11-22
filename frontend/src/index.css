@@ -3806,3 +3806,12 @@ hr.ddivider {
 .failure-details header h3 { margin: 0.4rem 0; }
 .failure-details-scroll { max-block-size: min(55dvh, 24rem); overflow: auto; overscroll-behavior: contain; margin-block: 0.75rem; padding: 0.75rem; border: 1px solid var(--line); }
 .failure-details-scroll pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; font: 0.85rem/1.6 var(--mono); margin: 0; }
+
+/* Informational navigation follows the research publication hierarchy. */
+.editorial-link { display:inline-flex; align-items:center; gap:.45em; min-height:44px; padding:.35rem 0; border:0; border-radius:0; background:none; color:var(--ink); font:inherit; font-weight:600; text-decoration:underline; text-decoration-color:var(--line); text-underline-offset:.3em; cursor:pointer; overflow-wrap:anywhere; }
+.editorial-link:hover { color:var(--accent); text-decoration-color:currentColor; }
+.editorial-link:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
+.home-hero .analysis-header-side { align-items:center; gap:1.6rem; margin-top:1.25rem; }
+#about-project .analysis-header-side, .home-cta-row { border-top:1px solid var(--line); padding-top:.6rem; gap:1.5rem; }
+.contact-email { font-family:var(--mono); font-size:.95em; }
+#home-provenance .facts, #about-project .facts { border:0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); border-radius:0; background:none; }

@@ -10,6 +10,7 @@
  * Existing design language only (hero, cards, badges).
  */
 
+import EditorialLink from '../components/EditorialLink.jsx';
 import { api } from '../api/client.js';
 import { useApi } from '../hooks/useApi.js';
 import { Section, StatusBlock } from '../components/ui.jsx';
@@ -54,9 +55,10 @@ export default function Home({ sourceName, onOpenView, onOpenSubject }) {
           <button type="button" className="btn btn-primary" onClick={() => onOpenView?.('overview')}>
             Explore analysis
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => onOpenView?.('methodology')}>
+          <EditorialLink href="/methodology/" onNavigate={onOpenView?()=>onOpenView('methodology'):undefined}>
             Read methodology
-          </button>
+            <span aria-hidden="true"> →</span>
+          </EditorialLink>
         </div>
       </div>
 
@@ -92,7 +94,7 @@ export default function Home({ sourceName, onOpenView, onOpenSubject }) {
                 <p className="card-action">
                   <button
                     type="button"
-                    className="btn btn-secondary home-card-link"
+                    className="editorial-link home-card-link"
                     onClick={() => onOpenSubject?.(family.key)}
                   >
                     Open in Movement →
@@ -128,9 +130,9 @@ export default function Home({ sourceName, onOpenView, onOpenSubject }) {
           </div>
         </dl>
         <div className="analysis-header-side home-cta-row">
-          <button type="button" className="btn btn-secondary" onClick={() => onOpenView?.('methodology')}>
+          <EditorialLink href="/methodology/" onNavigate={onOpenView?()=>onOpenView('methodology'):undefined}>
             Explore methodology →
-          </button>
+          </EditorialLink>
         </div>
         <p className="footnote">
           Data freshness, vintage and refresh state always come from the live backend — see the

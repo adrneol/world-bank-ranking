@@ -25,6 +25,7 @@ export function fingerprintOf(status) {
   }
   return {
     ...(status?.database?.provider ? { provider: status.database.provider } : {}),
+    ...(status?.generation?.contentVersion != null ? {contentVersion:status.generation.contentVersion}:{}),
     runId: fp.runId ?? null,
     lastSuccessAt: fp.lastSuccessAt ?? null,
     maxFetchedAt: fp.maxFetchedAt ?? null,

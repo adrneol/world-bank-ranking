@@ -17,15 +17,17 @@ it('serves complete crawler-readable documents only after explicit backend confi
   expect(response.body).toContain('Endpoint reference');
   expect(response.body).toContain('/data-catalog.json');
   expect(response.body).not.toContain('rel="canonical"');
-  expect(JSON.parse((await render('catalog', { publicReadApiEnabled: true })).body).resources).toHaveLength(30);
+  expect(JSON.parse((await render('catalog', { publicReadApiEnabled: true })).body).resources).toHaveLength(31);
 });
 it.each([{ publicReadApiEnabled: false }, {}, { publicReadApiEnabled: 'true' }, new Error('offline')])(
   'fails closed with a readable response and no catalog advertisement for %j', async capability => {
     const response = await render('docs', capability);
     expect(response.statusCode).toBe(capability.publicReadApiEnabled === false ? 404 : 503);
-    expect(response.body).toContain('Public API documentation unavailable');
+    expect(response.body).toContain(capability.publicReadApiEnabled === false ? 'Public data API not published' : 'Public data service temporarily unavailable');
     expect(response.body).not.toContain('href="/data-catalog.json"');
-    expect(response.body).not.toContain('href="/public-data/"');
+    expect(response.body.match(/<nav[\s\S]*?<\/nav>/)?.[0]??'').not.toContain('href="/public-data/"');
+    expect(response.body).toContain('Try again');
+    expect(response.body).toContain('Return to Home');
     expect(response.headers['Cache-Control']).toBe('no-store');
     expect(response.headers['Vercel-CDN-Cache-Control']).toBe('no-store');
     expect((await render('catalog', capability)).statusCode).toBe(response.statusCode);

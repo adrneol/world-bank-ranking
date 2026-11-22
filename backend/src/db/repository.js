@@ -1006,6 +1006,29 @@ export async function getCountryObservationsRange(db, indicatorId, iso3, startYe
   );
 }
 
+/** Annual eligible coverage and genuinely usable same-economy YoY pairs. */
+export async function getAnnualPairCoverage(db, indicatorId, maxYear, withPairs = true) {
+  if(!withPairs)return queryAll(db,`SELECT o.year, COUNT(*) AS observations, 0 AS validPairs, MAX(o.wb_last_updated) AS vintage
+    FROM observations o JOIN countries c ON c.id=o.country_id
+    WHERE o.indicator_id=? AND o.year BETWEEN 1960 AND ? AND c.is_aggregate=0 GROUP BY o.year ORDER BY o.year`,[indicatorId,maxYear]);
+  return queryAll(db, `SELECT o.year, COUNT(*) AS observations,
+      SUM(CASE WHEN p.value > 0 THEN 1 ELSE 0 END) AS validPairs,
+      MAX(o.wb_last_updated) AS vintage
+    FROM observations o JOIN countries c ON c.id=o.country_id
+    LEFT JOIN observations p ON p.country_id=o.country_id AND p.indicator_id=o.indicator_id AND p.year=o.year-1
+    WHERE o.indicator_id=? AND o.year BETWEEN 1960 AND ? AND c.is_aggregate=0
+    GROUP BY o.year ORDER BY o.year`, [indicatorId, maxYear]);
+}
+
+/** Availability needs indexed identities/range, not an ever-growing year IN list. */
+export async function getEntityAvailabilityRows(db, indicatorId, codes, endYear) {
+  if (!codes.length) return [];
+  const marks=codes.map(()=>'?').join(',');
+  return queryAll(db,`SELECT country_id AS iso3,year,value,wb_last_updated AS wbLastUpdated
+    FROM observations WHERE indicator_id=? AND country_id IN (${marks}) AND year BETWEEN 1960 AND ?
+    ORDER BY country_id,year`,[indicatorId,...codes,endYear]);
+}
+
 /** Bounded country history, with a predecessor only for the real GDP leg. */
 export async function getFocusHistoryRows(db, country, metricKeys, startYear, endYear, needsPredecessor) {
   const selectors = metricKeys.map(() => '?').join(', ');

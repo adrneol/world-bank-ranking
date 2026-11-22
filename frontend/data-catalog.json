@@ -155,6 +155,1865 @@
       "/api/public/population/country-groups",
       "population Movement group filters",
       "Lists supported country classifications for the family. Use the returned keys when filtering Movement."
+    ],
+    [
+      "/api/public/availability",
+      "Scoped published years and valid YoY pairs",
+      "indicator; optional country or entityA/entityB, basis. Committed inputs and generation only."
     ]
-  ]
+  ],
+  "schemaVersion": "2.0",
+  "parameterDefinitions": {
+    "year": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "yearA": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "yearB": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "yearC": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "yearMid": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "startYear": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "endYear": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "fromYear": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "toYear": {
+      "type": "integer",
+      "minimum": 1960,
+      "dynamicMaximum": "UTC calendar year + 1",
+      "description": "Four-digit observation year; use /years or scoped /availability first. Not a release/vintage date. Explicit unavailable years are never replaced."
+    },
+    "indicator": {
+      "type": "string",
+      "enumSource": "/api/public/indicators",
+      "description": "Registered metric key or exact World Bank indicator code; read its units and supported methods."
+    },
+    "country": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "enumSource": "/api/public/countries?includeAggregates=false",
+      "description": "Eligible economy ISO3. Official aggregates belong in entity specs."
+    },
+    "subject": {
+      "type": "string",
+      "enumSource": "/api/public/indicators",
+      "description": "Registered subject key. Metrics retain independent units and denominators."
+    },
+    "series": {
+      "type": "string",
+      "maxItems": 8,
+      "description": "Comma-separated registered metric keys, optionally real_gdp_growth; at most eight, and a history window of at most 100 annual years."
+    },
+    "entityA": {
+      "type": "string",
+      "description": "country:ISO3, aggregate:CODE, or group:ISO3,ISO3. Group members are eligible countries only, maximum 50; percent-encode query values with URLSearchParams."
+    },
+    "entityB": {
+      "type": "string",
+      "description": "Same entity encoding as entityA; official aggregate values are read as published."
+    },
+    "basis": {
+      "type": "string",
+      "enumSource": "/api/public/indicators",
+      "description": "Registered basis for the selected metric. Omit for the default raw basis; never infer a basis from another indicator."
+    },
+    "operation": {
+      "type": "string",
+      "enumSource": "/api/public/indicators",
+      "description": "Supported analysis for this metric/entity/basis. Compare uses level, absolute_change, percent_change, pp_change, index_point_change, cagr, cross_rate, period_total, period_average, movement_period_total, movement_period_average, movement_inflation_cumulative, period_total_growth or segmented_growth as permitted. Periods/summary uses SUM or AVG."
+    },
+    "groupMode": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "like_for_like"
+      ],
+      "description": "Compare population policy; like_for_like requires a custom group. Complete/common universes are returned by the calculation."
+    },
+    "members": {
+      "type": "string",
+      "maxItems": 50,
+      "description": "Comma-separated eligible ISO3 codes, at least one, at most 50; an aggregate cannot be a member."
+    },
+    "label": {
+      "type": "string",
+      "description": "Optional user-facing custom group label."
+    },
+    "labelA": {
+      "type": "string",
+      "description": "Optional Entity A group label."
+    },
+    "labelB": {
+      "type": "string",
+      "description": "Optional Entity B group label."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "country",
+        "aggregate",
+        "all"
+      ],
+      "description": "Entity-registry kind."
+    },
+    "search": {
+      "type": "string",
+      "description": "Country name or ISO3 search; rank positions retain the full population."
+    },
+    "page": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "One-based page."
+    },
+    "pageSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500,
+      "description": "Requested rows per page; maximum 500."
+    },
+    "neighbors": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50,
+      "description": "Bounded rank verification neighborhood."
+    },
+    "includeAggregates": {
+      "type": "string",
+      "enum": [
+        "true",
+        "false"
+      ],
+      "description": "Country registry aggregate inclusion; false for focus/group membership."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "level",
+        "yoy"
+      ],
+      "description": "comparison/level value or approved YoY-growth comparison."
+    },
+    "detail": {
+      "type": "string",
+      "enum": [
+        "full",
+        "summary"
+      ],
+      "description": "Comparison detail projection; evidence remains available through the full response."
+    },
+    "groupType": {
+      "type": "string",
+      "enumSource": "family /country-groups resource",
+      "description": "Supported World Bank country classification key."
+    },
+    "group": {
+      "type": "string",
+      "enumSource": "family /country-groups resource",
+      "description": "A returned classification value, not a custom entity spec."
+    }
+  },
+  "operations": [
+    {
+      "method": "GET",
+      "path": "/api/public/countries",
+      "summary": "Economies and ISO3 identities",
+      "description": "Use the non-aggregate economy registry for focus and group members.",
+      "parameters": [
+        {
+          "name": "includeAggregates",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/includeAggregates"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "includeAggregates": "false"
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Economies and ISO3 identities",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/entities",
+      "summary": "Countries and official aggregates",
+      "description": "type, search, page, pageSize, indicator, year",
+      "parameters": [
+        {
+          "name": "type",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/type"
+          }
+        },
+        {
+          "name": "search",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/search"
+          }
+        },
+        {
+          "name": "page",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/page"
+          }
+        },
+        {
+          "name": "pageSize",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/pageSize"
+          }
+        },
+        {
+          "name": "indicator",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "year",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "type": "all",
+            "pageSize": 10
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Countries and official aggregates",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/indicators",
+      "summary": "Registered measures and comparison capabilities",
+      "description": "Read the metric key, indicator code, unit, measurement basis and supported operations.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Registered measures and comparison capabilities",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/metadata",
+      "summary": "Source and methodology",
+      "description": "Registered indicator definitions and supported analysis semantics.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Source and methodology",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/years",
+      "summary": "Published year coverage",
+      "description": "Use the available years and per-metric availability returned by the API.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Published year coverage",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/observations",
+      "summary": "Stored WDI observation evidence",
+      "description": "indicator, year, optional country (ISO3). Without country, one indicator and year only.",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "year",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "year": 2024,
+            "country": "IND"
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Stored WDI observation evidence",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/focus/yearly",
+      "summary": "Annual observations and focus evidence",
+      "description": "country, subject, startYear, endYear",
+      "parameters": [
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "subject",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/subject"
+          }
+        },
+        {
+          "name": "startYear",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/startYear"
+          }
+        },
+        {
+          "name": "endYear",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/endYear"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "country": "JPN",
+            "subject": "gdp_total",
+            "startYear": 2024,
+            "endYear": 2025
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Annual observations and focus evidence",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/focus/history",
+      "summary": "Bounded annual trajectories",
+      "description": "country, comma-separated series, startYear, endYear. Up to 8 series and 100 years.",
+      "parameters": [
+        {
+          "name": "series",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/series"
+          }
+        },
+        {
+          "name": "startYear",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/startYear"
+          }
+        },
+        {
+          "name": "endYear",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/endYear"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "country": "JPN",
+            "series": "total_constant",
+            "startYear": 2023,
+            "endYear": 2025
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Bounded annual trajectories",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {
+        "historyMaxYears": 100,
+        "historyMaxSeries": 8
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/ranking",
+      "summary": "Level rankings",
+      "description": "indicator, year, country, page, pageSize, search",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "year",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "page",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/page"
+          }
+        },
+        {
+          "name": "pageSize",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/pageSize"
+          }
+        },
+        {
+          "name": "search",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/search"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "year": 2024,
+            "pageSize": 10
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Level rankings",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/ranking/verify",
+      "summary": "Level rank verification",
+      "description": "indicator, year, country, neighbors",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "year",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "neighbors",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/neighbors"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "year": 2024,
+            "country": "IND",
+            "neighbors": 3
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Level rank verification",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/yoy-ranking",
+      "summary": "Year-over-year rankings",
+      "description": "indicator, year, country, page, pageSize, search",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "year",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "page",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/page"
+          }
+        },
+        {
+          "name": "pageSize",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/pageSize"
+          }
+        },
+        {
+          "name": "search",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/search"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "year": 2024,
+            "pageSize": 10
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Year-over-year rankings",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/yoy-ranking/verify",
+      "summary": "YoY observations and rank verification",
+      "description": "indicator, year, country, neighbors",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "year",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "neighbors",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/neighbors"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "year": 2024,
+            "country": "JPN",
+            "neighbors": 3
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "YoY observations and rank verification",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/compare",
+      "summary": "Compare countries, groups and official aggregates",
+      "description": "entityA, entityB, indicator, basis, operation, yearA, optional yearB/yearC, groupMode",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "entityA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/entityA"
+          }
+        },
+        {
+          "name": "entityB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/entityB"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "operation",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/operation"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "yearC",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearC"
+          }
+        },
+        {
+          "name": "groupMode",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupMode"
+          }
+        },
+        {
+          "name": "labelA",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/labelA"
+          }
+        },
+        {
+          "name": "labelB",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/labelB"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "entityA": "country:USA",
+            "entityB": "country:JPN",
+            "yearA": 2024,
+            "yearC": 2025,
+            "operation": "level"
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Compare countries, groups and official aggregates",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/groups/evaluate",
+      "summary": "Group eligibility and capability",
+      "description": "members, indicator, optional label. No stored group is created.",
+      "parameters": [
+        {
+          "name": "members",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/members"
+          }
+        },
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "label",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/label"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "yearC",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearC"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "members": "IND,USA",
+            "indicator": "total_current",
+            "yearA": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Group eligibility and capability",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/comparison/level",
+      "summary": "Level or growth Movement",
+      "description": "indicator, country, yearA, yearB, optional yearMid, mode, detail",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/mode"
+          }
+        },
+        {
+          "name": "detail",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/detail"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024,
+            "mode": "level"
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Level or growth Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/periods/summary",
+      "summary": "Period totals and averages",
+      "description": "indicator, country, startYear, endYear, operation",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "startYear",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/startYear"
+          }
+        },
+        {
+          "name": "endYear",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/endYear"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "operation",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/operation"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "exports_current",
+            "country": "IND",
+            "startYear": 2020,
+            "endYear": 2024,
+            "operation": "SUM"
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Period totals and averages",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/movement/prices",
+      "summary": "Prices Movement",
+      "description": "indicator, basis, country, yearA, yearB, optional yearMid and group filters",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "groupType",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupType"
+          }
+        },
+        {
+          "name": "group",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/group"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "inflation_cpi",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Prices Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/movement/trade",
+      "summary": "Trade Movement",
+      "description": "indicator, basis, country, yearA, yearB, optional yearMid and group filters",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "groupType",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupType"
+          }
+        },
+        {
+          "name": "group",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/group"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "exports_current",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Trade Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/movement/capital",
+      "summary": "Capital flows Movement",
+      "description": "indicator, basis, country, yearA, yearB, optional yearMid and group filters",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "groupType",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupType"
+          }
+        },
+        {
+          "name": "group",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/group"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "fdi_inflows",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Capital flows Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/movement/fx",
+      "summary": "Exchange-rate Movement",
+      "description": "indicator, basis, country, yearA, yearB, optional yearMid and group filters",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "groupType",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupType"
+          }
+        },
+        {
+          "name": "group",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/group"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "fx_official",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Exchange-rate Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/movement/external",
+      "summary": "External sector Movement",
+      "description": "indicator, basis, country, yearA, yearB, optional yearMid and group filters",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "groupType",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupType"
+          }
+        },
+        {
+          "name": "group",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/group"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "current_account",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "External sector Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/movement/population",
+      "summary": "Population Movement",
+      "description": "indicator, basis, country, yearA, yearB, optional yearMid and group filters",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "yearA",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearA"
+          }
+        },
+        {
+          "name": "yearB",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "yearMid",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/yearMid"
+          }
+        },
+        {
+          "name": "groupType",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/groupType"
+          }
+        },
+        {
+          "name": "group",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/group"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "population_total",
+            "country": "IND",
+            "yearA": 2023,
+            "yearB": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Population Movement",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/coverage",
+      "summary": "Coverage and missingness",
+      "description": "indicator, subject, country, year, optional fromYear and toYear",
+      "parameters": [
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "indicator",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "subject",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/subject"
+          }
+        },
+        {
+          "name": "year",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/year"
+          }
+        },
+        {
+          "name": "fromYear",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/fromYear"
+          }
+        },
+        {
+          "name": "toYear",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/toYear"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "country": "JPN",
+            "subject": "gdp_total",
+            "year": 2024
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Coverage and missingness",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/data-status",
+      "summary": "Serving data and source freshness",
+      "description": "Use the reported vintage, check time and publication time for their separate meanings.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Serving data and source freshness",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/prices/country-groups",
+      "summary": "prices Movement group filters",
+      "description": "Lists supported country classifications for the family. Use the returned keys when filtering Movement.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "prices Movement group filters",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/trade/country-groups",
+      "summary": "trade Movement group filters",
+      "description": "Lists supported country classifications for the family. Use the returned keys when filtering Movement.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "trade Movement group filters",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/capital/country-groups",
+      "summary": "capital Movement group filters",
+      "description": "Lists supported country classifications for the family. Use the returned keys when filtering Movement.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "capital Movement group filters",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/fx/country-groups",
+      "summary": "fx Movement group filters",
+      "description": "Lists supported country classifications for the family. Use the returned keys when filtering Movement.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "fx Movement group filters",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/external/country-groups",
+      "summary": "external Movement group filters",
+      "description": "Lists supported country classifications for the family. Use the returned keys when filtering Movement.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "external Movement group filters",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/population/country-groups",
+      "summary": "population Movement group filters",
+      "description": "Lists supported country classifications for the family. Use the returned keys when filtering Movement.",
+      "parameters": [],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {}
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "population Movement group filters",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/availability",
+      "summary": "Scoped published years and valid YoY pairs",
+      "description": "indicator; optional country or entityA/entityB, basis. Committed inputs and generation only.",
+      "parameters": [
+        {
+          "name": "indicator",
+          "required": true,
+          "schema": {
+            "$ref": "#/parameterDefinitions/indicator"
+          }
+        },
+        {
+          "name": "country",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/country"
+          }
+        },
+        {
+          "name": "entityA",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/entityA"
+          }
+        },
+        {
+          "name": "entityB",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/entityB"
+          }
+        },
+        {
+          "name": "basis",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/basis"
+          }
+        }
+      ],
+      "examples": [
+        {
+          "summary": "Bounded historical example (discover current years separately)",
+          "parameters": {
+            "indicator": "total_current",
+            "entityA": "country:USA",
+            "entityB": "country:JPN"
+          }
+        }
+      ],
+      "response": {
+        "contentType": "application/json",
+        "semantics": "Scoped published years and valid YoY pairs",
+        "missing": "Absence remains null/unavailable with a reason, never zero-filled. A valid request may return available:false.",
+        "units": "Read the registered metric/basis and response unit; do not combine unrelated units.",
+        "provenance": "World Bank WDI source 2 observations; ranks, changes and custom groups are application-derived."
+      },
+      "limits": {}
+    }
+  ],
+  "availabilityDiscovery": {
+    "global": "/api/public/years",
+    "scoped": "/api/public/availability?indicator=total_current&country=JPN",
+    "instruction": "Discover committed indicator/economy years and valid adjacent YoY pairs, then send explicit numeric years. The public API does not accept year=latest. Historical examples intentionally keep their dates."
+  },
+  "encoding": "Encode query values with URLSearchParams or equivalent UTF-8 percent encoding; entity colons and group/series commas are query values, not path separators.",
+  "errors": {
+    "400": "Invalid request or unsupported operation; inspect code and message.",
+    "404": "Optional publication disabled or unknown resource.",
+    "429": "Read budget exhausted; honor Retry-After.",
+    "503": "Temporary service or publication authority failure; retry later, never assume authorization."
+  }
 }

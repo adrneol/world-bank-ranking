@@ -306,6 +306,9 @@ export default function DataStatus({ onRefreshed }) {
         <>
           <h3>Current dataset</h3>
           <dl className="facts facts-grid">
+            <div><dt>Latest published economy year</dt><dd>{data.years?.maxYear??'Not reported'}</dd></div>
+            <div><dt>Published content generation</dt><dd>{data.generation?.contentVersion!=null ? `v${data.generation.contentVersion}`:'Not reported'}</dd></div>
+            <div><dt>Last refresh attempt (UTC)</dt><dd>{(data.lastRun?.completed_at??data.lastRun?.started_at) ? formatUtcDateTime(data.lastRun.completed_at??data.lastRun.started_at) : 'Not reported'}{data.lastRun?.status ? ` · ${data.lastRun.status}`:''}</dd></div>
             <div>
               <dt>Dataset</dt>
               <dd>
@@ -475,6 +478,7 @@ export default function DataStatus({ onRefreshed }) {
               >
                 <summary>Indicator results and timestamps</summary>
                 <IndicatorMonitor keys={activeKeys} steps={activeStepByKey} labelOf={labelOf} polling={polling} runningKey={runningKey}
+                  latestYears={data.years?.perMetric}
                   publication={refreshCompletedOk ? 'completed' : refreshRolledBack ? 'not-published' : 'pending'} />
               </details>
               ) : null}

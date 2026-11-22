@@ -304,6 +304,7 @@ const get = (path, params, options) => {
 };
 
 export const api = {
+  availability: (params, options) => get('/api/availability', params, options),
   capabilities: (options) => get('/api/capabilities', {}, options),
   health: (options) => get('/api/health', {}, options),
   years: (options) => get('/api/years', {}, options),
