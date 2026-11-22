@@ -190,6 +190,11 @@ async function buildYearlySnapshot(db, options) {
       } else {
         row[metricKey] = holder.cells.get(year);
       }
+      // Additive response aliases; calculations and legacy consumers keep their fields.
+      const cell = row[metricKey];
+      for (const suffix of ['Value', 'ValueRaw', 'ValueDisplay', 'Rank', 'RankReason', 'YoY', 'YoYDisplay', 'YoYReason']) {
+        if (Object.hasOwn(cell, `india${suffix}`)) cell[`focus${suffix}`] = cell[`india${suffix}`];
+      }
     }
     return row;
   });

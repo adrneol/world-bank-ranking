@@ -586,7 +586,7 @@
       "method": "GET",
       "path": "/api/public/focus/yearly",
       "summary": "Annual observations and focus evidence",
-      "description": "country, subject, startYear, endYear",
+      "description": "country, subject, startYear, endYear. Country-neutral focusValue, focusValueRaw, focusValueDisplay, focusRank, focusRankReason, focusYoY, focusYoYDisplay and focusYoYReason exactly alias the corresponding legacy india* cell fields, including nulls. Legacy fields remain supported; focus identifies the selected economy.",
       "parameters": [
         {
           "name": "country",
@@ -945,7 +945,7 @@
       "method": "GET",
       "path": "/api/public/compare",
       "summary": "Compare countries, groups and official aggregates",
-      "description": "entityA, entityB, indicator, basis, operation, yearA, optional yearB/yearC, groupMode",
+      "description": "entityA, entityB, indicator, basis, operation, yearA, optional yearB/yearC, groupMode. Comparisons use entities.a and entities.b and do not declare a focus country. source.focusCountry is retained only for compatibility as the application default; source.focusCountryRole=application_default_not_comparison_focus explicitly qualifies it. Entity A is not implicitly a focus.",
       "parameters": [
         {
           "name": "indicator",

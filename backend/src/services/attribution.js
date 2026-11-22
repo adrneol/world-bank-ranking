@@ -8,7 +8,7 @@
 
 import { FOCUS_COUNTRY, SOURCE_INFO, config } from '../config.js';
 
-export function sourceAttribution() {
+export function sourceAttribution({ focusCountryRole } = {}) {
   return {
     provider: SOURCE_INFO.provider,
     dataset: SOURCE_INFO.dataset,
@@ -16,6 +16,7 @@ export function sourceAttribution() {
     wording: SOURCE_INFO.rankWording,
     disclaimer: SOURCE_INFO.rankDisclaimer,
     focusCountry: { ...FOCUS_COUNTRY },
+    ...(focusCountryRole ? { focusCountryRole } : {}),
     apiBaseUrl: config.worldBank.baseUrl,
   };
 }

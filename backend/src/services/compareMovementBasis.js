@@ -401,7 +401,7 @@ export async function buildCompareMovementBasisResponse(db, {
       coherent: vintages.length <= 1,
       lastUpdatedValues: vintages,
       warning: vintages.length > 1 ? 'Source legs carry different World Bank vintages; the derived result combines those stored vintages.' : null,
-    }, source: sourceAttribution(), cached: false,
+    }, source: sourceAttribution({ focusCountryRole: 'application_default_not_comparison_focus' }), cached: false,
   };
   setCachedCompare(db, cacheKey, response);
   return response;

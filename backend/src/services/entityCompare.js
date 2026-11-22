@@ -665,7 +665,7 @@ export async function buildCompareResponse(db, options = {}) {
       universe: null,
       diagnostics: [],
       vintage: null,
-      source: sourceAttribution(),
+      source: sourceAttribution({ focusCountryRole: 'application_default_not_comparison_focus' }),
     };
   }
 
@@ -1039,7 +1039,7 @@ export async function buildCompareResponse(db, options = {}) {
     results: { ...results, comparison },
     diagnostics,
     vintage: vintageBlock,
-    source: sourceAttribution(),
+    source: sourceAttribution({ focusCountryRole: 'application_default_not_comparison_focus' }),
     cached: false,
   };
   // Only a fully produced response is cached. A blocked comparison is never
