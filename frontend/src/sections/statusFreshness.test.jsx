@@ -76,7 +76,7 @@ function renderSection(element) {
   act(() => {
     root.render(element);
   });
-  return { container, cleanup: () => act(() => root.unmount()) || container.remove() };
+  return { container, rerender:element=>act(()=>root.render(element)), cleanup: () => act(() => root.unmount()) || container.remove() };
 }
 
 describe('status and audit freshness semantics', () => {
@@ -85,6 +85,19 @@ describe('status and audit freshness semantics', () => {
     stub?.restore();
     stub = null;
     document.body.innerHTML = '';
+  });
+
+  it('reuses a newer shared operational snapshot without fetching again or advancing generation',async()=>{
+    stub=stubFetch([['/api/data-status',{...STATUS,generation:{contentVersion:1}}]]);
+    const rendered=renderSection(<DataStatus />);await flushReact(act);const count=stub.calls.length;
+    rendered.rerender(<DataStatus observedStatus={{receivedAt:performance.now()+1,data:{...STATUS,generation:{contentVersion:1},fresh:false,lastRun:{status:'partial'},refreshOutcome:{checked:19,updated:0,unchanged:19,failed:1,notAttempted:0,total:20}}}} />);
+    await flushReact(act);expect(rendered.container.textContent).toContain('1 failed');expect(rendered.container.textContent).toContain('v1');expect(stub.calls.length).toBe(count);rendered.cleanup();
+  });
+
+  it('Audit renders one authoritative snapshot and its generation without split evidence requests',async()=>{
+    stub=stubFetch([['/api/observations',{...AUDIT,auditSnapshot:true,generation:{contentVersion:7}}]]);
+    const rendered=renderSection(<AuditSource year={2024} metricKey="nominal_current" country="JPN" />);await flushReact(act);
+    expect(rendered.container.textContent).toContain('Source snapshot generation');expect(rendered.container.textContent).toContain('v7');expect(stub.calls).toHaveLength(1);expect(stub.calls[0]).toContain('audit=1');rendered.cleanup();
   });
 
   it('status separates upstream vintage from local retrieval in explicit UTC', async () => {

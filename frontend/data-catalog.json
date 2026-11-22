@@ -345,6 +345,16 @@
       "type": "string",
       "enumSource": "family /country-groups resource",
       "description": "A returned classification value, not a custom entity spec."
+    },
+    "audit": {
+      "type": "integer",
+      "allowedValues": [
+        1
+      ],
+      "description": "With country and year, 1 returns metadata, raw observation, yearly calculation and generation from one read transaction. Omit for the original observation response.",
+      "enum": [
+        1
+      ]
     }
   },
   "operations": [
@@ -535,6 +545,13 @@
           "schema": {
             "$ref": "#/parameterDefinitions/country"
           }
+        },
+        {
+          "name": "audit",
+          "required": false,
+          "schema": {
+            "$ref": "#/parameterDefinitions/audit"
+          }
         }
       ],
       "examples": [
@@ -544,6 +561,15 @@
             "indicator": "total_current",
             "year": 2024,
             "country": "IND"
+          }
+        },
+        {
+          "label": "Atomic audit evidence",
+          "parameters": {
+            "indicator": "total_current",
+            "country": "JPN",
+            "year": 2024,
+            "audit": 1
           }
         }
       ],

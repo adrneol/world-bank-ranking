@@ -226,3 +226,23 @@ test('the post-failure cooldown prevents a hot loop, and a manual refresh is nev
     db.close();
   }
 });
+
+
+test('maintenance respects partial-failure backoff, restart cooldown and the actual pending delay',async()=>{
+ const ingest=await import('../src/wb/ingest.js'),repo=await import('../src/db/repository.js');const db=await freshDb();const previous=process.env.WB_REFRESH_RETRY_DELAYS_MS;
+ try{
+  ingest.noteRefreshSuccess();stub.reset();const run=await repo.startFetchRun(db,{trigger:'ttl'});await repo.finishFetchRun(db,run,{status:'partial',errorMessage:'synthetic partial source outage'});
+  await db.execute({sql:'UPDATE fetch_runs SET started_at=? WHERE id=?',args:[new Date(Date.now()-20*60000).toISOString(),run]});
+  process.env.WB_REFRESH_RETRY_DELAYS_MS='600000,1200000';ingest.scheduleRefreshRetry(db);
+  assert.equal(ingest.getRefreshRetryState().nextDelayMs,600000,'reports the armed delay, not the following ladder rung');const before=stub.requestCount();
+  assert.equal((await ingest.maybeAutoRefresh(db)).reason,'retry-scheduled');assert.equal(stub.requestCount(),before,'maintenance must not bypass the pending retry');
+  ingest.cancelScheduledRefreshRetry();process.env.WB_REFRESH_RETRY_DELAYS_MS='20';await db.execute({sql:'UPDATE fetch_runs SET started_at=? WHERE id=?',args:[new Date().toISOString(),run]});assert.equal((await ingest.maybeAutoRefresh(db,{autoStale:false,autoEmpty:true})).reason,'cooldown-after-failure','persisted partial failure remains cooled down after timer loss');
+  assert.equal(ingest.getRefreshRetryState().scheduled,true,'startup restores the lost retry timer even for initial-ingestion-only policy');assert.equal(ingest.getRefreshRetryState().nextDelayMs,20);
+  const start=Date.now();while(Date.now()-start<30000){if(await repo.getLastSuccessfulFetchTime(db))break;await new Promise(resolve=>setTimeout(resolve,25));}
+  assert.ok(await repo.getLastSuccessfulFetchTime(db),'the owned retry timer recovers without a visitor request');assert.ok(await repo.countObservations(db)>0);assert.equal(ingest.getRefreshRetryState().scheduled,false);
+ }finally{process.env.WB_REFRESH_RETRY_DISABLED='1';ingest.cancelScheduledRefreshRetry();const start=Date.now();while(ingest.isRefreshInProgress()&&Date.now()-start<30000)await new Promise(resolve=>setTimeout(resolve,25));delete process.env.WB_REFRESH_RETRY_DISABLED;if(previous==null)delete process.env.WB_REFRESH_RETRY_DELAYS_MS;else process.env.WB_REFRESH_RETRY_DELAYS_MS=previous;stub.reset();db.close();}
+});
+
+test('owned freshness reads relay only transport failures to existing failover without a visitor',async()=>{const ingest=await import('../src/wb/ingest.js');for(const transport of [true,false]){const error=Object.assign(new Error(transport?'SERVER_ERROR: transport failure':'SQLITE_CONSTRAINT: invalid data'),{code:transport?'SERVER_ERROR':'SQLITE_CONSTRAINT'});let calls=0;const broken={execute:async()=>{throw error;},batch:async()=>{throw error;}};const result=await ingest.maybeAutoRefresh(broken,{onTransportFailure:async actual=>{assert.equal(actual,error);calls++;}});assert.equal(result.reason,'status-unavailable');assert.equal(result.triggered,false);assert.equal(calls,transport?1:0);
+ const db=await freshDb();const execute=db.execute.bind(db);try{db.execute=async(statement,...rest)=>{const sql=typeof statement==='string'?statement:statement.sql;if(sql.includes('refresh_lock'))throw error;return execute(statement,...rest);};calls=0;const lockResult=await ingest.maybeAutoRefresh(db,{onTransportFailure:async actual=>{assert.equal(actual,error);calls++;}});assert.equal(lockResult.reason,'status-unavailable');assert.equal(calls,transport?1:0,'lock-read transport failures also reach existing failover');}finally{db.close();}
+}});

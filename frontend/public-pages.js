@@ -21,7 +21,7 @@ export function publicDocuments({ origin, catalog }) {
       root = config.root;
       building = config.command === 'build';
       outDir = join(root, config.build.outDir);
-      backend = config.env.VITE_API_BASE_URL?.trim().replace(/\/+$/, '') || config.server.proxy?.['/api']?.target || 'http://localhost:3001';
+      backend = process.env.BACKEND_API_ORIGIN?.trim().replace(/\/+$/, '') || config.server.proxy?.['/api']?.target || 'http://localhost:3001';
     },
     configureServer(server) {
       server.middlewares.use(middleware(async () => (await readFile(join(root, 'index.html'), 'utf8')).replace('</head>', '<link rel="stylesheet" href="/src/index.css"></head>')));

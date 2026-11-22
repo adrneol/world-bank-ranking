@@ -13,7 +13,8 @@
  * retry) keep native AbortError semantics.
  */
 
-// Precedence: explicit VITE_API_BASE_URL (local override or production)
+// Development may override the API origin. Production always uses the website origin.
+// Precedence: explicit VITE_API_BASE_URL (development only)
 // wins; empty/absent falls back to relative /api (Vite dev proxy locally,
 // same-origin API in deployments that serve both from one host). Trailing
 // slashes and surrounding whitespace are stripped so neither
@@ -24,7 +25,7 @@
 import { recoverRead } from './readRecovery.js';
 
 let baseUrlOverride = null;
-const BASE_URL = (import.meta.env?.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '');
+const BASE_URL = (import.meta.env?.DEV ? import.meta.env?.VITE_API_BASE_URL ?? '' : '').trim().replace(/\/+$/, '');
 
 function resolveBaseUrl() {
   return baseUrlOverride ?? BASE_URL;
@@ -33,7 +34,7 @@ function resolveBaseUrl() {
 /**
  * Test seam (and advanced embedding override): point the client at an
  * explicit base URL. Production code never calls this; the build-time
- * VITE_API_BASE_URL remains the only production mechanism.
+ * production remains same-origin; this override is used only by tests/embedding.
  */
 export function setApiBaseUrl(url) {
   baseUrlOverride = typeof url === 'string' && url.trim() !== '' ? url.trim().replace(/\/+$/, '') : null;
@@ -342,8 +343,8 @@ export const api = {
       },
       options,
     ),
-  observations: ({ indicator, year, country } = {}, options) =>
-    get('/api/observations', { indicator, year, country }, options),
+  observations: ({ indicator, year, country, audit } = {}, options) =>
+    get('/api/observations', { indicator, year, country, audit }, options),
   countries: ({ includeAggregates } = {}, options) =>
     get('/api/countries', { includeAggregates }, options),
   metadata: (options) => get('/api/metadata', {}, options),

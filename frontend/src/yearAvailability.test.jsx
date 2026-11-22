@@ -139,3 +139,5 @@ it('content versions detect a later publication even when a legacy fingerprint h
   state.max=2026;state.generation=2;await act(async()=>{await vi.advanceTimersByTimeAsync(61000);});await flushReact(act,16);
   expect(container.querySelector('.app-header h1').textContent).toBe('India — 2026');
 });
+
+it('an empty initial year registry recovers when the first committed dataset appears without a visitor refresh',async()=>{vi.useFakeTimers({shouldAdvanceTime:true});const{state}=setup({max:2022,globalGeneration:null,lagCpi:false});const container=mount('/overview/?country=IND&metric=total_current');await flushReact(act,12);state.max=2026;state.generation=1;await act(async()=>{await vi.advanceTimersByTimeAsync(31000);});await flushReact(act,16);expect(container.querySelector('.app-header h1').textContent).toBe('India — 2026');expect(stub.calls.filter(url=>url.includes('/api/years')).length).toBeGreaterThan(1);});

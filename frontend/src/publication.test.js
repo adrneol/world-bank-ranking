@@ -33,3 +33,5 @@ it.each([{ publicReadApiEnabled: false }, {}, { publicReadApiEnabled: 'true' }, 
     expect((await render('catalog', capability)).statusCode).toBe(response.statusCode);
   },
 );
+
+it.each([true,false,new Error('offline')])('Home remains usable and discovery follows actual authority: %s',async value=>{const response=await render('home',value instanceof Error?value:{publicReadApiEnabled:value});expect(response.statusCode).toBe(200);expect(response.body.includes('href="/public-data/"')).toBe(value===true);expect(response.headers['Cache-Control']).toBe('no-store');});

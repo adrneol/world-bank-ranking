@@ -521,8 +521,8 @@ export async function buildLevelComparisonResponse(db, options = {}) {
     comparisonMethodology: {
       ranking:
         direction === 'ASC'
-          ? 'value ASC (lower values first, per metric rankingDirection), ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).'
-          : 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).',
+          ? 'value ASC (lower values first, per metric rankingDirection), ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(focus,A) = 1 + (economies positioned before the focus in A).'
+          : 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(focus,A) = 1 + (economies positioned before the focus in A).',
       sets: 'Common = economies observed in both years; Exited = observed in year A only; Entered = observed in year B only.',
       aboveBelow: 'Above/below the focus economy is determined by ranking position, never by raw-value comparison.',
       identity: 'F_B - F_A = (K_B - K_A) + EnteredAbove_B - ExitedAbove_A.',
@@ -936,8 +936,8 @@ export async function buildThreeYearComparisonResponse(db, options = {}) {
     comparisonMethodology: {
       ranking:
         direction === 'ASC'
-          ? 'value ASC (lower values first, per metric rankingDirection), ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).'
-          : 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(India,A) = 1 + (economies positioned before India in A).',
+          ? 'value ASC (lower values first, per metric rankingDirection), ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(focus,A) = 1 + (economies positioned before the focus in A).'
+          : 'value DESC, ISO3 ASC; rank = 1-based ordinal position. Ties receive distinct positions ordered by ISO3. Explicitly: rank(focus,A) = 1 + (economies positioned before the focus in A).',
       sets: 'Common = economies observed in all three selected years (start, point breaker, end); Outside = observed in at least one year but missing in at least one other year.',
       aboveBelow: 'Above/below the focus economy is determined by ranking position, never by raw-value comparison.',
       identity:

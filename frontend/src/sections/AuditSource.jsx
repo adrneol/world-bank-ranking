@@ -17,12 +17,11 @@ export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita
       const siblings = new AbortController();
       const options = { signal: AbortSignal.any([signal, siblings.signal]), recover: true, passive: true, timeoutMs: 12000 };
       try {
-        const [metadata, observation, yearly] = await Promise.all([
-          api.metadata(options),
-          api.observations({ indicator: metricKey, year, country }, options),
-          api.focusYearly({ startYear: year, endYear: year, subject, country }, options),
-        ]);
-        return { metadata, observation, yearly };
+        const snapshot=await api.observations({indicator:metricKey,year,country,audit:1},options);
+        if(snapshot.auditSnapshot===true)return snapshot;
+        // Older backends do not implement the opt-in snapshot bundle.
+        const [metadata,yearly]=await Promise.all([api.metadata(options),api.focusYearly({startYear:year,endYear:year,subject,country},options)]);
+        return {metadata,observation:snapshot,yearly,legacySnapshot:true};
       } finally {
         siblings.abort();
       }
@@ -59,6 +58,8 @@ export default function AuditSource({ year, metricKey, subject = 'gdp_per_capita
       <StatusBlock loading={loading} error={error} empty={false} onRetry={retry} sectionName="audit data" />
       {!loading && !error && data ? (
         <dl className="facts facts-grid">
+          {data.auditSnapshot ? <div><dt>Source snapshot generation</dt><dd>{data.generation?.contentVersion!=null?`v${data.generation.contentVersion}`:"Legacy dataset; generation unavailable"}</dd></div> : <div><dt>Snapshot consistency</dt><dd>This server does not provide atomic Audit snapshots.</dd></div>}
+          {data.auditSnapshot ? <div><dt>Serving database</dt><dd>{data.database?.label??data.database?.provider??"Not reported"}</dd></div> : null}
           <div>
             <dt>Source</dt>
             <dd>World Bank World Development Indicators (WDI)</dd>

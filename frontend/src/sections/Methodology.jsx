@@ -65,7 +65,7 @@ function BackLink({ label, onSelect }) {
   // Secondary navigation action matching the site's button language.
   return (
     <p className="backnav-row">
-      <button type="button" className="btn btn-secondary backnav" onClick={onSelect}>
+      <button type="button" className="editorial-link backnav" onClick={onSelect}>
         ← Back to {label}
       </button>
     </p>

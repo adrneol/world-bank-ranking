@@ -19,6 +19,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import config from '../config.js';
+import { verifiedProxyIdentity } from './proxyIdentity.js';
 import { getDb } from '../db/index.js';
 import { getCountryByIso2 } from '../db/repository.js';
 
@@ -57,8 +58,9 @@ function cacheSet(ip, iso3) {
  */
 export function clientIpFromRequest(req) {
   const trusted = req?.app?.get('trust proxy');
-  if (req?.headers?.['x-forwarded-for'] && !trusted) return null;
-  let raw = trusted ? req?.ip : req?.socket?.remoteAddress;
+  const signed=req?.headers?verifiedProxyIdentity(req):null;
+  if (!signed && req?.headers?.['x-forwarded-for'] && !trusted) return null;
+  let raw = signed ?? (trusted ? req?.ip : req?.socket?.remoteAddress);
   raw = String(raw ?? '').trim();
   if (raw === '' || raw.toLowerCase() === 'unknown') return null;
   // Normalize: strip brackets, zone ids and IPv4-mapped IPv6 prefixes.

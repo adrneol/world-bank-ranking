@@ -3815,3 +3815,8 @@ hr.ddivider {
 #about-project .analysis-header-side, .home-cta-row { border-top:1px solid var(--line); padding-top:.6rem; gap:1.5rem; }
 .contact-email { font-family:var(--mono); font-size:.95em; }
 #home-provenance .facts, #about-project .facts { border:0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); border-radius:0; background:none; }
+
+.research-entry { display:inline-flex; align-items:center; gap:1.5rem; padding:.7rem 0; border:0; border-block:2px solid var(--accent); border-radius:0; color:var(--ink); background:transparent; font:600 1.15rem var(--serif); min-height:48px; cursor:pointer; }
+.research-entry::after { content:'↗'; padding-inline:.65rem; border-inline-start:1px solid var(--line); color:var(--accent); }
+.research-entry:hover { color:var(--accent); }
+.research-entry:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }

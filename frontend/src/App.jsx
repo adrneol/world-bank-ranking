@@ -198,6 +198,7 @@ function isAnalyticalView(value) {
 const CONNECTION_HINT_SECONDS = 10;
 
 export default function App() {
+  const [observedStatus,setObservedStatus]=useState(null);
   const [yearsData, setYearsData] = useState(null);
   const [yearsError, setYearsError] = useState(null);
   const [yearsLoading, setYearsLoading] = useState(true);
@@ -692,7 +693,7 @@ export default function App() {
   useEffect(() => {
     // Adopt, don't revalidate, until the app has real data on screen: the
     // first observation only records the baseline generation.
-    if (!filtersReady) return undefined;
+    // Observe publication even when the initial dataset is empty or unavailable.
     let cancelled = false;
     let timer = null;
     const check = async () => {
@@ -712,6 +713,7 @@ export default function App() {
         return; // Background watcher never surfaces errors; the views' own fetches report them.
       }
       if (cancelled) return;
+      setObservedStatus({data:status,receivedAt:performance.now()});
       observePublication(status?.capabilities, started);
       const next = fingerprintOf(status);
       if (!next || (!next.provider && next.runId === null && !next.lastSuccessAt && next.contentVersion==null)) return;
@@ -719,7 +721,7 @@ export default function App() {
       if (!prev) {
         knownGeneration.current = next;
         const previousYears=yearSnapshot.current;
-        if(previousYears && ((previousYears.contentVersion!=null && status.generation?.contentVersion!=null && previousYears.contentVersion!==status.generation.contentVersion) ||
+        if(previousYears && ((status.generation?.contentVersion!=null && previousYears.contentVersion!==status.generation.contentVersion) ||
           (previousYears.provider && next.provider && previousYears.provider!==next.provider)))setDataVersion(value=>value+1);
       } else if (isNewerGeneration(prev, next) || (prev.contentVersion!=null && next.contentVersion!=null && prev.contentVersion!==next.contentVersion) || (prev.provider && next.provider && prev.provider !== next.provider)) {
         knownGeneration.current = next;
@@ -733,26 +735,7 @@ export default function App() {
       } else if (!prev.provider && next.provider) {
         knownGeneration.current = { ...prev, provider: next.provider };
       }
-      // Phase 8E narrow TTL engagement: /api/data-status is deliberately
-      // side-effect free, so a tab sitting only on the Status page would
-      // otherwise never trigger the server's TTL middleware. When the backend
-      // reports refreshDue and nothing is running, issue one lightweight
-      // GET /api/years (an AUTO_REFRESH_PATHS member) so the server's existing
-      // fire-and-forget maybeAutoRefresh engages. No new endpoint, no status
-      // write, same 60 s watcher cadence — never a storm.
-      if (!passiveBootstrap && status?.refreshDue && !status?.inProgress) {
-        try {
-          const yController = new AbortController();
-          const yTimeout = setTimeout(() => yController.abort(), 15000);
-          try {
-            await api.years({ signal: yController.signal, timeoutMs: 15000 });
-          } finally {
-            clearTimeout(yTimeout);
-          }
-        } catch {
-          // Watcher never surfaces errors.
-        }
-      }
+      // Source synchronization belongs to server-owned startup and maintenance.
     };
     // Stagger the first check so it never races initial page-load fetches.
     timer = setTimeout(function tick() {
@@ -1031,7 +1014,7 @@ export default function App() {
           {researchReady && effective.country && view === 'audit' ? (
             <AuditSource year={effective.year} metricKey={effective.metric} subject={effective.subject} country={effective.country} focusName={effective.focusName} />
           ) : null}
-          {view === 'status' ? <DataStatus onRefreshed={handleRefreshed} /> : null}
+          {view === 'status' ? <DataStatus onRefreshed={handleRefreshed} observedStatus={observedStatus} /> : null}
           </Suspense>
         </main>
         </ResearchPreferences>

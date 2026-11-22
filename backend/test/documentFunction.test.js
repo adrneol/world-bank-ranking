@@ -6,9 +6,9 @@ import { publicationState } from '../../frontend/server/publication.js';
 
 function response(){return {statusCode:200,headers:{},setHeader(name,value){this.headers[name]=value;},end(body){this.body=body;}};}
 test('function distinguishes enabled, disabled and invalid authority without frontend overrides',async()=>{
-  const old=process.env.VITE_API_BASE_URL;
+  const old=process.env.BACKEND_API_ORIGIN;
   try{
-    process.env.VITE_API_BASE_URL='https://backend.example/';
+    process.env.BACKEND_API_ORIGIN='https://backend.example/';
     for(const body of [{publicReadApiEnabled:true},{publicReadApiEnabled:false},{publicReadApiEnabled:'true'},{}]){
       const handler=createDocumentHandler({loadTemplate:async()=>DOCUMENT_SHELL,fetcher:async()=>({ok:true,json:async()=>body})});
       for(const resource of ['docs','catalog']){
@@ -19,17 +19,17 @@ test('function distinguishes enabled, disabled and invalid authority without fro
         else assert.match(res.body,/<html/);
       }
     }
-    delete process.env.VITE_API_BASE_URL;const res=response();await createDocumentHandler()({method:'GET',query:{resource:'docs'}},res);
+    delete process.env.BACKEND_API_ORIGIN;const res=response();await createDocumentHandler()({method:'GET',query:{resource:'docs'}},res);
     assert.equal(res.statusCode,503);assert.match(res.body,/Try again/);assert.match(res.body,/Return to Home/);
-  }finally{if(old==null)delete process.env.VITE_API_BASE_URL;else process.env.VITE_API_BASE_URL=old;}
+  }finally{if(old==null)delete process.env.BACKEND_API_ORIGIN;else process.env.BACKEND_API_ORIGIN=old;}
 });
 test('missing packaged HTML gives intentional 503 HTML, JSON resources stay independent, and HEAD stays empty',async()=>{
-  const old=process.env.VITE_API_BASE_URL;process.env.VITE_API_BASE_URL='https://backend.example';
+  const old=process.env.BACKEND_API_ORIGIN;process.env.BACKEND_API_ORIGIN='https://backend.example';
   try{
     const handler=createDocumentHandler({loadTemplate:async()=>{throw Error('sensitive internal asset path');},fetcher:async()=>({ok:true,json:async()=>({publicReadApiEnabled:true})})});
     for(const method of ['GET','HEAD']){const res=response();await handler({method,query:{resource:'docs'}},res);assert.equal(res.statusCode,503);assert.match(res.headers['Content-Type'],/text\/html/);assert.equal(res.headers['Retry-After'],'5');if(method==='HEAD')assert.equal(res.body,undefined);else{assert.match(res.body,/Public data service temporarily unavailable/);assert.ok(!res.body.includes('sensitive internal asset path'));}}
     const res=response();await handler({method:'GET',query:{resource:'catalog'}},res);assert.equal(res.statusCode,200);assert.equal(JSON.parse(res.body).operations.length,31);
-  }finally{if(old==null)delete process.env.VITE_API_BASE_URL;else process.env.VITE_API_BASE_URL=old;}
+  }finally{if(old==null)delete process.env.BACKEND_API_ORIGIN;else process.env.BACKEND_API_ORIGIN=old;}
 });
 test('authority retries only transient failures and does not retain a settled enabled decision',async()=>{
   let calls=0;

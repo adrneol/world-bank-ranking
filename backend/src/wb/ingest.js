@@ -192,6 +192,8 @@ export const AUTO_REFRESH_FAIL_COOLDOWN_MS = 15 * 60 * 1000;
  */
 export const REFRESH_RETRY_DELAYS_MS = Object.freeze([5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000]);
 let refreshRetryTimer = null;
+let scheduledRetryDelayMs = null;
+let scheduledRetryHandle = null;
 let consecutiveAutoFailures = 0;
 
 /** Parse the retry schedule: env override (tests) or the default ladder. */
@@ -219,7 +221,7 @@ export function getRefreshRetryState() {
   return {
     scheduled: refreshRetryTimer !== null,
     consecutiveFailures: consecutiveAutoFailures,
-    nextDelayMs: refreshRetryTimer !== null ? getRefreshRetryDelayMs(consecutiveAutoFailures) : null,
+    nextDelayMs: refreshRetryTimer !== null ? scheduledRetryDelayMs : null,
   };
 }
 
@@ -228,6 +230,8 @@ export function cancelScheduledRefreshRetry() {
   if (refreshRetryTimer !== null) {
     clearTimeout(refreshRetryTimer);
     refreshRetryTimer = null;
+    scheduledRetryDelayMs = null;
+    scheduledRetryHandle = null;
   }
 }
 
@@ -255,8 +259,12 @@ export function scheduleRefreshRetry(db, { trigger = 'ttl', onWarn = null } = {}
   if (refreshRetryTimer !== null) return getRefreshRetryState();
   const delay = getRefreshRetryDelayMs(consecutiveAutoFailures);
   consecutiveAutoFailures += 1;
+  scheduledRetryDelayMs = delay;
+  scheduledRetryHandle = db;
   refreshRetryTimer = setTimeout(() => {
     refreshRetryTimer = null;
+    scheduledRetryDelayMs = null;
+    scheduledRetryHandle = null;
     maybeAutoRefresh(db, { onWarn, ignoreCooldown: true }).then(
       () => {},
       (error) => {
@@ -1574,17 +1582,23 @@ export async function maybeAutoRefresh(db, options = {}) {
   let status;
   try {
     status = await getCacheStatus(handle, { ttlHours });
-  } catch {
+  } catch (error) {
+    if (isTransportError(error)) {
+      try { await options.onTransportFailure?.(error); } catch { /* Keep the last eligible handle if recovery is inconclusive. */ }
+    }
     return { triggered: false, reason: 'status-unavailable' };
   }
 
+  // A serving-handle transition retires the old target's pending retry.
+  if (refreshRetryTimer !== null && scheduledRetryHandle !== handle) cancelScheduledRefreshRetry();
   if (!status.refreshDue) return { triggered: false, reason: 'fresh' };
   if (status.empty && !autoEmpty) return { triggered: false, reason: 'empty-auto-ingest-disabled' };
   if (!status.empty && !autoStale) return { triggered: false, reason: 'stale-auto-refresh-disabled' };
   if (isRefreshInProgress()) return { triggered: false, reason: 'already-running' };
   try {
     if ((await refreshLockStatus(handle))?.locked) return { triggered: false, reason: 'already-running' };
-  } catch {
+  } catch (error) {
+    if (isTransportError(error)) { try { await options.onTransportFailure?.(error); } catch { /* Existing failover proof remains authoritative. */ } }
     return { triggered: false, reason: 'status-unavailable' };
   }
 
@@ -1594,13 +1608,16 @@ export async function maybeAutoRefresh(db, options = {}) {
   // itself is the backoff, and re-applying the cooldown would wedge the
   // first 5-minute retry behind a 15-minute gate.
   const lastRun = status.lastRun;
-  if (!options.ignoreCooldown && lastRun && lastRun.status === 'failed') {
+  if (!options.ignoreCooldown && lastRun && ['failed','partial'].includes(lastRun.status)) {
     const startedAt = new Date(lastRun.started_at).getTime();
     if (Number.isFinite(startedAt) && Date.now() - startedAt < AUTO_REFRESH_FAIL_COOLDOWN_MS) {
+      // A restarted process has lost its timer; restore the existing retry path.
+      if (refreshRetryTimer === null) scheduleRefreshRetry(handle, { trigger: status.empty ? 'boot' : 'ttl', onWarn: options.onWarn });
       return { triggered: false, reason: 'cooldown-after-failure' };
     }
   }
 
+  if (!options.ignoreCooldown && refreshRetryTimer !== null) return {triggered:false,reason:'retry-scheduled'};
   const trigger = status.empty ? 'boot' : 'ttl';
   refreshData({ db: handle, trigger, onWarn: options.onWarn }).then(
     (summary) => {

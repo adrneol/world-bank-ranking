@@ -1,11 +1,581 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": { "api/public-documents.js": { "includeFiles": "dist/index.html" } },
+  "functions": {
+    "api/public-documents.js": {
+      "includeFiles": "dist/index.html"
+    },
+    "api/research.js": {
+      "maxDuration": 300
+    }
+  },
   "rewrites": [
-    { "source": "/public-data", "destination": "/api/public-documents?resource=docs" },
-    { "source": "/public-data/", "destination": "/api/public-documents?resource=docs" },
-    { "source": "/public-data/index.html", "destination": "/api/public-documents?resource=docs" },
-    { "source": "/data-catalog.json", "destination": "/api/public-documents?resource=catalog" },
-    { "source": "/sitemap.xml", "destination": "/api/public-documents?resource=sitemap" }
+    {
+      "source": "/",
+      "destination": "/api/public-documents?resource=home"
+    },
+    {
+      "source": "/public-data",
+      "destination": "/api/public-documents?resource=docs"
+    },
+    {
+      "source": "/public-data/",
+      "destination": "/api/public-documents?resource=docs"
+    },
+    {
+      "source": "/public-data/index.html",
+      "destination": "/api/public-documents?resource=docs"
+    },
+    {
+      "source": "/data-catalog.json",
+      "destination": "/api/public-documents?resource=catalog"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/public-documents?resource=sitemap"
+    },
+    {
+      "source": "/api/availability",
+      "destination": "/api/research?_researchPath=availability"
+    },
+    {
+      "source": "/api/availability/",
+      "destination": "/api/research?_researchPath=availability/"
+    },
+    {
+      "source": "/api/capabilities",
+      "destination": "/api/research?_researchPath=capabilities"
+    },
+    {
+      "source": "/api/capabilities/",
+      "destination": "/api/research?_researchPath=capabilities/"
+    },
+    {
+      "source": "/api/capital/country-groups",
+      "destination": "/api/research?_researchPath=capital/country-groups"
+    },
+    {
+      "source": "/api/capital/country-groups/",
+      "destination": "/api/research?_researchPath=capital/country-groups/"
+    },
+    {
+      "source": "/api/compare",
+      "destination": "/api/research?_researchPath=compare"
+    },
+    {
+      "source": "/api/compare/",
+      "destination": "/api/research?_researchPath=compare/"
+    },
+    {
+      "source": "/api/comparison/level",
+      "destination": "/api/research?_researchPath=comparison/level"
+    },
+    {
+      "source": "/api/comparison/level/",
+      "destination": "/api/research?_researchPath=comparison/level/"
+    },
+    {
+      "source": "/api/countries",
+      "destination": "/api/research?_researchPath=countries"
+    },
+    {
+      "source": "/api/countries/",
+      "destination": "/api/research?_researchPath=countries/"
+    },
+    {
+      "source": "/api/coverage",
+      "destination": "/api/research?_researchPath=coverage"
+    },
+    {
+      "source": "/api/coverage/",
+      "destination": "/api/research?_researchPath=coverage/"
+    },
+    {
+      "source": "/api/data-status",
+      "destination": "/api/research?_researchPath=data-status"
+    },
+    {
+      "source": "/api/data-status/",
+      "destination": "/api/research?_researchPath=data-status/"
+    },
+    {
+      "source": "/api/data/refresh",
+      "destination": "/api/research?_researchPath=data/refresh"
+    },
+    {
+      "source": "/api/data/refresh/",
+      "destination": "/api/research?_researchPath=data/refresh/"
+    },
+    {
+      "source": "/api/entities",
+      "destination": "/api/research?_researchPath=entities"
+    },
+    {
+      "source": "/api/entities/",
+      "destination": "/api/research?_researchPath=entities/"
+    },
+    {
+      "source": "/api/external/country-groups",
+      "destination": "/api/research?_researchPath=external/country-groups"
+    },
+    {
+      "source": "/api/external/country-groups/",
+      "destination": "/api/research?_researchPath=external/country-groups/"
+    },
+    {
+      "source": "/api/focus/history",
+      "destination": "/api/research?_researchPath=focus/history"
+    },
+    {
+      "source": "/api/focus/history/",
+      "destination": "/api/research?_researchPath=focus/history/"
+    },
+    {
+      "source": "/api/focus/yearly",
+      "destination": "/api/research?_researchPath=focus/yearly"
+    },
+    {
+      "source": "/api/focus/yearly/",
+      "destination": "/api/research?_researchPath=focus/yearly/"
+    },
+    {
+      "source": "/api/fx/country-groups",
+      "destination": "/api/research?_researchPath=fx/country-groups"
+    },
+    {
+      "source": "/api/fx/country-groups/",
+      "destination": "/api/research?_researchPath=fx/country-groups/"
+    },
+    {
+      "source": "/api/geo/country",
+      "destination": "/api/research?_researchPath=geo/country"
+    },
+    {
+      "source": "/api/geo/country/",
+      "destination": "/api/research?_researchPath=geo/country/"
+    },
+    {
+      "source": "/api/groups/evaluate",
+      "destination": "/api/research?_researchPath=groups/evaluate"
+    },
+    {
+      "source": "/api/groups/evaluate/",
+      "destination": "/api/research?_researchPath=groups/evaluate/"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/research?_researchPath=health"
+    },
+    {
+      "source": "/api/health/",
+      "destination": "/api/research?_researchPath=health/"
+    },
+    {
+      "source": "/api/india/gdp-ranking",
+      "destination": "/api/research?_researchPath=india/gdp-ranking"
+    },
+    {
+      "source": "/api/india/gdp-ranking/",
+      "destination": "/api/research?_researchPath=india/gdp-ranking/"
+    },
+    {
+      "source": "/api/indicators",
+      "destination": "/api/research?_researchPath=indicators"
+    },
+    {
+      "source": "/api/indicators/",
+      "destination": "/api/research?_researchPath=indicators/"
+    },
+    {
+      "source": "/api/integrity",
+      "destination": "/api/research?_researchPath=integrity"
+    },
+    {
+      "source": "/api/integrity/",
+      "destination": "/api/research?_researchPath=integrity/"
+    },
+    {
+      "source": "/api/metadata",
+      "destination": "/api/research?_researchPath=metadata"
+    },
+    {
+      "source": "/api/metadata/",
+      "destination": "/api/research?_researchPath=metadata/"
+    },
+    {
+      "source": "/api/movement/capital",
+      "destination": "/api/research?_researchPath=movement/capital"
+    },
+    {
+      "source": "/api/movement/capital/",
+      "destination": "/api/research?_researchPath=movement/capital/"
+    },
+    {
+      "source": "/api/movement/external",
+      "destination": "/api/research?_researchPath=movement/external"
+    },
+    {
+      "source": "/api/movement/external/",
+      "destination": "/api/research?_researchPath=movement/external/"
+    },
+    {
+      "source": "/api/movement/fx",
+      "destination": "/api/research?_researchPath=movement/fx"
+    },
+    {
+      "source": "/api/movement/fx/",
+      "destination": "/api/research?_researchPath=movement/fx/"
+    },
+    {
+      "source": "/api/movement/population",
+      "destination": "/api/research?_researchPath=movement/population"
+    },
+    {
+      "source": "/api/movement/population/",
+      "destination": "/api/research?_researchPath=movement/population/"
+    },
+    {
+      "source": "/api/movement/prices",
+      "destination": "/api/research?_researchPath=movement/prices"
+    },
+    {
+      "source": "/api/movement/prices/",
+      "destination": "/api/research?_researchPath=movement/prices/"
+    },
+    {
+      "source": "/api/movement/trade",
+      "destination": "/api/research?_researchPath=movement/trade"
+    },
+    {
+      "source": "/api/movement/trade/",
+      "destination": "/api/research?_researchPath=movement/trade/"
+    },
+    {
+      "source": "/api/observations",
+      "destination": "/api/research?_researchPath=observations"
+    },
+    {
+      "source": "/api/observations/",
+      "destination": "/api/research?_researchPath=observations/"
+    },
+    {
+      "source": "/api/periods/summary",
+      "destination": "/api/research?_researchPath=periods/summary"
+    },
+    {
+      "source": "/api/periods/summary/",
+      "destination": "/api/research?_researchPath=periods/summary/"
+    },
+    {
+      "source": "/api/population/country-groups",
+      "destination": "/api/research?_researchPath=population/country-groups"
+    },
+    {
+      "source": "/api/population/country-groups/",
+      "destination": "/api/research?_researchPath=population/country-groups/"
+    },
+    {
+      "source": "/api/prices/country-groups",
+      "destination": "/api/research?_researchPath=prices/country-groups"
+    },
+    {
+      "source": "/api/prices/country-groups/",
+      "destination": "/api/research?_researchPath=prices/country-groups/"
+    },
+    {
+      "source": "/api/public/availability",
+      "destination": "/api/research?_researchPath=public/availability"
+    },
+    {
+      "source": "/api/public/availability/",
+      "destination": "/api/research?_researchPath=public/availability/"
+    },
+    {
+      "source": "/api/public/capital/country-groups",
+      "destination": "/api/research?_researchPath=public/capital/country-groups"
+    },
+    {
+      "source": "/api/public/capital/country-groups/",
+      "destination": "/api/research?_researchPath=public/capital/country-groups/"
+    },
+    {
+      "source": "/api/public/compare",
+      "destination": "/api/research?_researchPath=public/compare"
+    },
+    {
+      "source": "/api/public/compare/",
+      "destination": "/api/research?_researchPath=public/compare/"
+    },
+    {
+      "source": "/api/public/comparison/level",
+      "destination": "/api/research?_researchPath=public/comparison/level"
+    },
+    {
+      "source": "/api/public/comparison/level/",
+      "destination": "/api/research?_researchPath=public/comparison/level/"
+    },
+    {
+      "source": "/api/public/countries",
+      "destination": "/api/research?_researchPath=public/countries"
+    },
+    {
+      "source": "/api/public/countries/",
+      "destination": "/api/research?_researchPath=public/countries/"
+    },
+    {
+      "source": "/api/public/coverage",
+      "destination": "/api/research?_researchPath=public/coverage"
+    },
+    {
+      "source": "/api/public/coverage/",
+      "destination": "/api/research?_researchPath=public/coverage/"
+    },
+    {
+      "source": "/api/public/data-status",
+      "destination": "/api/research?_researchPath=public/data-status"
+    },
+    {
+      "source": "/api/public/data-status/",
+      "destination": "/api/research?_researchPath=public/data-status/"
+    },
+    {
+      "source": "/api/public/entities",
+      "destination": "/api/research?_researchPath=public/entities"
+    },
+    {
+      "source": "/api/public/entities/",
+      "destination": "/api/research?_researchPath=public/entities/"
+    },
+    {
+      "source": "/api/public/external/country-groups",
+      "destination": "/api/research?_researchPath=public/external/country-groups"
+    },
+    {
+      "source": "/api/public/external/country-groups/",
+      "destination": "/api/research?_researchPath=public/external/country-groups/"
+    },
+    {
+      "source": "/api/public/focus/history",
+      "destination": "/api/research?_researchPath=public/focus/history"
+    },
+    {
+      "source": "/api/public/focus/history/",
+      "destination": "/api/research?_researchPath=public/focus/history/"
+    },
+    {
+      "source": "/api/public/focus/yearly",
+      "destination": "/api/research?_researchPath=public/focus/yearly"
+    },
+    {
+      "source": "/api/public/focus/yearly/",
+      "destination": "/api/research?_researchPath=public/focus/yearly/"
+    },
+    {
+      "source": "/api/public/fx/country-groups",
+      "destination": "/api/research?_researchPath=public/fx/country-groups"
+    },
+    {
+      "source": "/api/public/fx/country-groups/",
+      "destination": "/api/research?_researchPath=public/fx/country-groups/"
+    },
+    {
+      "source": "/api/public/groups/evaluate",
+      "destination": "/api/research?_researchPath=public/groups/evaluate"
+    },
+    {
+      "source": "/api/public/groups/evaluate/",
+      "destination": "/api/research?_researchPath=public/groups/evaluate/"
+    },
+    {
+      "source": "/api/public/indicators",
+      "destination": "/api/research?_researchPath=public/indicators"
+    },
+    {
+      "source": "/api/public/indicators/",
+      "destination": "/api/research?_researchPath=public/indicators/"
+    },
+    {
+      "source": "/api/public/metadata",
+      "destination": "/api/research?_researchPath=public/metadata"
+    },
+    {
+      "source": "/api/public/metadata/",
+      "destination": "/api/research?_researchPath=public/metadata/"
+    },
+    {
+      "source": "/api/public/movement/capital",
+      "destination": "/api/research?_researchPath=public/movement/capital"
+    },
+    {
+      "source": "/api/public/movement/capital/",
+      "destination": "/api/research?_researchPath=public/movement/capital/"
+    },
+    {
+      "source": "/api/public/movement/external",
+      "destination": "/api/research?_researchPath=public/movement/external"
+    },
+    {
+      "source": "/api/public/movement/external/",
+      "destination": "/api/research?_researchPath=public/movement/external/"
+    },
+    {
+      "source": "/api/public/movement/fx",
+      "destination": "/api/research?_researchPath=public/movement/fx"
+    },
+    {
+      "source": "/api/public/movement/fx/",
+      "destination": "/api/research?_researchPath=public/movement/fx/"
+    },
+    {
+      "source": "/api/public/movement/population",
+      "destination": "/api/research?_researchPath=public/movement/population"
+    },
+    {
+      "source": "/api/public/movement/population/",
+      "destination": "/api/research?_researchPath=public/movement/population/"
+    },
+    {
+      "source": "/api/public/movement/prices",
+      "destination": "/api/research?_researchPath=public/movement/prices"
+    },
+    {
+      "source": "/api/public/movement/prices/",
+      "destination": "/api/research?_researchPath=public/movement/prices/"
+    },
+    {
+      "source": "/api/public/movement/trade",
+      "destination": "/api/research?_researchPath=public/movement/trade"
+    },
+    {
+      "source": "/api/public/movement/trade/",
+      "destination": "/api/research?_researchPath=public/movement/trade/"
+    },
+    {
+      "source": "/api/public/observations",
+      "destination": "/api/research?_researchPath=public/observations"
+    },
+    {
+      "source": "/api/public/observations/",
+      "destination": "/api/research?_researchPath=public/observations/"
+    },
+    {
+      "source": "/api/public/periods/summary",
+      "destination": "/api/research?_researchPath=public/periods/summary"
+    },
+    {
+      "source": "/api/public/periods/summary/",
+      "destination": "/api/research?_researchPath=public/periods/summary/"
+    },
+    {
+      "source": "/api/public/population/country-groups",
+      "destination": "/api/research?_researchPath=public/population/country-groups"
+    },
+    {
+      "source": "/api/public/population/country-groups/",
+      "destination": "/api/research?_researchPath=public/population/country-groups/"
+    },
+    {
+      "source": "/api/public/prices/country-groups",
+      "destination": "/api/research?_researchPath=public/prices/country-groups"
+    },
+    {
+      "source": "/api/public/prices/country-groups/",
+      "destination": "/api/research?_researchPath=public/prices/country-groups/"
+    },
+    {
+      "source": "/api/public/ranking",
+      "destination": "/api/research?_researchPath=public/ranking"
+    },
+    {
+      "source": "/api/public/ranking/",
+      "destination": "/api/research?_researchPath=public/ranking/"
+    },
+    {
+      "source": "/api/public/ranking/verify",
+      "destination": "/api/research?_researchPath=public/ranking/verify"
+    },
+    {
+      "source": "/api/public/ranking/verify/",
+      "destination": "/api/research?_researchPath=public/ranking/verify/"
+    },
+    {
+      "source": "/api/public/trade/country-groups",
+      "destination": "/api/research?_researchPath=public/trade/country-groups"
+    },
+    {
+      "source": "/api/public/trade/country-groups/",
+      "destination": "/api/research?_researchPath=public/trade/country-groups/"
+    },
+    {
+      "source": "/api/public/years",
+      "destination": "/api/research?_researchPath=public/years"
+    },
+    {
+      "source": "/api/public/years/",
+      "destination": "/api/research?_researchPath=public/years/"
+    },
+    {
+      "source": "/api/public/yoy-ranking",
+      "destination": "/api/research?_researchPath=public/yoy-ranking"
+    },
+    {
+      "source": "/api/public/yoy-ranking/",
+      "destination": "/api/research?_researchPath=public/yoy-ranking/"
+    },
+    {
+      "source": "/api/public/yoy-ranking/verify",
+      "destination": "/api/research?_researchPath=public/yoy-ranking/verify"
+    },
+    {
+      "source": "/api/public/yoy-ranking/verify/",
+      "destination": "/api/research?_researchPath=public/yoy-ranking/verify/"
+    },
+    {
+      "source": "/api/ranking",
+      "destination": "/api/research?_researchPath=ranking"
+    },
+    {
+      "source": "/api/ranking/",
+      "destination": "/api/research?_researchPath=ranking/"
+    },
+    {
+      "source": "/api/ranking/verify",
+      "destination": "/api/research?_researchPath=ranking/verify"
+    },
+    {
+      "source": "/api/ranking/verify/",
+      "destination": "/api/research?_researchPath=ranking/verify/"
+    },
+    {
+      "source": "/api/trade/country-groups",
+      "destination": "/api/research?_researchPath=trade/country-groups"
+    },
+    {
+      "source": "/api/trade/country-groups/",
+      "destination": "/api/research?_researchPath=trade/country-groups/"
+    },
+    {
+      "source": "/api/years",
+      "destination": "/api/research?_researchPath=years"
+    },
+    {
+      "source": "/api/years/",
+      "destination": "/api/research?_researchPath=years/"
+    },
+    {
+      "source": "/api/yoy-ranking",
+      "destination": "/api/research?_researchPath=yoy-ranking"
+    },
+    {
+      "source": "/api/yoy-ranking/",
+      "destination": "/api/research?_researchPath=yoy-ranking/"
+    },
+    {
+      "source": "/api/yoy-ranking/verify",
+      "destination": "/api/research?_researchPath=yoy-ranking/verify"
+    },
+    {
+      "source": "/api/yoy-ranking/verify/",
+      "destination": "/api/research?_researchPath=yoy-ranking/verify/"
+    }
   ]
 }

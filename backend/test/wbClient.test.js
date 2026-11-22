@@ -148,3 +148,7 @@ test('backoff grows exponentially within the 30s cap', async () => {
   for (const sample of samples) assert.equal(sample.withinCap, true);
   assert.ok(backoffDelay(0, base) < backoffDelay(10, base) || true, 'jitter may overlap; cap is what matters');
 });
+
+test('transient HTTP 408 is retried rather than permanently abandoning the indicator',async()=>{const{fetchPage}=await import('../src/wb/client.js');stub.reset();stub.failNext({status:408,times:1,body:'timeout'});const before=stub.requestCount();const{rows}=await fetchPage('/country',{per_page:5},{baseMs:1});assert.ok(rows.length>0);assert.equal(stub.requestCount()-before,2);stub.reset();});
+
+test('Retry-After interprets both HTTP dates and delay seconds without retrying before the requested time',async()=>{const{retryAfterDelayMs}=await import('../src/wb/client.js');const now=Date.UTC(2026,10,22);assert.equal(retryAfterDelayMs('2',now),2000);assert.equal(retryAfterDelayMs('Sun, 22 Nov 2026 00:00:05 GMT',now),5000);assert.equal(retryAfterDelayMs('Sat, 21 Nov 2026 00:00:00 GMT',now),0);assert.equal(retryAfterDelayMs('invalid',now),0);});

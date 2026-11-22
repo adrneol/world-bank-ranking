@@ -51,3 +51,8 @@ PROJECT_REQUIREMENTS.md
 /OPTIMIZATION.md
 /PHASE_5_ACCEPTANCE.md
 /PHASE_5_1_RELEASE_CLOSURE.md
+# Private deployment variants; public templates remain trackable.
+.env.*
+!**/.env.example
+!frontend/.env.development
+/FINAL_RELEASE_REPORT.md

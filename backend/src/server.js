@@ -1,3 +1,4 @@
+import { clientIdentity, verifiedProxyIdentity } from './services/proxyIdentity.js';
 /**
  * EXPRESS 5 HTTP SERVER (specification sections 15, 34).
  *
@@ -932,7 +933,7 @@ function refreshRateLimitCheck(req) {
   const windowMs = config.refreshRateLimitWindowMs;
   if (!(max > 0) || !(windowMs > 0)) return null;
   const now = Date.now();
-  const key = req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  const key = clientIdentity(req);
   const log = (refreshAttemptLog.get(key) ?? []).filter((t) => now - t < windowMs);
   if (log.length >= max) {
     return Math.max(1, Math.ceil((log[0] + windowMs - now) / 1000));
@@ -1013,8 +1014,9 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
   const publicBudgets = new Map();
   const limitPublicRead = (req, res, next) => {
     if (req.readBudgetCounted) return next();
+    if(routePath(req)!=='/api/capabilities' && process.env.API_PROXY_SECRET && !(routePath(req).startsWith('/api/public/') && !config.publicReadApiEnabled) && !verifiedProxyIdentity(req)) throw httpError(403,'Use the public website for research requests.','TRUSTED_INGRESS_REQUIRED');
     const minute = Math.floor(Date.now() / 60000);
-    const key = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    const key = clientIdentity(req);
     const previous = publicBudgets.get(key);
     const count = previous?.minute === minute ? previous.count : 0;
     if (count >= 60) {
@@ -1048,7 +1050,7 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     app.use((req, res, next) => {
       (async () => {
         try {
-          if (req.method === 'GET' && req.query.readOnly !== '1' && AUTO_REFRESH_PATHS.includes(req.path)) {
+          if (req.method === 'GET' && !verifiedProxyIdentity(req) && req.query.readOnly !== '1' && AUTO_REFRESH_PATHS.includes(req.path)) {
             const target = handle();
             if (lastTarget === target && Date.now() - lastCheck < 60000) return next();
             lastTarget = target;
@@ -1869,6 +1871,22 @@ export function createApp({ db = null, autoRefresh = null, shared = null } = {})
     const year = parseYear(req.query.year, 'year');
     if (year === undefined) {
       throw httpError(400, 'Missing year. Observations are addressed by indicator and year.', 'MISSING_YEAR');
+    }
+    if(req.query.audit!==undefined && req.query.audit!=='1')throw httpError(400,'audit must be 1 when supplied.','INVALID_QUERY');
+    if(req.query.audit==='1') {
+      if(typeof req.query.country!=='string'||!req.query.country)throw httpError(400,'Atomic audit requires a country.','MISSING_COUNTRY');
+      const auditTarget=activeTargetOf(shared);
+      const tx=await h.transaction('read');
+      try {
+        const iso3=await parseFocusCountry(tx,req.query.country),state=await getDatasetState(tx);
+        const indicator=await getIndicatorByMetricKey(tx,metricKey),meta=await getCountry(tx,iso3);
+        const row=indicator?await getObservation(tx,iso3,indicator.id,year):null;
+        const yearly=await buildIndiaYearlyRows(tx,{startYear:year,endYear:year,subject:getMetric(metricKey).subject,focusIso3:iso3});
+        return res.json({auditSnapshot:true,source:"World Bank WDI",methodology:methodologyBlock(),database:publicDatabaseTarget(auditTarget),generation:{contentVersion:state?.contentVersion??null,runId:state?.updatedRunId??null},
+          metadata:{source:SOURCE_INFO,apiBaseUrl:config.worldBank.baseUrl,indicators:await listIndicators(tx),universe:{total:await countAllCountries(tx),eligible:await countEligibleCountries(tx)},methodology:methodologyBlock()},
+          observation:{available:Boolean(row),metric:getMetric(metricKey),year,country:{iso3,name:meta?.name??null},observation:row?{value:row.value,valueRaw:row.value_raw,wbLastUpdated:row.wb_last_updated,fetchedAt:row.fetched_at}:null,methodology:methodologyBlock()},
+          yearly});
+      }finally{tx.close();}
     }
     const indicator = await getIndicatorByMetricKey(h, metricKey);
     if (!indicator) {

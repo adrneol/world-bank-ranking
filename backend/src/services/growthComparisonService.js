@@ -134,11 +134,11 @@ function growthMethodology(hasMid, metric = null) {
       ? 'Common = economies with calculable growth in ALL THREE intervals (AM, MB, AB); Outside per interval = growth-valid for that interval but missing calculable growth in at least one other interval.'
       : 'Common = economies with calculable growth for the single interval; observed and like-for-like populations coincide.',
     aboveBelow:
-      'Above/below the focus economy is determined by growth-ranking position within the relevant ranking (observed or like-for-like), never by level values or by raw growth comparison. Country growth % > India growth % means above India only insofar as ranking position decides it under the ISO3 tie-break.',
+      'Above/below the focus economy is determined by growth-ranking position within the relevant ranking (observed or like-for-like), never by level values or by raw growth comparison. Country growth % > focus growth % means above the focus only insofar as ranking position decides it under the ISO3 tie-break.',
     identity:
       'Per interval: fullGrowthRank − outsideAbove = commonGrowthRank. Inter-interval rank subtraction is not performed.',
     peerAverage:
-      'Unweighted arithmetic mean of full-precision growthPercent over the interval population excluding the focus economy. Peer average (excluding India) over N peers; India-minus-average is plain subtraction displayed as percentage points (pp). Averages never affect ranking.',
+      'Unweighted arithmetic mean of full-precision growthPercent over the interval population excluding the focus economy. Peer average (excluding the focus economy) over N peers; Focus-minus-average is plain subtraction displayed as percentage points (pp). Averages never affect ranking.',
     validity:
       'Growth is calculable only when both endpoint levels are present and finite and the start value is strictly positive; otherwise growthPercent is null with a reason and the economy is not ranked for that interval.',
     membership: 'Growth-universe membership describes calculability only.',

@@ -79,7 +79,17 @@ export function formatPartialDate({ year, month = null, day = null }) {
  * defaults to the Vite environment.
  */
 export function siteMetadata(env = null) {
-  const source = env ?? import.meta.env ?? {};
+  const source = env ?? {
+    VITE_SITE_AUTHOR_NAME: import.meta.env?.VITE_SITE_AUTHOR_NAME,
+    VITE_SITE_AUTHOR_ROLE: import.meta.env?.VITE_SITE_AUTHOR_ROLE,
+    VITE_SITE_LAST_UPDATED_YEAR: import.meta.env?.VITE_SITE_LAST_UPDATED_YEAR,
+    VITE_SITE_LAST_UPDATED_MONTH: import.meta.env?.VITE_SITE_LAST_UPDATED_MONTH,
+    VITE_SITE_LAST_UPDATED_DAY: import.meta.env?.VITE_SITE_LAST_UPDATED_DAY,
+    VITE_SITE_DATA_YEAR: import.meta.env?.VITE_SITE_DATA_YEAR,
+    VITE_SITE_DATA_MONTH: import.meta.env?.VITE_SITE_DATA_MONTH,
+    VITE_SITE_CONTACT_EMAIL: import.meta.env?.VITE_SITE_CONTACT_EMAIL,
+    VITE_SITE_SOURCE_NAME: import.meta.env?.VITE_SITE_SOURCE_NAME,
+  };
   const authorName = rawText(source, 'VITE_SITE_AUTHOR_NAME');
   const authorRole = rawText(source, 'VITE_SITE_AUTHOR_ROLE');
   const updatedYear = rawInt(source, 'VITE_SITE_LAST_UPDATED_YEAR');

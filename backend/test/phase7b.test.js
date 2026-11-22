@@ -267,7 +267,7 @@ test('Phase 7B.6: GDP rankings stay value-DESC with integer per-capita display',
       await fetch(`${base}/api/comparison/level?indicator=nominal_current&yearA=2024&yearB=2025&country=IND`)
     ).json();
     assert.match(level.comparisonMethodology.ranking, /value DESC/);
-    assert.match(level.comparisonMethodology.ranking, /rank\(India,A\) = 1 \+/);
+    assert.match(level.comparisonMethodology.ranking, /rank\(focus,A\) = 1 \+/);
   } finally {
     await close();
   }

@@ -55,3 +55,5 @@ test('degraded payloads never trigger revalidation (no loops)', () => {
   assert.equal(isNewerGeneration(prev, { runId: null, lastSuccessAt: null }), false);
   assert.equal(isNewerGeneration({ runId: null, lastSuccessAt: null }, prev), false);
 });
+
+test('committed generation takes precedence over newer operational checks without a content change',()=>{const previous={contentVersion:4,runId:52,provider:'turso'};assert.equal(isNewerGeneration(previous,{...previous,runId:58}),false);assert.equal(isNewerGeneration(previous,{...previous,contentVersion:5}),true);assert.equal(isNewerGeneration(previous,{...previous,provider:'sqlite'}),true);assert.equal(isNewerGeneration({contentVersion:null,runId:null},{contentVersion:1,runId:1}),true);});

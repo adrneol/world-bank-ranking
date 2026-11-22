@@ -1,344 +1,249 @@
-# World Bank WDI Economic Research Platform
+# World Bank Economic Research Platform
 
-An independent research application for exploring World Bank World Development
-Indicators across economies and years. World Bank WDI **source 2** supplies the
-observations; this application calculates ranks, denominators, YoY changes,
-comparisons and Movement results. It is not an official World Bank product.
+An independent economic research application built on World Bank World Development
+Indicators (WDI), source 2. Explore eligible economies, official aggregates and
+custom groups with inspectable observations, calculations, coverage and provenance.
 
-The backend registers 20 indicators in eight subjects: GDP per capita, Total GDP,
-Prices, Trade, Capital flows, Exchange rates, External sector and Population.
-Each indicator keeps its own units, coverage, change rules and source vintage.
+## Live website
 
-## Research workspaces
+[Open the research platform](https://world-bank-ranking.vercel.app/).
+Public analytical requests use this same website origin. Publication is an optional
+backend-authorized feature; a deployment may serve the human application without it.
 
-- **Overview and Data:** selected-economy evidence and historical annual values.
-- **Rank and YoY:** complete rankings, search, pagination and country verification.
-- **Movement:** period analysis, peer universes, decomposition and evidence.
-- **Compare:** countries, custom groups and official aggregates; observed and
-  like-for-like analysis where the measurement contract supports them.
-- **Coverage and Audit:** valid populations, missingness, source identity,
-  ingestion evidence and calculation methodology.
-- **Data Status:** dataset freshness, refresh outcomes, bounded diagnostics and
-  protected operator refresh.
+## Economic research capabilities
 
-The interface includes persistent light/dark themes, responsive charts and tables,
-fixed chart axes, annual line/bar modes, touch tooltips and exact-value disclosure.
-Shared geographic initialization chooses an eligible economy when trusted location
-information is available. Manual and valid URL choices take precedence. Fresh
-Compare A uses the initial focus; B remains empty until chosen.
+Overview and historical charts, annual evidence, level and YoY rankings, two-entity
+comparison, observed and like-for-like Movement, coverage, Audit, and Data Status.
+The selected economy follows explicit URL/user choices before geolocation defaults.
+Compare initializes its first entity from shared context and leaves its second empty.
 
-Optional public API documentation, a machine-readable catalog and human research
-pages support AI retrieval and search discovery. Publication is controlled by the
-backend; it does not confer permission to refresh or mutate data.
+## Supported indicator families
+
+Twenty raw WDI indicators cover GDP per capita and total GDP (current US$, constant
+2015 US$, current PPP international $, constant 2021 PPP international $), CPI
+inflation, CPI index, GDP-deflator inflation, exports, imports, FDI inflows and
+FDI/GDP, official exchange rate, current account, reserves excluding gold,
+remittances, and population. The backend registry declares units, valid operations,
+ranking direction and group aggregation. Unsupported calculations remain unavailable.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  UI[React / Vite on Vercel] -->|bounded passive reads| API[Express on Render]
-  Edge[Vercel country function] -->|country hint| UI
-  API --> Primary[Turso libSQL primary]
-  API -->|validated outage failover| Fallback[local SQLite fallback]
-  WDI[World Bank WDI source 2] -->|validate / stage / atomic publish| API
-```
+React renders backend-calculated results. Express validates bounded requests and
+provides the same analytical handlers to human and optional public routes. WDI
+retrieval validates source identity, complete pagination and vintage before an
+atomic publication. libSQL supports a Turso primary and a local SQLite fallback.
+Vercel functions forward explicitly allowed requests and render public documents.
 
-Both serving paths use `@libsql/client` and the same repository SQL. Recovery
-requires observation coverage and provenance proof; a successful ping or newer
-clock is insufficient. An ephemeral Render filesystem is not a durable backup.
+## Technology stack
 
-## Stack and prerequisites
+Node.js, Express, libSQL, SQLite/Turso, React, Vite, Recharts, Vitest and Node's test
+runner. Use the committed lockfiles; no additional API gateway is required.
 
-Use Node.js **24 or newer** and npm with lockfile support. Development verification
-uses Node 24.22.2, React 19.3.0, Recharts 3.10.1, Express 5.2.1 and libSQL client
-0.18.0. Frontend Vite is pinned to the approved 8.3.8 security patch; inspect the
-lockfile for its compatible Rolldown resolution. No ORM, Redis or additional
-infrastructure is required. The local SQLite client includes native bindings;
-use a supported Node/platform combination.
+## Prerequisites
 
-## Installation and local development
+Node.js 22.12 or newer and npm. Use a supported Node release compatible with the
+locked Vite version (Node 24 is used for verification). Network access to the
+public World Bank API is needed for ingestion, not for isolated fixture tests.
 
-```sh
-git clone <repository-url>
-cd <repository-directory>
-cd backend
-npm ci
-cd ../frontend
-npm ci
-```
-
-Prepare configuration only if the corresponding file does not already exist.
-Never overwrite a working `.env` or copy production credentials into fixtures.
-
-PowerShell, from the repository root:
+## Installation
 
 ```powershell
-if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
-if (!(Test-Path frontend/.env)) { Copy-Item frontend/.env.example frontend/.env }
-```
-
-Linux/macOS:
-
-```sh
-test -e backend/.env || cp backend/.env.example backend/.env
-test -e frontend/.env || cp frontend/.env.example frontend/.env
-```
-
-Review the examples before starting. For a fresh local workspace, choose a local
-`DB_MODE` and a local `DATABASE_FILE`; clear any inherited remote database target
-in your development process. Merely changing a filename does not override an
-explicit Turso mode or URL.
-
-In separate terminals:
-
-```sh
 cd backend
-npm run dev
+npm ci
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+cd ../frontend
+npm ci
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-```sh
-cd frontend
-npm run dev
-```
+Configure private values locally; never commit active ENV files or databases.
+A public checkout needs no internal engineering notes, benchmark data or agent files.
 
-Open `http://localhost:5173`. The backend defaults to port 3001. Vite proxies data
-requests to that backend; its own `/api/location` handler ignores supplied
-geographic headers and reports location unavailable. Private/loopback addresses
-cannot identify a visitor's public country. Local development offers manual
-selection unless the existing resolver receives a verified public client address.
+## Local development
 
-## Configuration
+In separate terminals run `npm run dev` in backend and frontend. The frontend
+uses Vite's local `/api` proxy to port 3001. Its location endpoint retains the
+existing local/production trust boundary. `VITE_API_BASE_URL` is an optional
+**development-only** override; production browser requests always use `/api`.
 
-The backend reads `backend/.env` outside tests; process configuration is validated
-in [config.js](backend/src/config.js). Vite reads frontend build configuration.
-Do not put secrets in any `VITE_*` variable, which is exposed to the browser.
+## Environment configuration
 
-| Variable | Default / purpose | Production requirement |
-| --- | --- | --- |
-| `PORT` | `3001` | Hosting-assigned port is supported |
-| `DB_MODE` | Automatic target selection; `local` or `turso` overrides | Verify the actual serving target |
-| `DATABASE_FILE` | `backend/data/worldbank.db` | Durable local storage if fallback is required |
-| `TURSO_DATABASE_URL` | Unset; selects remote primary when configured | Owner-provided target, never a fixture credential |
-| `TURSO_AUTH_TOKEN` | Unset | Owner-provided secret for authenticated Turso |
-| `ALLOW_LOCAL_DB_FALLBACK` | `true` | Existing local file must pass eligibility checks |
-| `PUBLIC_READ_API_ENABLED` | Disabled unless exactly `1` | Sole publication authority |
-| `REFRESH_ADMIN_TOKEN` | Unset | Required secret for production boot/refresh |
-| `CORS_ORIGINS` | Development default when unset | Required exact allowed frontend origins in production |
-| `CACHE_TTL_HOURS` | `24` | Freshness policy, distinct from content generation |
-| `WB_AUTO_INGEST_ON_EMPTY` | `true` | Starting an empty configured target can WRITE data |
-| `WB_AUTO_REFRESH_ON_STALE` | `true` | Enables controlled background freshness checks |
-| `WORLD_BANK_API_BASE_URL` | Official World Bank v2 API | Keep the authoritative source; tests use a loopback stub |
-| `GEO_PROVIDER_URL` / `GEO_TIMEOUT_MS` | Existing keyless fallback / 3000 ms | Requires trustworthy public client addressing |
-| `VITE_API_BASE_URL` | Relative API locally | Existing Render API base at build and documentation-function runtime |
-| `VERCEL_PROJECT_PRODUCTION_URL` | Platform-provided | Used for verified absolute canonical/social origins |
+Both application `.env.example` files document actual supported settings. Existing
+credentials and database targets must be supplied by the operator. All `VITE_`
+values are public; never place a credential or private service address there.
 
-`VITE_PUBLIC_READ_API_ENABLED` is deprecated and ignored. Neither value controls
-publication. Do not fabricate Vercel runtime variables or weaken Express proxy
-trust to make geolocation succeed. No ENV changes are required by Phase 5.
+For production, configure server-only `BACKEND_API_ORIGIN` on the frontend function
+runtime to the existing private upstream service origin, without `/api`. Configure
+an owner-provisioned `API_PROXY_SECRET` identically on frontend functions and backend.
+These settings authenticate forwarded client identity; they do not authorize public
+publication or replace the refresh bearer token. Missing forwarding settings fail
+closed with 503. They are unnecessary for Vite's ordinary local proxy.
 
-## Data setup and write-capable commands
+Public display metadata is optional. Site update date, source vintage and economic
+observation years have separate meanings. Do not edit display metadata to imply
+that a dataset is freshly verified.
 
-An empty configured database can ingest at startup when enabled. A nonempty valid
-dataset remains served during background refresh; partial input publishes nothing.
-The default acquisition range includes historical years, because WDI can revise
-older observations. Source 2, indicator identity, pagination, vintage and numeric
-validation precede publication.
+## Database setup
 
-**The following backend commands can write to the configured database or contact
-live WDI. Inspect the target first; do not run them against production casually:**
+`DB_MODE=local` uses a generic repository-relative SQLite file by default. Configure
+Turso with server-only `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` if required.
+Backend startup initializes its supported schema. Do not point tests at live data.
+Never copy a fallback into primary merely because it has a larger generation number.
 
-```sh
-npm run ingest
-npm run refresh:http
-npm run snapshot:create
-npm run audit:live
-```
+## World Bank ingestion and automatic years
 
-Fixtures are explicitly synthetic or captured test inputs, not a replacement for
-production WDI data. Safe tests and benchmarks override database/network settings
-before importing configuration and never load private ENV files.
+`npm run ingest` in backend performs explicit ingestion; consult the script's
+supported arguments before use. `WB_AUTO_INGEST_ON_EMPTY` and
+`WB_AUTO_REFRESH_ON_STALE` control the existing startup/freshness mechanism.
+`CACHE_TTL_HOURS` defaults to 24. One controlled maintenance scheduler shares the
+same refresh locks and cooldowns; no ordinary public GET authorizes ingestion.
 
-## Commands and verification
+`INGEST_START_YEAR` defaults to 1960. Unset, blank or `auto` `INGEST_END_YEAR`
+resolves the UTC year when each refresh begins, including across New Year without
+restart. A numeric year remains an intentional acquisition cap. The legacy
+`DEFAULT_END_YEAR` is an analysis preset, not an acquisition cap. Historical ranges
+remain necessary because WDI revises and removes older observations.
 
-| Directory | Command | Purpose |
-| --- | --- | --- |
-| `backend` | `npm start` | Production backend process |
-| `backend` | `npm run dev` | Backend with Node watch |
-| `backend` | `npm test` | Complete isolated Node test suite |
-| `backend` | `node bench/run.js --years 66 --output <temporary-result.json>` | Deterministic analytical/HTTP resource benchmark |
-| `backend` | `node bench/refresh.js --output <temporary-result.json>` | Synthetic WDI refresh amplification benchmark |
-| `backend` | `node bench/storage.js --output <temporary-result.json>` | Disposable startup/index/WAL/recovery benchmark |
-| `frontend` | `npm test -- --maxWorkers=2` | Full Vitest/jsdom suite |
-| `frontend` | `npm run lint` | Static checks |
-| `frontend` | `npm run build` | Production chunks and human research documents |
-| `frontend` | `npm run preview` | Inspect the built frontend locally |
+Only validated published observations appear in availability. Indicators and
+economies can publish at different times. Automatic selections follow the actual
+metric/country/YoY/common-entity inputs; explicit historical URLs remain pinned.
+History requests are bounded to 100 years and eight series.
 
-Prefer a disposable checkout for the full integration suite. Include tracked
-`.env.example` templates needed by contract tests, but never private `.env` files
-or the developer's `backend/data` directory. Tests need loopback HTTP access;
-a sandbox permission error is not evidence of a product regression.
+## Analytical methodology and provenance
 
-## Public API and AI retrieval
+The application calculates ranks and derived results; the World Bank supplies the
+underlying observations. Ranks exclude official aggregates. Missing data remains
+missing; genuine zeros and negative values retain indicator-specific semantics.
+Stored unrounded values drive arithmetic; raw decimal strings provide audit evidence.
 
-The backend enables `/api/public/*` only when `PUBLIC_READ_API_ENABLED=1`.
-`GET /api/capabilities` returns its current non-secret decision with no-store
-caching. When enabled, the frontend serves `/public-data/`, `/data-catalog.json`
-and `/sitemap.xml` through a runtime function that confirms backend authority.
-Unavailable authority fails closed for optional publication; human pages remain.
+GDP growth peers use the arithmetic mean of valid non-focus economy growth,
+excluding the selected focus only when it belongs to the relevant population.
+Observed intervals use their own eligible coverage; like-for-like uses the declared
+shared universe. Neither is an official World aggregate or a weighted growth series.
+Group aggregation and official aggregate observations remain distinct.
 
-Example bounded reads, relative to the intended backend:
+## Public read-only API
+
+Only exact backend `PUBLIC_READ_API_ENABLED=1` enables optional public aliases.
+New-installation templates default to disabled. The deprecated frontend publication
+flag has no authority. Enabled discovery is available at `/public-data/` and
+`/data-catalog.json`, with 31 typed operations and complete GET examples.
+
+Discover years before constructing explicit numerical requests:
 
 ```text
-GET /api/public/countries?includeAggregates=false
-GET /api/public/indicators
-GET /api/public/focus/history?country=IND&series=total_current&startYear=2004&endYear=2025
-GET /api/public/ranking?indicator=total_current&year=2024&page=1&pageSize=50
+https://world-bank-ranking.vercel.app/api/public/years
+https://world-bank-ranking.vercel.app/api/public/availability?indicator=total_current&country=JPN
+https://world-bank-ranking.vercel.app/api/public/focus/history?country=JPN&series=total_constant&startYear=2023&endYear=2025
+https://world-bank-ranking.vercel.app/api/public/compare?entityA=country%3AUSA&entityB=country%3AJPN&indicator=total_current&yearA=2024&yearC=2025&operation=level
 ```
 
-Source attribution and exact evidence remain in responses. The shared public and
-legacy analytical read budget is 60 requests/minute per server-resolved address,
-including HEAD and case/trailing-slash variants. No bot User-Agent bypass exists.
-HTTP 429 includes `Retry-After`. Human-facing legacy APIs remain available when
-optional publication is disabled; hiding documentation is not API authorization.
+Examples are historical, not claims of current coverage. The API accepts explicit
+numeric years, not the frontend `latest` sentinel. Documentation is server-readable
+without JavaScript. Disabled publication returns 404; uncertain authority returns
+retryable 503. Human pages and sitemap remain usable. Successful HTTP retrieval
+cannot guarantee access through every AI vendor's URL-fetch client or search index.
 
-UI reads use `readOnly=1`; public aliases are intrinsically passive. Legacy TTL
-checks retain compatibility but run at most once/minute per serving target.
-A server-owned minute cadence also checks freshness independently of traffic.
-GET Status never persists verification, regardless of `readOnly` spelling;
-controlled maintenance owns that generation-conditional write.
+## Performance architecture
 
-## Performance and database operations
+Overview reads are batched; identical work shares active flights. Generation-aware
+bounded caches retain analytical identity. Exact delta persistence avoids rewriting
+unchanged observations. Provenance-only changes still perform required writes.
+Analytical workspaces and chart code are lazy-loaded. Local resource measurements
+are not provider billing estimates.
 
-Measured Phase 5 fixture improvements include 18 to 1 client calls for bounded
-Overview, 144 to 1 for eight identical concurrent Overviews, and 1,320 to 1
-affected observation rows for a single historical correction. These are local
-client/write proxies, **not measured Turso-billed usage or monetary savings**.
-Unchanged refresh already wrote zero observation rows and still does.
+## Fault tolerance and recovery
 
-Read [OPTIMIZATION.md](OPTIMIZATION.md) for SQL plans, existing and new caches,
-delta publication, recovery proofs, telemetry limitations, benchmarks, rollout,
-backup/rollback considerations and troubleshooting.
+A failed or incomplete refresh preserves the last validated published dataset.
+Transient source failures receive bounded immediate retries and later guarded
+automatic recovery; permanent upstream outages cannot be made successful locally.
+Candidate publications and dataset generation advance atomically. Unchanged complete
+checks advance freshness without changing content generation. Source-vintage and
+metadata changes advance generation according to the publication contract.
 
-## Deployment and production checks
+Generation is persisted in `dataset_state.content_version`, starts at 1 on first
+publication and is formatted as `vN`. It is not an ENV value, application version
+or count of successful checks. Recovery requires content/coverage/provenance proof;
+a higher or equal counter alone is insufficient. Fallback durability depends on
+actual hosting storage, not on the existence of a local file in development.
 
-- **Render:** backend root `backend`, dependency installation from lockfile,
-  start command `npm start`, configured production token/CORS/Turso settings.
-  Preserve targets and credentials. The service listens before data readiness;
-  distinguish liveness `/api/health` from readiness and serving-provider state.
-- **Vercel:** frontend root `frontend`, `npm run build`, output `dist`. Include
-  both `api/location.js` and `api/public-documents.js`; package the latter's HTML
-  shell using `vercel.json`. Specific publication rewrites must reach that
-  function. A catch-all API proxy must not intercept `/api/location`.
-- Keep the existing API base available to the browser build and documentation
-  function runtime. Vercel supplies the trusted country hint; the backend registry
-  must expose usable ISO2 fields. Plain static hosting cannot enforce a remote
-  backend's runtime documentation-publication decision.
-- Deploy backend and frontend as a coordinated owner-controlled release. Verify
-  API off/on, passive reads, no-store policies, real geographic initialization,
-  Compare A/B, canonical documents, charts and fallback/recovery afterward.
+## Security and access controls
 
-No schema/index migration or ENV change is introduced by Phase 5. No deployment,
-production database operation or remote setting change was performed. Previous
-live checks found an older bundle, unavailable location route and null backend
-geo result; local fixtures do not prove that the hosted ingress is now fixed.
+The forwarding layer has a fixed route allowlist, fixed server-configured origin,
+restricted methods, no redirect following and no cookie forwarding. Signed,
+short-lived method/path-bound client identity uses Vercel's platform-overwritten
+client IP header. Backend limits remain authoritative. When the shared key is configured, unsigned
+analytical ingress is denied, preventing a separate direct-service read budget.
+Health and capability checks remain available. Invalid forwarding claims never
+become client identity.
+Publication and human aliases share the same backend read budget for that identity.
+Forwarded GET/HEAD requests remain passive even through human aliases; source
+synchronization belongs to startup and maintenance. The only forwarded POST is the existing explicit refresh action, which retains its
+backend bearer authorization and abuse limit. No development/admin route is exposed.
 
-## Security and limitations
+Production backend boot requires its existing `REFRESH_ADMIN_TOKEN` and explicit
+`CORS_ORIGINS`. Public aliases are bounded, parameterized and rate-limited. Robots
+policies guide discovery and never grant authorization. Moving URLs does not make
+a previously public upstream address secret or revoke historical cached copies.
 
-Refresh requires the configured bearer token, timing-safe comparison and its
-separate limiter; JSON bodies are bounded at 64 kB. SQL values are bound and
-identifiers allowlisted. Proxy trust remains conservative. CORS is a browser
-policy, not authentication. Do not expose development servers to untrusted
-networks or publish database clients, SQL diagnostics or private ENV files.
+## Testing, lint and build
 
-Report security concerns privately to the repository owner using the hosting
-provider's private reporting channel, if available. Include affected revisions
-and a minimal reproduction without credentials, raw visitor IPs or private data.
-There is no claim of perfect security or an invented reporting address.
+```powershell
+cd backend
+npm test
+npm audit
+cd ../frontend
+npm test -- --pool=threads --maxWorkers=2
+npm run lint
+npm run build
+npm audit
+```
 
-Operational limits include one process-local cache per backend instance, genuine
-full-population ranking costs, expensive first-generation integrity verification,
-provider/network outages and production-only billing/ingress verification. VPN
-exit country may differ from residence. Exact raw text is canonical post-JSON
-precision, not recoverable lexical digits lost by the upstream JSON parser.
+Backend isolation uses disposable databases and controlled WDI HTTP fixtures;
+it clears remote credentials. Do not run tests against production credentials.
+No internal ignored documentation or benchmark fixture is needed for normal tests.
+
+## Deployment guidance
+
+Release matched backend/frontend source through the owner's deployment workflow.
+Set Vercel's project root to `frontend`, output to `dist`, and retain the explicit
+function asset include and rewrites. Supply server-only origin and shared identity
+key at function runtime; remove private origins from production `VITE_` settings.
+Rebuild and redeploy after changing build configuration; restart services after
+changing runtime configuration. Never publish secrets in dashboard screenshots.
+
+Verify same-origin capability, documentation, catalog, an actual Overview and
+Compare request, disabled/unavailable behavior in an isolated deployment, metadata,
+location initialization and application navigation. Do not use a live refresh as a
+smoke test. Deployment and remote settings are owner-controlled actions.
 
 ## Project structure
 
 ```text
-backend/
-  src/db/          SQL repository, schema, client, opt-in metrics
-  src/domain/      economic calculations and measurement contracts
-  src/services/    analytical builders, bounded caches, maintenance
-  src/wb/          WDI validation, staging and atomic publication
-  src/scripts/     explicitly invoked operational commands
-  test/            isolated regression fixtures and tests
-  bench/           safe reproducible performance workloads
-frontend/
-  api/             Vercel location and publication functions
-  server/          local development/preview endpoint handlers
-  src/components/  reusable controls, charts and evidence tables
-  src/hooks/       requests, publication and shared economy lifecycle
-  src/sections/    lazily loaded analytical workspaces
-OPTIMIZATION.md    central engineering and cost reference
-PHASE_5_ACCEPTANCE.md  final verification record
+backend/src/config.js      Registry and configuration
+backend/src/wb/            Retrieval, validation and atomic ingestion
+backend/src/db/            Schema, repository and libSQL access
+backend/src/domain/        Economic calculation contracts
+backend/src/services/      Analytical caches, availability and recovery
+backend/test/              Disposable fixture regressions
+frontend/api/              Hosting functions and same-origin forwarding
+frontend/server/           Publication rendering and transport policy
+frontend/src/              React workspaces, controls, charts and evidence
 ```
 
-## Methodology and attribution
+## Known limitations
 
-A missing observation is absent, never invented as zero. Genuine zeros and signed
-values keep their indicator-specific transformation rules. Ranking populations
-exclude official aggregates; group sums do not impersonate official published
-aggregate observations. Like-for-like analysis explicitly uses its common
-universe. Ranks and YoY are calculated by this application, not published WDI ranks.
+Maintenance runs only while the hosting process executes. Suspension prevents
+scheduled checks; startup restores stale-data eligibility. Continuously scheduled
+execution requires owner-selected hosting capabilities. No keep-alive traffic or
+paid external scheduler is assumed. Long upstream outages can leave valid but stale
+data; Status distinguishes failed attempts from successful verification. Audit
+retains deliberate historical selections and inspects the actual serving evidence.
 
-Consult the [World Bank Indicators API documentation](https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation),
-[World Bank data terms](https://www.worldbank.org/en/about/legal/terms-of-use-for-datasets),
-and each indicator's source notes and licensing/attribution requirements.
+## Data attribution and terms
 
-## Phase 5.1 release correction and automatic years
-
-See [PHASE_5_1_RELEASE_CLOSURE.md](PHASE_5_1_RELEASE_CLOSURE.md) for the live HTTP
-evidence, actual Overview/Compare figures, full acceptance results, environment
-consumer references and owner-controlled release checklist. Production acceptance
-remains conditional: the sampled deployed document page returned 503 even though
-the deployed catalog, capability endpoint and economic API returned valid data.
-Local changes do not repair an older deployment until the owner releases them.
-
-The public-document function loads its packaged HTML relative to its module,
-using the existing `frontend/vercel.json` include-files and rewrite rules. The
-existing `VITE_API_BASE_URL` is used both by the SPA build and function runtime;
-production expects the Render **origin**, without an appended `/api`. The backend
-alone authorizes optional publication with exact `PUBLIC_READ_API_ENABLED=1`.
-Disabled is 404; unknown/temporary failure is retryable 503, with a human error
-document or JSON error as appropriate. Checks share active requests, never cache
-an enabled permission. Human routes and sitemap remain independently available.
-
-The catalog retains the original 30 resources, adds typed arguments and complete
-historical GET examples, and adds `/api/public/availability` as resource 31.
-Discover current years before selecting numeric query values:
-
-```text
-https://world-bank-ranking.onrender.com/api/public/years
-https://world-bank-ranking.onrender.com/api/public/availability?indicator=total_current&country=JPN
-https://world-bank-ranking.onrender.com/api/public/focus/history?country=JPN&series=total_constant&startYear=2023&endYear=2025
-https://world-bank-ranking.onrender.com/api/public/compare?entityA=country%3AUSA&entityB=country%3AJPN&indicator=total_current&yearA=2024&yearC=2025&operation=level
-```
-
-The availability route requires this backend revision. API numeric years are
-explicit; `latest` is a frontend selection convention, not an API argument.
-Historical examples do not claim to be the newest release. Source vintage,
-observation year, coverage, valid YoY pairs and common entity inputs are separate.
-Successful HTTP retrieval is not a guarantee of indexing or access through every
-external AI vendor's URL-fetch client.
-
-Automatic ingestion now resolves the current **UTC** year when refresh begins,
-including a long-running process crossing New Year. The existing `INGEST_END_YEAR`
-supports unset/blank/`auto` for automatic acquisition and a numeric four-digit
-intentional cap. `DEFAULT_END_YEAR=2025` remains a legacy analysis preset, not an
-ingestion limit or latest-year UI bound. Historical acquisition remains intact
-because WDI revises old observations. No ENV files or variables changed here.
-
-Latest selections follow committed country/indicator/YoY/common-entity availability
-through the existing publication watcher; explicit numeric years remain pinned.
-Lagging indicators stay on their actual latest year. Valid UI preferences survive
-generation changes. Existing maintenance/TTL/locks remain the only refresh
-mechanism; maintenance cannot execute while a hosting process is suspended.
-No extra scheduler, visitor-privileged refresh or keep-alive service was added.
+Source: [World Bank WDI](https://databank.worldbank.org/source/world-development-indicators),
+[Indicators API](https://datahelpdesk.worldbank.org/knowledgebase/articles/898581)
+and [World Bank dataset terms](https://www.worldbank.org/en/about/legal/terms-of-use-for-datasets).
+Review indicator-specific provenance and licensing before reuse. This independent
+application does not represent the World Bank.

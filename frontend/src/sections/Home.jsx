@@ -52,7 +52,7 @@ export default function Home({ sourceName, onOpenView, onOpenSubject }) {
           until display.
         </p>
         <div className="analysis-header-side">
-          <button type="button" className="btn btn-primary" onClick={() => onOpenView?.('overview')}>
+          <button type="button" className="research-entry" onClick={() => onOpenView?.('overview')}>
             Explore analysis
           </button>
           <EditorialLink href="/methodology/" onNavigate={onOpenView?()=>onOpenView('methodology'):undefined}>

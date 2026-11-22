@@ -56,3 +56,6 @@ describe('isNewerGeneration', () => {
     expect(isNewerGeneration(prev, { ...prev })).toBe(false);
   });
 });
+
+it('uses committed content identity rather than unchanged-check run ids',()=>{const prev={provider:'turso',contentVersion:4,runId:52,lastSuccessAt:'2026-11-20'};expect(isNewerGeneration(prev,{...prev,runId:58,lastSuccessAt:'2026-11-21'})).toBe(false);expect(isNewerGeneration(prev,{...prev,contentVersion:5,runId:59})).toBe(true);expect(isNewerGeneration(prev,{...prev,provider:'sqlite'})).toBe(true);});
+it('retains committed identity when the legacy fingerprint is absent',()=>{const value=fingerprintOf({generation:{contentVersion:4},database:{provider:'sqlite'}});expect(value.contentVersion).toBe(4);expect(value.provider).toBe('sqlite');expect(isNewerGeneration(value,fingerprintOf({generation:{contentVersion:5},database:{provider:'sqlite'}}))).toBe(true);});

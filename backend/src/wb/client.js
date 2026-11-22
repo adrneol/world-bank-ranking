@@ -50,6 +50,13 @@ export function backoffDelay(attempt, baseMs) {
   return Math.min(exponential + jitter, 30_000);
 }
 
+/** Retry-After supports both delay seconds and an HTTP date. */
+export function retryAfterDelayMs(value, now = Date.now()) {
+ const text=String(value??'').trim();if(!text)return 0;
+ if(/^\d+(?:\.\d+)?$/.test(text))return Number(text)*1000;
+ const time=Date.parse(text);return Number.isFinite(time)?Math.max(0,time-now):0;
+}
+
 /** Build a fully-qualified URL, preserving the base path. */
 export function buildUrl(pathname, params = {}) {
   const base = config.worldBank.baseUrl;
@@ -181,6 +188,7 @@ export async function getWithRetry(url, options = {}) {
 
       const retryable =
         error.timeout === true ||
+        error.status === 408 ||
         error.status === 429 ||
         (typeof error.status === 'number' && error.status >= 500) ||
         error.status === undefined; // network-level failure
@@ -191,10 +199,7 @@ export async function getWithRetry(url, options = {}) {
       const retryAfterHeader = error.retryAfter;
       let waitMs = backoffDelay(attempt, baseMs);
       if (retryAfterHeader) {
-        const seconds = Number(retryAfterHeader);
-        if (Number.isFinite(seconds) && seconds >= 0) {
-          waitMs = Math.max(waitMs, seconds * 1000);
-        }
+        waitMs = Math.max(waitMs, retryAfterDelayMs(retryAfterHeader));
       }
 
       if (typeof options.onRetry === 'function') {

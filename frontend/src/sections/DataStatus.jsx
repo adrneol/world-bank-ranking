@@ -67,7 +67,7 @@ function databaseLabel(database) {
   return '—';
 }
 
-export default function DataStatus({ onRefreshed }) {
+export default function DataStatus({ onRefreshed, observedStatus }) {
   const [refreshState, setRefreshState] = useState({ running: false, error: null });
   const [pollToken, setPollToken] = useState(0);
   // Slow-first-load hint (R-02): independent of the fetch itself, so a hung
@@ -78,10 +78,12 @@ export default function DataStatus({ onRefreshed }) {
   // progress is visible, and stays user-controlled otherwise.
   const [detailsOpen, setDetailsOpen] = useState(false);
   const wasPollingRef = useRef(false);
-  const { data, loading, error, retry } = useApi(
-    (signal) => api.dataStatus({ signal, timeoutMs: STATUS_TIMEOUT_MS, recover: true }),
+  const fetchedAt=useRef(0);
+  const { data:requestedData, loading, error, retry } = useApi(
+    async (signal) => { const data=await api.dataStatus({ signal, timeoutMs: STATUS_TIMEOUT_MS, recover: true }); fetchedAt.current=performance.now(); return data; },
     `datastatus:${pollToken}`,
   );
+  const data=observedStatus?.receivedAt>fetchedAt.current?observedStatus.data:requestedData;
   const bumpPoll = () => setPollToken(t => t + 1);
   const inProgress = Boolean(data?.inProgress);
   // Poll while the backend is refreshing OR while our own manual POST is in
@@ -307,7 +309,7 @@ export default function DataStatus({ onRefreshed }) {
           <h3>Current dataset</h3>
           <dl className="facts facts-grid">
             <div><dt>Latest published economy year</dt><dd>{data.years?.maxYear??'Not reported'}</dd></div>
-            <div><dt>Published content generation</dt><dd>{data.generation?.contentVersion!=null ? `v${data.generation.contentVersion}`:'Not reported'}</dd></div>
+            <div><dt>Published content generation</dt><dd>{data.generation?.contentVersion!=null ? `v${data.generation.contentVersion}${data.generation.runId!=null?' · publication run #'+data.generation.runId:''}`:'Not reported'}</dd></div>
             <div><dt>Last refresh attempt (UTC)</dt><dd>{(data.lastRun?.completed_at??data.lastRun?.started_at) ? formatUtcDateTime(data.lastRun.completed_at??data.lastRun.started_at) : 'Not reported'}{data.lastRun?.status ? ` · ${data.lastRun.status}`:''}</dd></div>
             <div>
               <dt>Dataset</dt>

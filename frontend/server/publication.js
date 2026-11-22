@@ -18,11 +18,11 @@ export const publicationResource = path => {
   return null;
 };
 
-export async function publicationState(backend, fetcher = fetch) {
+export async function publicationState(backend, fetcher = fetch, scope = null) {
   const origin = backendOrigin(backend);
   if (!origin) return 'unavailable';
   // Concurrent requests share only an active check, never a cached permission.
-  const key = fetcher === fetch ? origin : null;
+  const key = scope ? origin+':'+scope : fetcher === fetch ? origin : null;
   if (key && flights.has(key)) return flights.get(key);
   const work = (async () => {
     for (const timeoutMs of [2500, 1500]) {
@@ -37,7 +37,7 @@ export async function publicationState(backend, fetcher = fetch) {
     }
     return 'unavailable';
   })();
-  if (key) { flights.set(key, work); const clear = () => flights.delete(key); work.then(clear, clear); }
+  if (key && flights.size<64) { flights.set(key, work); const clear = () => flights.delete(key); work.then(clear, clear); }
   return work;
 }
 
@@ -54,18 +54,21 @@ export function publicationFailure(req, res, { resource, origin = null, disabled
 }
 
 /** No analytical proxy: only render local documents after a fresh capability read. */
-export async function respondPublication(req, res, { resource, backend, origin, catalog, template, fetcher }) {
+export async function respondPublication(req, res, { resource, backend, origin, catalog, template, fetcher, authorityScope }) {
   for (const name of ['Cache-Control', 'CDN-Cache-Control', 'Vercel-CDN-Cache-Control']) res.setHeader(name, 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (!['GET', 'HEAD'].includes(req.method)) {
     res.setHeader('Allow', 'GET, HEAD'); res.statusCode = 405; res.end(); return;
   }
-  if (!['docs', 'catalog', 'sitemap'].includes(resource)) { res.statusCode = 404; res.end(); return; }
-  const state = await publicationState(backend, fetcher);
+  if (!['home','docs', 'catalog', 'sitemap'].includes(resource)) { res.statusCode = 404; res.end(); return; }
+  const state = await publicationState(backend, fetcher, authorityScope);
   const enabled = state === 'enabled';
-  if (resource !== 'sitemap' && !enabled) return publicationFailure(req, res, { resource, origin, disabled: state === 'disabled' });
+  if (resource !== 'home' && resource !== 'sitemap' && !enabled) return publicationFailure(req, res, { resource, origin, disabled: state === 'disabled' });
   let body;
-  if (resource === 'sitemap' && origin) {
+  if(resource==='home') {
+    res.setHeader('Content-Type','text/html; charset=utf-8');res.statusCode=200;
+    body=publicPageHtml(await template(),'home',origin,[], '',enabled?publicPages:humanPages);
+  } else if (resource === 'sitemap' && origin) {
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     body = sitemapXml(origin, enabled);
   } else if (resource === 'sitemap') {
@@ -73,13 +76,13 @@ export async function respondPublication(req, res, { resource, backend, origin, 
   } else if (resource === 'catalog') {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.statusCode = enabled ? 200 : state === 'disabled' ? 404 : 503;
-    body = JSON.stringify(bindCatalog(catalog,backendOrigin(backend)));
+    body = JSON.stringify(bindCatalog(catalog, origin ?? ''));
   } else {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.statusCode = enabled ? 200 : state === 'disabled' ? 404 : 503;
     const unavailable = enabled ? null : state === 'disabled' ? 'The data service has disabled optional public API publication.' : 'Public API availability could not be confirmed. Try again when the data service is reachable.';
     const html = (await template()).replace(/<script\b[^>]*type="module"[^>]*>[\s\S]*?<\/script>/g, '').replace(/<link\b[^>]*rel="modulepreload"[^>]*>/g, '');
-    body = publicPageHtml(html, 'public-data', origin, bindCatalog(catalog,backendOrigin(backend)).operations, backendOrigin(backend), enabled ? publicPages : humanPages, unavailable);
+    body = publicPageHtml(html, 'public-data', origin, bindCatalog(catalog, origin ?? '').operations, origin ?? '', enabled ? publicPages : humanPages, unavailable);
   }
   res.end(req.method === 'HEAD' ? undefined : body);
 }
